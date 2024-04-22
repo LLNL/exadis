@@ -1,0 +1,1033 @@
+/*---------------------------------------------------------------------------
+ *
+ *	ExaDiS python binding module
+ *
+ *	Nicolas Bertin
+ *	bertin1@llnl.gov
+ *
+ *-------------------------------------------------------------------------*/
+
+#include <iostream>
+#include <exadis.h>
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+
+namespace py = pybind11;
+using namespace ExaDiS;
+
+/*---------------------------------------------------------------------------
+ *
+ *    Struct:        Vec3
+ *
+ *-------------------------------------------------------------------------*/
+namespace pybind11 { namespace detail {
+    template <> struct type_caster<Vec3> {
+    public:
+        /*
+         * This macro establishes the name 'Vec3' in
+         * function signatures and declares a local variable
+         * 'value' of type Vec3
+         */
+        PYBIND11_TYPE_CASTER(Vec3, _("Vec3"));
+
+        /*
+         * Conversion part 1 (Python->C++): convert a PyObject into a Vec3
+         * instance or return false upon failure. The second argument
+         * indicates whether implicit conversions should be applied.
+         */
+        bool load(handle src, bool) {
+            if (!isinstance<sequence>(src)) return false;
+        	sequence seq = reinterpret_borrow<sequence>(src);
+        	if (seq.size() != 3)
+        		throw value_error("Expected sequence of length 3.");
+            value[0] = seq[0].cast<double>();
+            value[1] = seq[1].cast<double>();
+            value[2] = seq[2].cast<double>();
+        	return true;
+        }
+
+        /*
+         * Conversion part 2 (C++ -> Python): convert a Vec3 instance into
+         * a Python object. The second and third arguments are used to
+         * indicate the return value policy and parent object (for
+         * ``return_value_policy::reference_internal``) and are generally
+         * ignored by implicit casters.
+         */
+        static handle cast(Vec3 src, return_value_policy, handle) {
+            return py::make_tuple(src.x, src.y, src.z).release();
+        }
+    };
+    
+    template <> struct type_caster<Mat33> {
+    public:
+        PYBIND11_TYPE_CASTER(Mat33, _("Mat33"));
+        bool load(handle src, bool) {
+            if (!isinstance<sequence>(src)) return false;
+        	sequence seq = reinterpret_borrow<sequence>(src);
+            if (seq.size() == 3) {
+                value[0] = seq[0].cast<Vec3>();
+                value[1] = seq[1].cast<Vec3>();
+                value[2] = seq[2].cast<Vec3>();
+            } else if (seq.size() == 9) {
+                value[0] = Vec3(seq[0].cast<double>(), seq[1].cast<double>(), seq[2].cast<double>());
+                value[1] = Vec3(seq[3].cast<double>(), seq[4].cast<double>(), seq[5].cast<double>());
+                value[2] = Vec3(seq[6].cast<double>(), seq[7].cast<double>(), seq[8].cast<double>());
+            } else {
+                throw value_error("Expected sequence of length 9 or 3x3.");
+            }
+        	return true;
+        }
+        static handle cast(Mat33 src, return_value_policy, handle) {
+            return py::make_tuple(src.rowx, src.rowy, src.rowz).release();
+        }
+    };
+    
+}} // namespace pybind11::detail
+
+
+/*---------------------------------------------------------------------------
+ *
+ *    DisNet binding functions
+ *
+ *-------------------------------------------------------------------------*/
+void SerialDisNet::set_nodes_array(std::vector<std::vector<double> >& nodes_array) {
+    nodes.clear();
+    for (int i = 0; i < nodes_array.size(); i++) {
+        if (nodes_array[i].size() == 3)
+            add_node(Vec3(&nodes_array[i][0]));
+        else if (nodes_array[i].size() == 4)
+            add_node(Vec3(&nodes_array[i][0]), (int)nodes_array[i][3]);
+        else
+            ExaDiS_fatal("Error: node must have 3 (x,y,z) or 4 (x,y,z,constraint) attributes\n");
+    }
+}
+
+void SerialDisNet::set_segs_array(std::vector<std::vector<double> >& segs_array) {
+    segs.clear();
+    for (int i = 0; i < segs_array.size(); i++) {
+        if (segs_array[i].size() == 5)
+            add_seg((int)segs_array[i][0], (int)segs_array[i][1], Vec3(&segs_array[i][2]));
+        else if (segs_array[i].size() == 8)
+            add_seg((int)segs_array[i][0], (int)segs_array[i][1], Vec3(&segs_array[i][2]), Vec3(&segs_array[i][5]));
+        else
+            ExaDiS_fatal("Error: segment must have 5 (n1,n2,burg) or 8 (n1,n2,burg,plane) attributes\n");
+    }
+}
+
+std::vector<std::vector<double> > SerialDisNet::get_nodes_array() {
+    std::vector<std::vector<double> > nodes_array(number_of_nodes());
+    for (int i = 0; i < number_of_nodes(); i++) {
+        std::vector<double> node = {
+            nodes[i].pos[0], nodes[i].pos[1], nodes[i].pos[2],
+            (double)nodes[i].constraint
+        };
+        nodes_array[i] = node;
+    }
+    return nodes_array;
+}
+
+std::vector<std::vector<double> > SerialDisNet::get_segs_array() {
+    std::vector<std::vector<double> > segs_array(number_of_segs());
+    for (int i = 0; i < number_of_segs(); i++) {
+        std::vector<double> seg = {
+            (double)segs[i].n1, (double)segs[i].n2,
+            segs[i].burg[0], segs[i].burg[1], segs[i].burg[2],
+            segs[i].plane[0], segs[i].plane[1], segs[i].plane[2]
+        };
+        segs_array[i] = seg;
+    }
+    return segs_array;
+}
+
+std::vector<int> Cell::get_pbc() {
+    std::vector<int> pbc = {xpbc, ypbc, zpbc};
+    return pbc;
+}
+
+std::vector<Vec3> Cell::get_bounds() {
+    std::vector<Vec3> bounds = {
+        Vec3(xmin, ymin, zmin), Vec3(xmax, ymax, zmax)
+    };
+    return bounds;
+}
+
+std::vector<Vec3> Cell::pbc_position_array(std::vector<Vec3>& r0, std::vector<Vec3>& r) {
+    if (r0.size() != r.size())
+        ExaDiS_fatal("Error: reference and target position arrays must have the same size for closest_image()\n");
+    std::vector<Vec3> rpbc = r;
+    for (int i = 0; i < r.size(); i++)
+        rpbc[i] = pbc_position(r0[i], r[i]);
+    return rpbc;
+}
+
+std::vector<Vec3> Cell::pbc_position_array(Vec3& r0, std::vector<Vec3>& r) {
+    std::vector<Vec3> rpbc = r;
+    for (int i = 0; i < r.size(); i++)
+        rpbc[i] = pbc_position(r0, r[i]);
+    return rpbc;
+}
+
+std::vector<Vec3> Cell::pbc_fold_array(std::vector<Vec3>& r) {
+    std::vector<Vec3> rpbc = r;
+    for (int i = 0; i < r.size(); i++)
+        rpbc[i] = pbc_fold(r[i]);
+    return rpbc;
+}
+
+
+/*---------------------------------------------------------------------------
+ *
+ *    Utility functions
+ *
+ *-------------------------------------------------------------------------*/
+void initialize(int num_threads=-1, int device_id=0) {
+    Kokkos::InitializationSettings args;
+    if (num_threads > 0) args.set_num_threads(num_threads);
+    args.set_device_id(device_id);
+    Kokkos::initialize(args);
+    Kokkos::DefaultExecutionSpace{}.print_configuration(std::cout);
+}
+
+void finalize() {
+    Kokkos::finalize();
+}
+
+void set_positions(System* system, std::vector<Vec3>& pos) {
+    auto net = system->get_device_network();
+    
+    if (pos.size() != net->Nnodes_local)
+        ExaDiS_fatal("Error: positions list must have the same size as the number of nodes\n");
+    
+    #if EXADIS_UNIFIED_MEMORY
+        for (int i = 0; i < net->Nnodes_local; i++)
+            net->nodes(i).pos = pos[i];
+    #else
+        T_nodes::HostMirror h_nodes = Kokkos::create_mirror_view(net->nodes);
+        Kokkos::deep_copy(h_nodes, net->nodes);
+        for (int i = 0; i < net->Nnodes_local; i++)
+            h_nodes(i).pos = pos[i];
+        Kokkos::deep_copy(net->nodes, h_nodes);
+    #endif
+}
+
+void set_forces(System* system, std::vector<Vec3>& forces) {
+    auto net = system->get_device_network();
+    
+    if (forces.size() != net->Nnodes_local)
+        ExaDiS_fatal("Error: forces list must have the same size as the number of nodes\n");
+    
+    #if EXADIS_UNIFIED_MEMORY
+        for (int i = 0; i < net->Nnodes_local; i++)
+            net->nodes(i).f = forces[i];
+    #else
+        T_nodes::HostMirror h_nodes = Kokkos::create_mirror_view(net->nodes);
+        Kokkos::deep_copy(h_nodes, net->nodes);
+        for (int i = 0; i < net->Nnodes_local; i++)
+            h_nodes(i).f = forces[i];
+        Kokkos::deep_copy(net->nodes, h_nodes);
+    #endif
+}
+
+void set_velocities(System* system, std::vector<Vec3>& vels) {
+    auto net = system->get_device_network();
+    
+    if (vels.size() != net->Nnodes_local)
+        ExaDiS_fatal("Error: velocities list must have the same size as the number of nodes\n");
+    
+    #if EXADIS_UNIFIED_MEMORY
+        for (int i = 0; i < net->Nnodes_local; i++)
+            net->nodes(i).v = vels[i];
+    #else
+        T_nodes::HostMirror h_nodes = Kokkos::create_mirror_view(net->nodes);
+        Kokkos::deep_copy(h_nodes, net->nodes);
+        for (int i = 0; i < net->Nnodes_local; i++)
+            h_nodes(i).v = vels[i];
+        Kokkos::deep_copy(net->nodes, h_nodes);
+    #endif
+}
+
+std::vector<Vec3> get_forces(System* system) {
+    std::vector<Vec3> forces;
+    
+    auto net = system->get_device_network();
+    #if EXADIS_UNIFIED_MEMORY
+        for (int i = 0; i < net->Nnodes_local; i++)
+            forces.emplace_back(net->nodes(i).f);
+    #else
+        T_nodes::HostMirror h_nodes = Kokkos::create_mirror_view(net->nodes);
+        Kokkos::deep_copy(h_nodes, net->nodes);
+        for (int i = 0; i < net->Nnodes_local; i++)
+            forces.emplace_back(h_nodes(i).f);
+    #endif
+
+    return forces;
+}
+
+std::vector<Vec3> get_velocities(System* system) {
+    std::vector<Vec3> vels;
+    
+    auto net = system->get_device_network();
+    #if EXADIS_UNIFIED_MEMORY
+        for (int i = 0; i < net->Nnodes_local; i++)
+            vels.emplace_back(net->nodes(i).v);
+    #else
+        T_nodes::HostMirror h_nodes = Kokkos::create_mirror_view(net->nodes);
+        Kokkos::deep_copy(h_nodes, net->nodes);
+        for (int i = 0; i < net->Nnodes_local; i++)
+            vels.emplace_back(h_nodes(i).v);
+    #endif
+
+    return vels;
+}
+
+std::vector<Vec3> get_positions(System* system) {
+    std::vector<Vec3> pos;
+    
+    auto net = system->get_device_network();
+    #if EXADIS_UNIFIED_MEMORY
+        for (int i = 0; i < net->Nnodes_local; i++)
+            pos.emplace_back(net->nodes(i).pos);
+    #else
+        T_nodes::HostMirror h_nodes = Kokkos::create_mirror_view(net->nodes);
+        Kokkos::deep_copy(h_nodes, net->nodes);
+        for (int i = 0; i < net->Nnodes_local; i++)
+            pos.emplace_back(h_nodes(i).pos);
+    #endif
+
+    return pos;
+}
+
+
+/*---------------------------------------------------------------------------
+ *
+ *    ExaDisNet binding
+ *    Wrap the dislocation network into an ExaDiS system object.
+ *    This allows to save on overhead time when driving a GPU simulation
+ *    and prevents unnecessary memory copies between spaces.
+ *
+ *-------------------------------------------------------------------------*/
+struct ExaDisNet {
+    System* system = nullptr;
+    ExaDisNet() {}
+    ExaDisNet(System* _system) : system(_system) {}
+    
+    ExaDisNet(Cell& cell,
+              std::vector<std::vector<double> >& nodes_array, 
+              std::vector<std::vector<double> >& segs_array)
+    {
+        SerialDisNet* net = new SerialDisNet(cell);
+        net->set_nodes_array(nodes_array);
+        net->set_segs_array(segs_array); 
+        system = exadis_new<System>();
+        system->initialize(Params(), Crystal(), net);
+    }
+    
+    int number_of_nodes() { return system->Nnodes_total(); }
+    int number_of_segs() { return system->Nsegs_total(); }
+    
+    Cell get_cell() { return system->get_serial_network()->cell; }
+    std::vector<std::vector<double> > get_nodes_array() { return system->get_serial_network()->get_nodes_array(); }
+    std::vector<std::vector<double> > get_segs_array() { return system->get_serial_network()->get_segs_array(); }
+    
+    void set_positions(std::vector<Vec3>& pos) { ::set_positions(system, pos); }
+    
+    void write_data(std::string filename) { system->get_serial_network()->write_data(filename); }
+    
+    py::tuple get_plastic_strain() { return py::make_tuple(system->dEp, system->dWp, system->density); }
+};
+
+ExaDisNet generate_prismatic_config_system(Crystal crystal, double Lbox, int numsources,
+                                           double radius, double maxseg=-1, int seed=1234)
+{
+    SerialDisNet* config = generate_prismatic_config(crystal, Lbox, numsources, radius, maxseg, seed);
+    System* system = exadis_new<System>();
+    system->initialize(Params(), Crystal(crystal), config);
+    return ExaDisNet(system);
+}
+
+ExaDisNet generate_prismatic_config_system(Crystal crystal, Cell cell, int numsources,
+                                           double radius, double maxseg=-1, int seed=1234)
+{
+    SerialDisNet* config = generate_prismatic_config(crystal, cell, numsources, radius, maxseg, seed);
+    System* system = exadis_new<System>();
+    system->initialize(Params(), Crystal(crystal), config);
+    return ExaDisNet(system);
+}
+
+ExaDisNet read_paradis_system(const char *file)
+{
+    SerialDisNet* config = read_paradis(file);
+    System* system = exadis_new<System>();
+    system->initialize(Params(), Crystal(), config);
+    return ExaDisNet(system);
+}
+
+struct SystemBind : ExaDisNet {
+    SystemBind(ExaDisNet disnet, Params params) : ExaDisNet()
+    {
+        SerialDisNet* net = disnet.system->get_serial_network();
+        system = exadis_new<System>();
+        system->initialize(params, Crystal(params.crystal, params.Rorient), net);
+        system->params.check_params();
+    }
+    void set_neighbor_cutoff(double cutoff) {
+        system->neighbor_cutoff = cutoff;
+    }
+    void set_applied_stress(std::vector<double> applied_stress) { 
+        system->extstress = Mat33().symmetric(applied_stress.data()); 
+    }
+    void print_timers() { system->print_timers(); }
+};
+
+
+/*---------------------------------------------------------------------------
+ *
+ *    Parameters binding
+ *
+ *-------------------------------------------------------------------------*/
+Params::Params(
+    std::string crystalname,
+    double _burgmag,
+    double _MU, double _NU, double _a,
+    double _maxseg, double _minseg,
+    double _rann, double _rtol,
+    double _maxdt, double _nextdt,
+    int _split3node)
+{
+    set_crystal(crystalname);
+    burgmag = _burgmag;
+    MU = _MU;
+    NU = _NU;
+    a = _a;
+    maxseg = _maxseg;
+    minseg = _minseg;
+    rann = _rann;
+    rtol = _rtol;
+    maxdt = _maxdt;
+    nextdt = _nextdt;
+    split3node = _split3node;
+}
+
+void Params::set_crystal(std::string crystalname) {
+    if (!crystalname.empty()) {
+        if (crystalname == "bcc" || crystalname == "BCC") crystal = BCC_CRYSTAL;
+        else if (crystalname == "fcc" || crystalname == "FCC") crystal = FCC_CRYSTAL;
+        else ExaDiS_fatal("Error: unknown crystal type %s in the python binding\n", crystalname.c_str());
+    }
+}
+
+
+/*---------------------------------------------------------------------------
+ *
+ *    Force binding
+ *
+ *-------------------------------------------------------------------------*/
+struct ForceBind {
+    enum ForceModel {LINE_TENSION_MODEL, DDD_FFT_MODEL, SUBCYCLING_MODEL};
+    Force* force = nullptr;
+    int model = -1;
+    Params params;
+    double neighbor_cutoff = 0.0;
+    ForceBind() {}
+    ForceBind(Force* _force, int _model, Params _params, double cutoff=0.0) : 
+    force(_force), model(_model), params(_params), neighbor_cutoff(cutoff) {}
+    void pre_compute(SystemBind& sysbind) { force->pre_compute(sysbind.system); }
+    void compute(SystemBind& sysbind) { force->compute(sysbind.system); }
+};
+
+template<class F>
+ForceBind make_force(Params& params, typename F::Params fparams)
+{
+    params.check_params();
+    System* system = exadis_new<System>();
+    system->initialize(params, Crystal(params.crystal, params.Rorient), new SerialDisNet());
+    
+    Force* force = exadis_new<F>(system, fparams);
+    
+    int model = -1;
+    if (std::is_same<F, ForceType::LINE_TENSION_MODEL>::value)
+        model = ForceBind::LINE_TENSION_MODEL;
+    else
+        ExaDiS_fatal("Error: invalid force type requested in the python binding\n");
+    
+    exadis_delete(system);
+    
+    return ForceBind(force, model, params);
+}
+
+template<bool subcycling>
+ForceBind make_force_ddd_fft(Params& params, ForceType::CORE_SELF_PKEXT::Params coreparams,
+                             int Ngrid, Cell& cell, bool drift)
+{
+    params.check_params();
+    System* system = exadis_new<System>();
+    system->initialize(params, Crystal(params.crystal, params.Rorient), new SerialDisNet(cell));
+    
+    Force* force;
+    if (subcycling) {
+        ForceType::SUBCYCLING_MODEL::Params subcycparams(Ngrid, drift);
+        subcycparams.FSegParams = coreparams;
+        force = exadis_new<ForceType::SUBCYCLING_MODEL>(system, subcycparams);
+    } else {
+        force = exadis_new<ForceType::DDD_FFT_MODEL>(system, 
+            coreparams,
+            ForceType::LONG_FFT_SHORT_ISO::Params(Ngrid)
+        );
+    }
+    double cutoff = system->neighbor_cutoff; // needed in topology force calculations
+    
+    exadis_delete(system);
+    
+    int model = subcycling ? ForceBind::SUBCYCLING_MODEL : ForceBind::DDD_FFT_MODEL;
+    return ForceBind(force, model, params, cutoff);
+}
+
+std::vector<Vec3> compute_force(ExaDisNet& disnet, ForceBind& forcebind, 
+                                std::vector<double> applied_stress)
+{
+    System* system = disnet.system;
+    system->params = forcebind.params;
+    if (system->crystal.type != forcebind.params.crystal ||
+        system->crystal.R != forcebind.params.Rorient)
+        system->crystal = Crystal(forcebind.params.crystal, forcebind.params.Rorient);
+    
+    system->extstress = Mat33().symmetric(applied_stress.data());
+    
+    Force* force = forcebind.force;
+    force->pre_compute(system);
+    force->compute(system);
+    
+    std::vector<Vec3> forces = get_forces(system);
+    
+    return forces;
+}
+
+std::vector<Vec3> compute_force_n2(ExaDisNet& disnet, double MU, double NU, double a)
+{
+    Params params;
+    params.MU = MU;
+    params.NU = NU;
+    params.a = a;
+    
+    System* system = disnet.system;
+    system->params = params;
+    
+    Force* force = new ForceType::BRUTE_FORCE_N2(system);
+    force->compute(system);
+    std::vector<Vec3> forces = get_forces(system);
+    
+    delete force;
+    
+    return forces;
+}
+
+/*---------------------------------------------------------------------------
+ *
+ *    Mobility binding
+ *
+ *-------------------------------------------------------------------------*/
+struct MobilityBind {
+    Mobility* mobility = nullptr;
+    Params params;
+    MobilityBind() {}
+    MobilityBind(Mobility* _mobility, Params _params) : 
+    mobility(_mobility), params(_params) {}
+    void compute(SystemBind& sysbind) { mobility->compute(sysbind.system); }
+};
+
+template<class M>
+MobilityBind make_mobility(Params& params, typename M::Params mobparams)
+{
+    params.check_params();
+    System* system = exadis_new<System>();
+    system->initialize(params, Crystal(params.crystal, params.Rorient), new SerialDisNet());
+    
+    Mobility* mobility = new M(system, mobparams);
+    
+    exadis_delete(system);
+    
+    return MobilityBind(mobility, params);
+}
+
+std::vector<Vec3> compute_mobility(ExaDisNet& disnet, MobilityBind& mobbind,
+                                   std::vector<Vec3> forces)
+{
+    // We may need some crystal orientation here...
+    System* system = disnet.system;
+    system->params = mobbind.params;
+    if (system->crystal.type != mobbind.params.crystal ||
+        system->crystal.R != mobbind.params.Rorient)
+        system->crystal = Crystal(mobbind.params.crystal, mobbind.params.Rorient);
+    
+    // Set forces
+    set_forces(system, forces);
+    
+    Mobility* mobility = mobbind.mobility;
+    mobility->compute(system);
+    std::vector<Vec3> vels = get_velocities(system);
+    
+    return vels;
+}
+
+/*---------------------------------------------------------------------------
+ *
+ *    Integrator binding
+ *
+ *-------------------------------------------------------------------------*/
+struct IntegratorBind {
+    Integrator* integrator = nullptr;
+    Params params;
+    IntegratorBind() {}
+    IntegratorBind(Integrator* _integrator, Params _params) : 
+    integrator(_integrator), params(_params) {}
+    double integrate(SystemBind& sysbind) { 
+        integrator->integrate(sysbind.system);
+        // We also compute plastic strain here
+        sysbind.system->plastic_strain();
+        // We also reset/update glide planes here
+        sysbind.system->reset_glide_planes();
+        return sysbind.system->realdt;
+    }
+};
+
+template<class I>
+IntegratorBind make_integrator(Params& params, typename I::Params itgrparams,
+                               ForceBind& forcebind, MobilityBind& mobbind)
+{
+    params.check_params();
+    System* system = exadis_new<System>();
+    system->initialize(params, Crystal(params.crystal, params.Rorient), new SerialDisNet());
+    
+    Force* force = forcebind.force;
+    Mobility* mobility = mobbind.mobility;
+    Integrator* integrator = new I(system, force, mobility, itgrparams);
+    
+    exadis_delete(system);
+    
+    return IntegratorBind(integrator, params);
+}
+
+double integrate(ExaDisNet& disnet, IntegratorBind& itgrbind,
+                 std::vector<Vec3> vels, std::vector<double> applied_stress)
+{
+    System* system = disnet.system;
+    system->params = itgrbind.params;
+    if (system->crystal.type != itgrbind.params.crystal ||
+        system->crystal.R != itgrbind.params.Rorient)
+        system->crystal = Crystal(itgrbind.params.crystal, itgrbind.params.Rorient);
+    
+    system->extstress = Mat33().symmetric(applied_stress.data());
+    
+    // Set velocities
+    set_velocities(system, vels);
+    
+    Integrator* integrator = itgrbind.integrator;
+    integrator->integrate(system);
+    double dt = system->realdt;
+    
+    // Warning: we also compute plastic strain here
+    system->plastic_strain();
+    
+    // Warning: we also reset/update glide planes here
+    system->reset_glide_planes();
+    
+    return dt;
+}
+
+double integrate_euler(ExaDisNet& disnet, double dt, std::vector<Vec3> vels)
+{
+    Params params;
+    params.nextdt = dt;
+    
+    System* system = disnet.system;
+    system->params = params;
+    
+    // Set velocities
+    set_velocities(system, vels);
+    
+    Integrator* integrator = new IntegratorEuler(system);
+    integrator->integrate(system);
+    delete integrator;
+    
+    return dt;
+}
+
+/*---------------------------------------------------------------------------
+ *
+ *    Collision binding
+ *
+ *-------------------------------------------------------------------------*/
+struct CollisionBind {
+    Collision* collision = nullptr;
+    Params params;
+    CollisionBind() {}
+    CollisionBind(Collision* _collision, Params _params) : 
+    collision(_collision), params(_params) {}
+    void handle(SystemBind& sysbind) { collision->handle(sysbind.system); }
+};
+
+CollisionBind make_collision(Params& params)
+{
+    System* system = exadis_new<System>();
+    system->initialize(params, Crystal(params.crystal, params.Rorient), new SerialDisNet());
+    
+    Collision* collision = new CollisionRetroactive(system);
+    
+    exadis_delete(system);
+    
+    return CollisionBind(collision, params);
+}
+
+void handle_collision(ExaDisNet& disnet, CollisionBind& collisionbind,
+                      std::vector<Vec3> xold, double dt)
+{
+    System* system = disnet.system;
+    system->params = collisionbind.params;
+    if (system->crystal.type != collisionbind.params.crystal ||
+        system->crystal.R != collisionbind.params.Rorient)
+        system->crystal = Crystal(collisionbind.params.crystal, collisionbind.params.Rorient);
+    
+    // Make sure we have a value set for rann
+    if (system->params.rann < 0.0)
+        ExaDiS_fatal("Error: value of rann undefined in collision_retroactive()\n");
+    
+    // We need to allocate xold positions
+    SerialDisNet* net = system->get_serial_network();
+    Kokkos::resize(system->xold, net->number_of_nodes());
+    T_x::HostMirror h_xold = Kokkos::create_mirror_view(system->xold);
+    if (xold.size() == 0) {
+        // Use current positions
+        for (int i = 0; i < net->number_of_nodes(); i++)
+            h_xold(i) = net->nodes[i].pos;
+    } else {
+        // Use input positions
+        if (xold.size() != net->number_of_nodes())
+            ExaDiS_fatal("Error: old positions list must have the same size as the number of nodes\n");
+        for (int i = 0; i < net->number_of_nodes(); i++)
+            h_xold(i) = xold[i];
+    }
+    Kokkos::deep_copy(system->xold, h_xold);
+    
+    // TO FIX: we also need last nodal velocities here...
+    system->realdt = dt; // used for time interval
+    
+    Collision* collision = collisionbind.collision;
+    collision->handle(system);
+}
+
+/*---------------------------------------------------------------------------
+ *
+ *    Topology binding
+ *
+ *-------------------------------------------------------------------------*/
+struct TopologyBind {
+    Topology* topology = nullptr;
+    Params params;
+    double neighbor_cutoff = 0.0;
+    TopologyBind() {}
+    TopologyBind(Topology* _topology, Params _params, double cutoff) : 
+    topology(_topology), params(_params), neighbor_cutoff(cutoff) {}
+    void handle(SystemBind& sysbind) { topology->handle(sysbind.system); }
+};
+
+TopologyBind make_topology(std::string topology_mode, Params& params,
+                           typename Topology::Params topolparams,
+                           ForceBind& forcebind, MobilityBind& mobbind)
+{
+    params.check_params();
+    System* system = exadis_new<System>();
+    system->initialize(params, Crystal(params.crystal, params.Rorient), new SerialDisNet());
+    
+    Force* force = forcebind.force;
+    Mobility* mobility = mobbind.mobility;
+    double cutoff = forcebind.neighbor_cutoff; // required for topology force calculation
+    
+    Topology* topology;
+    if (topology_mode == "TopologyParallel") {
+        if (forcebind.model == ForceBind::LINE_TENSION_MODEL) {
+            if (strcmp(mobbind.mobility->name(), "MobilityBCC0b") == 0) {
+                topology = new TopologyParallel<ForceType::LINE_TENSION_MODEL,MobilityType::BCC_0B>(system, force, mobility, topolparams);
+            } else if (strcmp(mobbind.mobility->name(), "MobilityFCC0") == 0) {
+                topology = new TopologyParallel<ForceType::LINE_TENSION_MODEL,MobilityType::FCC_0>(system, force, mobility, topolparams);
+            } else if (strcmp(mobbind.mobility->name(), "MobilityGlide") == 0) {
+                topology = new TopologyParallel<ForceType::LINE_TENSION_MODEL,MobilityType::GLIDE>(system, force, mobility, topolparams);
+            } else {
+                ExaDiS_fatal("Error: invalid mobility type = %s for TopologyParallel binding\n", mobbind.mobility->name());
+            }
+        } else if (forcebind.model == ForceBind::DDD_FFT_MODEL) {
+            if (strcmp(mobbind.mobility->name(), "MobilityBCC0b") == 0) {
+                topology = new TopologyParallel<ForceType::DDD_FFT_MODEL,MobilityType::BCC_0B>(system, force, mobility, topolparams);
+            } else if (strcmp(mobbind.mobility->name(), "MobilityFCC0") == 0) {
+                topology = new TopologyParallel<ForceType::DDD_FFT_MODEL,MobilityType::FCC_0>(system, force, mobility, topolparams);
+            } else if (strcmp(mobbind.mobility->name(), "MobilityGlide") == 0) {
+                topology = new TopologyParallel<ForceType::DDD_FFT_MODEL,MobilityType::GLIDE>(system, force, mobility, topolparams);
+            } else {
+                ExaDiS_fatal("Error: invalid mobility type = %s for TopologyParallel binding\n", mobbind.mobility->name());
+            }
+        } else if (forcebind.model == ForceBind::SUBCYCLING_MODEL) {
+            if (strcmp(mobbind.mobility->name(), "MobilityBCC0b") == 0) {
+                topology = new TopologyParallel<ForceType::SUBCYCLING_MODEL,MobilityType::BCC_0B>(system, force, mobility, topolparams);
+            } else if (strcmp(mobbind.mobility->name(), "MobilityFCC0") == 0) {
+                topology = new TopologyParallel<ForceType::SUBCYCLING_MODEL,MobilityType::FCC_0>(system, force, mobility, topolparams);
+            } else if (strcmp(mobbind.mobility->name(), "MobilityGlide") == 0) {
+                topology = new TopologyParallel<ForceType::SUBCYCLING_MODEL,MobilityType::GLIDE>(system, force, mobility, topolparams);
+            } else {
+                ExaDiS_fatal("Error: invalid mobility type = %s for TopologyParallel binding\n", mobbind.mobility->name());
+            }
+        } else {
+            ExaDiS_fatal("Error: invalid force type for TopologyParallel binding\n");
+        }
+    } else if (topology_mode == "TopologySerial") {    
+        topology = new TopologySerial(system, force, mobility, topolparams);
+    } else {
+        ExaDiS_fatal("Error: invalid topology mode %s\n", topology_mode.c_str());
+    }
+    
+    exadis_delete(system);
+    
+    return TopologyBind(topology, params, cutoff);
+}
+
+void handle_topology(ExaDisNet& disnet, TopologyBind& topolbind, double dt)
+{
+    System* system = disnet.system;
+    system->params = topolbind.params;
+    if (system->crystal.type != topolbind.params.crystal ||
+        system->crystal.R != topolbind.params.Rorient)
+        system->crystal = Crystal(topolbind.params.crystal, topolbind.params.Rorient);
+    
+    system->neighbor_cutoff = topolbind.neighbor_cutoff; // required for topology force calculation
+    system->realdt = dt; // used for determining the noise level
+    
+    Topology* topology = topolbind.topology;
+    topology->handle(system);
+}
+
+/*---------------------------------------------------------------------------
+ *
+ *    Remesh binding
+ *
+ *-------------------------------------------------------------------------*/
+struct RemeshBind {
+    Remesh* remesh_class = nullptr;
+    Params params;
+    RemeshBind() {}
+    RemeshBind(Remesh* _remesh, Params _params) : 
+    remesh_class(_remesh), params(_params) {}
+    void remesh(SystemBind& sysbind) { remesh_class->remesh(sysbind.system); }
+};
+
+RemeshBind make_remesh(Params& params)
+{
+    System* system = exadis_new<System>();
+    system->initialize(params, Crystal(params.crystal, params.Rorient), new SerialDisNet());
+    
+    Remesh* remesh = new RemeshSerial(system);
+    
+    exadis_delete(system);
+    
+    return RemeshBind(remesh, params);
+}
+
+void remesh(ExaDisNet& disnet, RemeshBind& remeshbind)
+{
+    System* system = disnet.system;
+    system->params = remeshbind.params;
+    if (system->crystal.type != remeshbind.params.crystal ||
+        system->crystal.R != remeshbind.params.Rorient)
+        system->crystal = Crystal(remeshbind.params.crystal, remeshbind.params.Rorient);
+    
+    Remesh* remesh = remeshbind.remesh_class;
+    remesh->remesh(system);
+}
+
+
+/*---------------------------------------------------------------------------
+ *
+ *    Binding module
+ *
+ *-------------------------------------------------------------------------*/
+PYBIND11_MODULE(pyexadis, m) {
+    m.doc() = "ExaDiS python module";
+    
+    // Constants
+    m.attr("BCC_CRYSTAL") = py::int_((int)BCC_CRYSTAL);
+    m.attr("FCC_CRYSTAL") = py::int_((int)FCC_CRYSTAL);
+    
+    // Classes
+    py::class_<Params>(m, "Params")
+        .def(py::init<std::string, double, double, double, double, double, double, double, double, double, double, int>(),
+             py::arg("crystal")="", py::arg("burgmag"), py::arg("mu"), py::arg("nu"), py::arg("a"), 
+             py::arg("maxseg"), py::arg("minseg"), py::arg("rann")=-1.0, py::arg("rtol")=-1.0, 
+             py::arg("maxdt")=1e-7, py::arg("nextdt")=1e-12, py::arg("split3node")=1)
+        .def("set_crystal", &Params::set_crystal, "Set the crystal type")
+        .def_readonly("crystal", &Params::crystal, "Index of the crystal type")
+        .def_readwrite("Rorient", &Params::Rorient, "Crystal orientation matrix")
+        .def_readwrite("burgmag", &Params::burgmag, "Burgers vector magnitude (scaling length)")
+        .def_readwrite("mu", &Params::MU, "Shear modulus")
+        .def_readwrite("nu", &Params::NU, "Poisson's ratio")
+        .def_readwrite("a", &Params::a, "Dislocation core radius")
+        .def_readwrite("maxseg", &Params::maxseg, "Maximum line discretization length")
+        .def_readwrite("minseg", &Params::minseg, "Minimum line discretization length")
+        .def_readwrite("rann", &Params::rann, "Annihilation distance")
+        .def_readwrite("rtol", &Params::rtol, "Error tolerance")
+        .def_readwrite("maxdt", &Params::maxdt, "Maximum timestep size")
+        .def_readwrite("nextdt", &Params::nextdt, "Starting timestep size")
+        .def_readwrite("split3node", &Params::split3node, "Enable splitting of 3-nodes");
+        
+    py::class_<Crystal>(m, "Crystal")
+        .def(py::init<>())
+        .def(py::init<int>())
+        .def(py::init<int, Mat33>())
+        .def_readonly("R", &Crystal::R, "Crystal orientation matrix")
+        .def("set_orientation", (void (Crystal::*)(Mat33)) &Crystal::set_orientation, "Set crystal orientation matrix")
+        .def("set_orientation", (void (Crystal::*)(Vec3)) &Crystal::set_orientation, "Set crystal orientation via Euler angles");
+        
+    py::class_<Cell>(m, "Cell")
+        .def(py::init<>())
+        .def(py::init<double>())
+        .def(py::init<const Vec3&, const Vec3&>())
+        .def(py::init<const Mat33&, const Vec3&, std::vector<int> >(), py::arg("h"), py::arg("origin")=Vec3(0.0),
+             py::arg("is_periodic")=std::vector<int>({PBC_BOUND,PBC_BOUND,PBC_BOUND}))
+        .def_readonly("h", &Cell::H, "Cell matrix")
+        .def("origin", &Cell::origin, "Returns the origin of the cell")
+        .def("center", &Cell::center, "Returns the center of the cell")
+        .def("closest_image", (std::vector<Vec3> (Cell::*)(std::vector<Vec3>&, std::vector<Vec3>&)) &Cell::pbc_position_array, 
+             "Returns the closest image of an array of positions from another", py::arg("Rref"), py::arg("R"))
+        .def("closest_image", (std::vector<Vec3> (Cell::*)(Vec3&, std::vector<Vec3>&)) &Cell::pbc_position_array, 
+             "Returns the closest image of an array of positions from a reference position", py::arg("Rref"), py::arg("R"))
+        .def("closest_image", (Vec3 (Cell::*)(Vec3&, Vec3&)) &Cell::pbc_position, 
+             "Returns the closest image of a position from another", py::arg("Rref"), py::arg("R"))
+        .def("pbc_fold", &Cell::pbc_fold_array, "Fold an array of positions to the primary cell")
+        .def("is_triclinic", &Cell::is_triclinic, "Returns if the box is triclinic")
+        .def("get_pbc", &Cell::get_pbc, "Get the cell pbc flags along the 3 dimensions")
+        .def("get_bounds", &Cell::get_bounds, "Get the (orthorombic) bounds of the cell")
+        .def("volume", &Cell::volume, "Returns the volume of the cell");
+    
+    py::class_<ExaDisNet>(m, "ExaDisNet")
+        .def(py::init<>())
+        .def(py::init<Cell&, std::vector<std::vector<double> >&, std::vector<std::vector<double> >&>(),
+             py::arg("cell"), py::arg("nodes"), py::arg("segs"))
+        .def("number_of_nodes", &ExaDisNet::number_of_nodes, "Returns the number of nodes in the network")
+        .def("number_of_segs", &ExaDisNet::number_of_segs, "Returns the number of segments in the network")
+        .def("get_cell", &ExaDisNet::get_cell, "Get the cell containing the network")
+        .def("get_nodes_array", &ExaDisNet::get_nodes_array, "Get the list of nodes (x,y,z,constraint) of the network")
+        .def("get_segs_array", &ExaDisNet::get_segs_array, "Get the list of segments (n1,n2,burg,plane) of the network")
+        .def("set_positions", &ExaDisNet::set_positions, "Set the list of nodes positions (x,y,z) of the network")
+        .def("write_data", &ExaDisNet::write_data, "Write network in ParaDiS format")
+        .def("get_plastic_strain", &ExaDisNet::get_plastic_strain, "Returns plastic strain as computed since the last integration step");
+        
+    py::class_<SystemBind, ExaDisNet>(m, "System")
+        .def(py::init<ExaDisNet, Params>())
+        .def("set_neighbor_cutoff", &SystemBind::set_neighbor_cutoff, "Set set_neighbor cutoff of the system")
+        .def("set_applied_stress", &SystemBind::set_applied_stress, "Set applied stress of the system")
+        .def("print_timers", &SystemBind::print_timers, "Print simulation timers");
+    
+    py::class_<ForceType::CORE_SELF_PKEXT::Params>(m, "Force_CORE_Params")
+        .def(py::init<double, double>(), py::arg("Ecore")=-1.0, py::arg("Ecore_junc_fact")=1.0);
+    
+    py::class_<MobilityType::GLIDE::Params>(m, "Mobility_GLIDE_Params")
+        .def(py::init<double>(), py::arg("Mglide"))
+        .def(py::init<double, double>(), py::arg("Medge"), py::arg("Mscrew"));
+    py::class_<MobilityType::BCC_0B::Params>(m, "Mobility_BCC_0B_Params")
+        .def(py::init<double, double, double, double>(), py::arg("Medge"), py::arg("Mscrew"), py::arg("Mclimb"), py::arg("vmax")=-1.0);
+    py::class_<MobilityType::FCC_0::Params>(m, "Mobility_FCC_0_Params")
+        .def(py::init<double, double, double>(), py::arg("Medge"), py::arg("Mscrew"), py::arg("vmax")=-1.0);
+        
+    py::class_<IntegratorTrapezoid::Params>(m, "Integrator_Trapezoid_Params")
+        .def(py::init<>());
+    py::class_<IntegratorMulti<IntegratorTrapezoid>::Params>(m, "Integrator_Multi_Params")
+        .def(py::init<int>(), py::arg("multi"));
+    py::class_<IntegratorSubcycling::Params>(m, "Integrator_Subcycling_Params")
+        .def(py::init<std::vector<double>, double, double>(), py::arg("rgroups"), py::arg("rtolth")=1.0, py::arg("rtolrel")=0.1);
+        
+    py::class_<Topology::Params>(m, "Topology_Params")
+        .def(py::init<double>(), py::arg("splitMultiNodeAlpha"));
+    
+    
+    // Utility
+    m.def("initialize", &initialize, "Initialize the python binding module",
+          py::arg("num_threads")=-1, py::arg("device_id")=0);
+    m.def("finalize", &finalize, "Finalize the python binding module");
+    
+    // Read / Generate
+    m.def("read_paradis", &read_paradis_system, "Read ParaDiS data file");
+    m.def("generate_prismatic_config", (ExaDisNet (*)(Crystal, double, int, double, double, int)) &generate_prismatic_config_system,
+          "Generate a configuration made of prismatic loops",
+          py::arg("crystal"), py::arg("Lbox"), py::arg("numsources"), py::arg("radius"), py::arg("maxseg")=-1, py::arg("seed")=1234);
+    m.def("generate_prismatic_config", (ExaDisNet (*)(Crystal, Cell, int, double, double, int)) &generate_prismatic_config_system,
+          "Generate a configuration made of prismatic loops",
+          py::arg("crystal"), py::arg("cell"), py::arg("numsources"), py::arg("radius"), py::arg("maxseg")=-1, py::arg("seed")=1234);
+    
+    // Force
+    py::class_<ForceBind>(m, "Force")
+        .def(py::init<>())
+        .def_readwrite("neighbor_cutoff", &ForceBind::neighbor_cutoff, "Neighbor cutoff")
+        .def("pre_compute", &ForceBind::pre_compute, "Pre-compute force of the system")
+        .def("compute", &ForceBind::compute, "Compute force of the system");
+    m.def("make_force_lt", &make_force<ForceType::LINE_TENSION_MODEL>, "Instantiate a line-tension force model",
+          py::arg("params"), py::arg("coreparams"));
+    m.def("make_force_ddd_fft", &make_force_ddd_fft<0>, "Instantiate a DDD-FFT force model",
+          py::arg("params"), py::arg("coreparams"), py::arg("Ngrid"), py::arg("cell"), py::arg("drift")=0);
+    m.def("make_force_subcycling", &make_force_ddd_fft<1>, "Instantiate a subcycling force model",
+          py::arg("params"), py::arg("coreparams"), py::arg("Ngrid"), py::arg("cell"), py::arg("drift")=1);
+    m.def("compute_force", &compute_force, "Wrapper to compute nodal forces",
+          py::arg("net"), py::arg("force"), py::arg("applied_stress"));
+    
+    m.def("compute_force_n2", &compute_force_n2, "Compute forces using the brute-force N^2 calculation",
+          py::arg("net"), py::arg("mu"), py::arg("nu"), py::arg("a"));
+    
+    // Mobility
+    py::class_<MobilityBind>(m, "Mobility")
+        .def(py::init<>())
+        .def("compute", &MobilityBind::compute, "Compute mobility of the system");
+    m.def("make_mobility_glide", &make_mobility<MobilityType::GLIDE>, "Instantiate a GLIDE mobility law",
+          py::arg("params"), py::arg("mobparams"));
+    m.def("make_mobility_bcc_0b", &make_mobility<MobilityType::BCC_0B>, "Instantiate a BCC_0B mobility law",
+          py::arg("params"), py::arg("mobparams"));
+    m.def("make_mobility_fcc_0", &make_mobility<MobilityType::FCC_0>, "Instantiate a FCC_0 mobility law",
+          py::arg("params"), py::arg("mobparams"));
+    m.def("compute_mobility", &compute_mobility, "Wrapper to compute nodal velocities",
+          py::arg("net"), py::arg("mobility"), py::arg("nodeforces"));
+    
+    // Integrator
+    py::class_<IntegratorBind>(m, "Integrator")
+        .def(py::init<>())
+        .def("integrate", &IntegratorBind::integrate, "Integrate the system");
+    m.def("make_integrator_trapezoid", &make_integrator<IntegratorTrapezoid>, "Instantiate a trapezoid integrator",
+          py::arg("params"), py::arg("intparams"), py::arg("force"), py::arg("mobility"));
+    m.def("make_integrator_trapezoid_multi", &make_integrator<IntegratorMulti<IntegratorTrapezoid> >, "Instantiate a multi-step trapezoid integrator",
+          py::arg("params"), py::arg("intparams"), py::arg("force"), py::arg("mobility"));
+    m.def("make_integrator_subclycing", &make_integrator<IntegratorSubcycling>, "Instantiate a subcycling integrator",
+          py::arg("params"), py::arg("intparams"), py::arg("force"), py::arg("mobility"));
+    m.def("integrate", &integrate, "Wrapper to perform a time-integration step",
+          py::arg("net"), py::arg("integrator"), py::arg("nodevels"), py::arg("applied_stress"));
+    
+    m.def("integrate_euler", &integrate_euler, "Time-integrate positions using the euler integrator",
+          py::arg("net"), py::arg("dt"), py::arg("nodevels"));
+    
+    // Collision
+    py::class_<CollisionBind>(m, "Collision")
+        .def(py::init<>())
+        .def("handle", &CollisionBind::handle, "Handle collision of the system");
+    m.def("make_collision", &make_collision, "Instantiate a collision class", py::arg("params"));
+    m.def("handle_collision", &handle_collision, "Wrapper to handle collisions",
+          py::arg("net"), py::arg("collision"), py::arg("xold")=std::vector<Vec3>(), py::arg("dt")=0.0);
+    
+    // Topology
+    py::class_<TopologyBind>(m, "Topology")
+        .def(py::init<>())
+        .def("handle", &TopologyBind::handle, "Handle topology of the system");
+    m.def("make_topology", &make_topology, "Instantiate a topology class",
+          py::arg("topology_mode"), py::arg("params"), py::arg("topolparams"), py::arg("force"), py::arg("mobility"));
+    m.def("handle_topology", &handle_topology, "Wrapper to handle topological operations",
+          py::arg("net"), py::arg("topology"), py::arg("dt"));
+    
+    // Remesh
+    py::class_<RemeshBind>(m, "Remesh")
+        .def(py::init<>())
+        .def("remesh", &RemeshBind::remesh, "Remesh the system");
+    m.def("make_remesh", &make_remesh, "Instantiate a remesh class", py::arg("params"));
+    m.def("remesh", &remesh, "Wrapper to remesh the network",
+          py::arg("net"), py::arg("remesh"));
+}
