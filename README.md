@@ -21,7 +21,7 @@ ExaDiS is implemented using the [Kokkos](https://kokkos.org) framework and built
 * Step 2: Build ExaDiS
     * Clone the repository
     ```
-    git clone https://lc.llnl.gov/gitlab/opendis/exadis.git
+    git clone https://github.com/LLNL/exadis.git
     cd exadis
     ```
     * Initialize the submodules (required if enabling the python binding)
