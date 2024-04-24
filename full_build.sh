@@ -22,11 +22,13 @@
 
 SYS=user
 
+EXADIS_BUILD_EXAMPLES=Off
+EXADIS_BUILD_TESTS=Off
 
-#-------------------------------------------------
-# USER DEFINED SYSTEM
+#-------------------------------------------------------
+# USER DEFINED SYSTEM (SYS=user)
 # Configure your build options here
-#-------------------------------------------------
+#-------------------------------------------------------
 # C++ compiler
 CXX_COMPILER_user=c++
 # Kokkos backend: Serial, OpenMP, CUDA and/or HIP
@@ -40,12 +42,16 @@ PYTHON_BINDING_user=On
 PYTHON_EXECUTABLE_user=
 FFTW_INC_DIR_user=
 FFTW_LIB_DIR_user=
-#-------------------------------------------------
+#-------------------------------------------------------
 
 
-#-------------------------------------------------
-# Nicolas mac config
-#-------------------------------------------------
+# ******************************************************
+# Below are pre-configured build options
+# ******************************************************
+
+#-------------------------------------------------------
+# Nicolas mac config (SYS=mac_nicolas)
+#-------------------------------------------------------
 # C++ compiler
 CXX_COMPILER_mac_nicolas=c++
 # Kokkos backend: Serial, OpenMP, CUDA and/or HIP
@@ -59,11 +65,11 @@ PYTHON_BINDING_mac_nicolas=On
 PYTHON_EXECUTABLE_mac_nicolas=/Users/bertin1/opt/anaconda3/bin/python
 FFTW_INC_DIR_mac_nicolas=/Users/bertin1/Documents/Codes/p365_bcc_nl_mob/ext/include/fftw
 FFTW_LIB_DIR_mac_nicolas=/Users/bertin1/Documents/Codes/p365_bcc_nl_mob/ext/lib
-#-------------------------------------------------
+#-------------------------------------------------------
 
-#-------------------------------------------------
-# LLNL lassen with CUDA backend (Volta70)
-#-------------------------------------------------
+#-------------------------------------------------------
+# LLNL lassen with CUDA backend (SYS=lassen)
+#-------------------------------------------------------
 # C++ compiler
 CXX_COMPILER_lassen=c++
 # Kokkos backend: Serial, OpenMP, CUDA and/or HIP
@@ -77,11 +83,11 @@ PYTHON_BINDING_lassen=On
 PYTHON_EXECUTABLE_lassen=/usr/tcetmp/bin/python3
 FFTW_INC_DIR_lassen=
 FFTW_LIB_DIR_lassen=
-#-------------------------------------------------
+#-------------------------------------------------------
 
-#-------------------------------------------------
-# LLNL lassen with OpenMP backend only
-#-------------------------------------------------
+#-------------------------------------------------------
+# LLNL lassen with OpenMP backend only (SYS=lassen_omp)
+#-------------------------------------------------------
 # C++ compiler
 CXX_COMPILER_lassen_omp=c++
 # Kokkos backend: Serial, OpenMP, CUDA and/or HIP
@@ -95,9 +101,12 @@ PYTHON_BINDING_lassen_omp=On
 PYTHON_EXECUTABLE_lassen_omp=/usr/tcetmp/bin/python3
 FFTW_INC_DIR_lassen_omp=
 FFTW_LIB_DIR_lassen_omp=
-#-------------------------------------------------
+#-------------------------------------------------------
 
 
+# ******************************************************
+# Now we try to build the code: kokkos + exadis
+# ******************************************************
 
 # Substitute system variables
 cxx=CXX_COMPILER_${SYS}
@@ -170,6 +179,8 @@ cmake \
     -DPYTHON_EXECUTABLE=${!python_exec} \
     -DFFTW_INC_DIR=${!fftw_inc} \
     -DFFTW_LIB_DIR=${!fftw_lib} \
+    -DEXADIS_BUILD_EXAMPLES=${EXADIS_BUILD_EXAMPLES} \
+    -DEXADIS_BUILD_TESTS=${EXADIS_BUILD_TESTS} \
     ..
 make -j8
 cd ..
