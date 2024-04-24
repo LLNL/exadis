@@ -9,17 +9,78 @@ ExaDiS is built around a portable library of core functions for Discrete Disloca
 Note: Although ExaDiS is a fully functional code, it is currently under active development and is subject to frequent updates and bug fixes. There is no guarantee of stability and one should expect occasional breaking changes to the code.
 
 
+
+## Quick start
+
+ExaDiS is implemented using the [Kokkos](https://kokkos.org) framework and built using the CMake build system. In most situations, the full code (kokkos + exadis) can be built using the `full_build.sh` script provided in this repository:
+
+* Clone this repository
+```
+git clone https://github.com/LLNL/exadis.git
+cd exadis
+```
+* Configure the build options for your own system (`SYS=user`) in script `full_build.sh` at lines 28-45. For instance, for building in serial mode for CPU, specify `SERIAL_user=On`. To build for CUDA GPU, specify `CUDA_user=On` and your target CUDA architecture, e.g. `ARCH_user=VOLTA70`.
+* Build the code by running the script
+```
+./full_build.sh
+```
+The script will first clone, build and install kokkos, and then build exadis using the local kokkos install.
+* Run an example to test your installation
+```
+cd examples/02_frank_read_src
+python test_frank_read_src.py
+```
+
+Note: The `full_build.sh` script is intended to simplify the building process, e.g. if Kokkos is not installed on your machine and/or you are not too sure how to install it. While it should work fine in most cases (e.g. CPU build), it may fail on more complex environments (e.g. GPU build on HPC machines). If the build fails, it is recommended that the user follows the detailed manual build process described in the Installation section below.
+
+
 ## Installation
 
-### Quick start
-
-ExaDiS is implemented using the [Kokkos](https://kokkos.org) framework and built using the CMake build system.
+ExaDiS is implemented using the [Kokkos](https://kokkos.org) framework and built using the CMake build system. An installation of the code typically follows the following steps:
 
 * Step 1: Install Kokkos
-    * https://github.com/kokkos/kokkos
+    * If Kokkos is installed on your machine, you can skip this step
+    * If Kokkos is not installed on your machine, you can install it from the kokkos repository:
+        * Clone the kokkos repository
+        ```
+        git clone https://github.com/kokkos/kokkos.git --branch 4.2.00
+        cd kokkos
+        ```
+        * Build and install kokkos
+            * Example: OpenMP CPU build
+            ```
+            mkdir build && cd build
+            cmake \
+                -DCMAKE_CXX_COMPILER=c++ \
+                -DCMAKE_INSTALL_PREFIX=../install \
+                -DCMAKE_POSITION_INDEPENDENT_CODE=On \
+                -DKokkos_ENABLE_SERIAL=On \
+                -DKokkos_ENABLE_OPENMP=On \
+                ..
+            make -j8
+            make install
+            cd ../..
+            ```
+            * Example: CUDA GPU build for `VOLTA70` device architecture
+            ```
+            mkdir build && cd build
+            cmake \
+                -DCMAKE_CXX_COMPILER=c++ \
+                -DCMAKE_INSTALL_PREFIX=../install \
+                -DCMAKE_POSITION_INDEPENDENT_CODE=On \
+                -DKokkos_ENABLE_SERIAL=On \
+                -DKokkos_ENABLE_OPENMP=On \
+                -DKokkos_ENABLE_CUDA=On \
+                -DKokkos_ENABLE_CUDA_LAMBDA=On \
+                -DKokkos_ARCH_VOLTA70=On \
+                ..
+            make -j8
+            make install
+            cd ../..
+            ```
       
 * Step 2: Build ExaDiS
-    * Clone the repository
+    * Clone this repository
     ```
     git clone https://github.com/LLNL/exadis.git
     cd exadis
@@ -33,11 +94,12 @@ ExaDiS is implemented using the [Kokkos](https://kokkos.org) framework and built
     ```
     mkdir build && cd build
     cmake \
-        -DKokkos_ROOT=/path/to/your/kokkos/install/lib/cmake/Kokkos \
+        -DKokkos_ROOT=/path/to/your/kokkos/install_dir \
         -DCMAKE_CXX_COMPILER=c++ \
         -DPYTHON_BINDING=On \
         ..
     make -j8
+    cd ..
     ```
     Note: building with nvcc (Cuda) may be pretty slow, please be patient! 
     For additional building options and troubleshooting see section Detailed build instructions below.
@@ -91,6 +153,7 @@ Brief description of the directories within this repository:
 * `examples/` : examples of scripts and simulations
 * `python/` : files related to the python binding implementation
 * `src/` : C++ source and header files (`*.cpp`, `*.h`)
+* `tests/` : files for testing and debugging
 
 ## Simulation examples
 
