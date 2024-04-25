@@ -147,9 +147,8 @@ def example2():
     print('EXAMPLE2')
     pyexadis.initialize()
     
-    datafile = '../../tests/data/taneg_001_bcc0b_1.data'
     G = ExaDisNet()
-    G.read_paradis(datafile)
+    G.generate_prismatic_config(crystal='bcc', Lbox=300.0, numsources=24, radius=60.0)
     N = DisNetManager({type(G): G})
     
     f_pydis = compute_pydis(N)
