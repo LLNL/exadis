@@ -124,10 +124,11 @@ fftw_lib=FFTW_LIB_DIR_${SYS}
 echo ""
 echo "BUILDING KOKKOS ... "
 echo ""
-if [ ! -d "kokkos" ]; then
-   git clone https://github.com/kokkos/kokkos.git --branch 4.2.00
+if [ ! -d "kokkos/core" ]; then
+    git submodule init
+    git submodule update --init kokkos
 else
-   echo "Kokkos directory exists"
+    echo "Kokkos directory exists"
 fi
 cd kokkos
 rm -rf build_${SYS}

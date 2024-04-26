@@ -3,7 +3,6 @@ cmake_minimum_required(VERSION 3.14)
 project(ExaDiS LANGUAGES CXX)
 
 option(PYTHON_BINDING "" ON)
-#set(PYBIND11_PYTHON_VERSION 3.6)
 
 option(EXADIS_FFT "Build ExaDiS ForceFFT module" ON)
 
@@ -12,15 +11,42 @@ option(EXADIS_BUILD_TESTS "Build ExaDiS tests" OFF)
 option(EXADIS_BUILD_RUNS "Build ExaDiS run cases" OFF)
 
 if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Release)
+    set(CMAKE_BUILD_TYPE Release)
 endif()
 
 #set(CMAKE_CXX_FLAGS "-Wall -Wextra")
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
-find_package(Kokkos REQUIRED)
+#---------------------------------------------------------
+# KOKKOS package
+#---------------------------------------------------------
+find_package(Kokkos QUIET)
+if(NOT Kokkos_FOUND)
+    option(Kokkos_ENABLE_SERIAL "kokkos enable serial" On)
+    option(Kokkos_ENABLE_OPENMP "kokkos enable openmp" On)
+    option(Kokkos_ENABLE_CUDA "kokkos enable cuda" Off)
+    option(Kokkos_ENABLE_CUDA_LAMBDA "kokkos enable cuda lambda" Off)
+    option(Kokkos_ENABLE_HIP "kokkos enable hip" Off)
+    
+    get_filename_component(kokkos_path "kokkos/core" REALPATH)
+    if(EXISTS "${kokkos_path}")
+        add_subdirectory(kokkos)
+    else()
+        message(FATAL_ERROR 
+            "ExaDiS requires the kokkos package\n"
+            "Initialize the submodules with:\n"
+            "  git submodule init\n"
+            "  git submodule update\n"
+            "OR\n"
+            "Provide the path to your local kokkos installation with option -DKokkos_ROOT=...\n"
+        )
+    endif()
+endif()
 
+#---------------------------------------------------------
+# FFT libraries
+#---------------------------------------------------------
 if(EXADIS_FFT)
     if(Kokkos_ENABLE_CUDA)
         message(STATUS "Requiring cuFFT")
@@ -37,6 +63,9 @@ if(EXADIS_FFT)
     add_definitions(-DEXADIS_FFT)
 endif()
 
+#---------------------------------------------------------
+# ExaDiS
+#---------------------------------------------------------
 set(EXADIS_SUBDIRECTORIES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/force_types
     ${CMAKE_CURRENT_SOURCE_DIR}/src/mobility_types
