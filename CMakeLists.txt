@@ -1,14 +1,12 @@
 cmake_minimum_required(VERSION 3.14)
 
-project(ExaDiS LANGUAGES CXX)
-
-option(PYTHON_BINDING "" ON)
-
+option(EXADIS_PYTHON_BINDING "Build ExaDiS python module" ON)
 option(EXADIS_FFT "Build ExaDiS ForceFFT module" ON)
 
 option(EXADIS_BUILD_EXAMPLES "Build ExaDiS examples" OFF)
 option(EXADIS_BUILD_TESTS "Build ExaDiS tests" OFF)
 option(EXADIS_BUILD_RUNS "Build ExaDiS run cases" OFF)
+option(EXADIS_BUILD_TOOLS "Build ExaDiS tools" OFF)
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
@@ -18,17 +16,39 @@ endif()
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
+option(Kokkos_ENABLE_SERIAL "Kokkos enable SERIAL" On)
+option(Kokkos_ENABLE_OPENMP "Kokkos enable OPENMP" On)
+option(Kokkos_ENABLE_CUDA "Kokkos enable cuda" Off)
+option(Kokkos_ENABLE_CUDA_LAMBDA "Kokkos enable cuda lambda" Off)
+option(Kokkos_ENABLE_HIP "Kokkos enable hip" Off)
+
+if(NOT PROJECT_SOURCE_DIR)
+    message(STATUS "ExaDiS standalone build")
+    if(DEFINED SYS)
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/sys.cmake.${SYS}")
+            message(STATUS "ExaDiS options set by cmake/sys.cmake.${SYS}")
+            include(cmake/sys.cmake.${SYS})
+        else()
+            message(FATAL_ERROR "cmake/sys.cmake.${SYS} does not exist")
+        endif()
+    endif()
+    if(Kokkos_ENABLE_CUDA STREQUAL "On")
+        set(CMAKE_CXX_COMPILER ${CMAKE_CURRENT_SOURCE_DIR}/kokkos/bin/nvcc_wrapper)
+    endif()
+else()
+    message(STATUS "ExaDiS embedded build")
+    message(STATUS "CMAKE_PROJECT_NAME: ${CMAKE_PROJECT_NAME}")
+endif()
+
+project(ExaDiS LANGUAGES CXX)
+
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 #---------------------------------------------------------
 # KOKKOS package
 #---------------------------------------------------------
 find_package(Kokkos QUIET)
 if(NOT Kokkos_FOUND)
-    option(Kokkos_ENABLE_SERIAL "kokkos enable serial" On)
-    option(Kokkos_ENABLE_OPENMP "kokkos enable openmp" On)
-    option(Kokkos_ENABLE_CUDA "kokkos enable cuda" Off)
-    option(Kokkos_ENABLE_CUDA_LAMBDA "kokkos enable cuda lambda" Off)
-    option(Kokkos_ENABLE_HIP "kokkos enable hip" Off)
-    
     get_filename_component(kokkos_path "kokkos/core" REALPATH)
     if(EXISTS "${kokkos_path}")
         add_subdirectory(kokkos)
@@ -90,7 +110,7 @@ add_definitions(-DEXADIS_ROOT_DIR=${CMAKE_CURRENT_SOURCE_DIR})
 
 add_subdirectory(src)
 
-if(PYTHON_BINDING)
+if(EXADIS_PYTHON_BINDING)
     add_subdirectory(python)
 endif()
 if(EXADIS_BUILD_EXAMPLES)

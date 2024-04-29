@@ -1,0 +1,7 @@
+set(Kokkos_ENABLE_SERIAL On)
+set(Kokkos_ENABLE_OPENMP On)
+set(Kokkos_ENABLE_HIP On)
+set(Kokkos_ARCH_VEGA90A On)
+
+set(CMAKE_CXX_COMPILER hipcc)
+set(CMAKE_CXX_FLAGS "--offload-arch=gfx90a -std=c++17 -munsafe-fp-atomics")

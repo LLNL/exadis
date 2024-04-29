@@ -16,3 +16,5 @@ endforeach()
 
 target_include_directories(exadis PRIVATE ${EXADIS_INCLUDE_DIRS})
 target_link_libraries(exadis PRIVATE ${EXADIS_EXTERN_LIBS})
+
+install(TARGETS exadis DESTINATION lib)

@@ -20,8 +20,6 @@ else()
     endif()
 endif()
 
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-
 set(EXADIS_SRC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 set(SOURCES
     ${EXADIS_SRC_PATH}/driver.cpp
@@ -33,6 +31,8 @@ set(SOURCES
     ${EXADIS_SRC_PATH}/neighbor_types/neighbor_bin.cpp
 )
 
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
 pybind11_add_module(pyexadis exadis_pybind.cpp ${SOURCES})
-target_include_directories(pyexadis PRIVATE ${EXADIS_INCLUDE_DIRS})
+target_include_directories(pyexadis PRIVATE ${EXADIS_INCLUDE_DIRS} ${PYTHON_DEV_INC_DIR})
 target_link_libraries(pyexadis PRIVATE ${EXADIS_EXTERN_LIBS})
