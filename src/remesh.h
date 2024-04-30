@@ -29,78 +29,6 @@ public:
     virtual const char* name() { return "RemeshNone"; }
 };
 
-#if 0
-/*---------------------------------------------------------------------------
- *
- *    Class:        RemeshRefine
- *
- *-------------------------------------------------------------------------*/
-class RemeshRefine : public Remesh {
-public:
-    RemeshRefine(System *system) {}
-    
-    int refine_bisect(System *system)
-    {
-        int Nnodes_local = system->Nnodes_local;
-        int Nsegs_local = system->Nsegs_local;
-        double maxseg = system->params.maxseg;
-        
-        Kokkos::View<int*> new_idx("new_idx", 2);
-        Kokkos::deep_copy(new_idx, 0);
-        
-        Kokkos::parallel_for(system->Nsegs_local, KOKKOS_LAMBDA(const int i) {
-            
-            int n1 = system->segs(i).n1;
-            int n2 = system->segs(i).n2;
-            Vec3 r1 = system->nodes(n1).pos;
-            Vec3 r2 = system->cell.pbc_position(r1, system->nodes(n2).pos);
-            double length = (r2-r1).norm();
-            
-            if (length > maxseg) {
-                // Bisect the segment
-                Vec3 rmid = 0.5*(r1+r2);
-                rmid = system->cell.pbc_fold(rmid);
-                
-                int idx_node = Kokkos::atomic_fetch_add(&new_idx(0), 1);
-                int idx_link = Kokkos::atomic_fetch_add(&new_idx(1), 1);
-                
-                system->segs(i).n2 = Nnodes_local+idx_node;
-                system->nodes(Nnodes_local+idx_node) = DisNode(rmid);
-                system->segs(Nsegs_local+idx_link) = DisSeg(Nnodes_local+idx_node, n2, system->segs(i).burg);
-            }
-        });
-        
-        Kokkos::View<int*>::HostMirror h_new_idx = Kokkos::create_mirror_view(new_idx);
-        Kokkos::deep_copy(h_new_idx, new_idx);
-        
-        system->Nnodes_local += h_new_idx(0);
-        system->Nsegs_local += h_new_idx(1);
-        
-        int refine = (h_new_idx(0) > 0 || h_new_idx(1) > 0);
-        return refine;
-    }
-    
-    void remesh(System *system)
-    {
-        Kokkos::fence();
-        //system->timer.reset();
-        
-        if (refine_bisect(system)) {
-            // do some communication here
-            system->Nnodes_tot = system->Nnodes_local;
-            system->Nsegs_tot = system->Nsegs_local;
-            
-            system->update_connectivity();
-        }
-        
-        Kokkos::fence();
-        //system->accumtime[system->TIMER_REMESH] += system->timer.seconds();
-    }
-    
-    const char* name() { return "RemeshRefine"; }
-};
-#endif
-
 /*---------------------------------------------------------------------------
  *
  *    Class:        RemeshSerial
@@ -108,8 +36,6 @@ public:
  *-------------------------------------------------------------------------*/
 class RemeshSerial : public Remesh {
 private:
-    double maxseg;
-    double minseg;
     bool do_remove_small_loops;
     
 public:
@@ -125,6 +51,10 @@ public:
     
     void refine_coarsen(System* system, SerialDisNet* network)
     {
+        double maxseg = system->params.maxseg;
+        double minseg = system->params.minseg;
+        double rann = system->params.rann;
+        
         int nadd = 0;
         int nrem = 0;
         
@@ -140,6 +70,10 @@ public:
             Vec3 rmid = 0.5*(r1+r2);
             
             if (length > maxseg) {
+                // Do not refine segments between pinned nodes
+                if (network->nodes[n1].constraint == PINNED_NODE &&
+                    network->nodes[n2].constraint == PINNED_NODE) continue;
+                
                 // Bisect the segment (refine)
                 int nnew = network->split_seg(i, network->cell.pbc_fold(rmid));
                 nadd++;
@@ -181,7 +115,7 @@ public:
                         network->nodes[n2].constraint == CORNER_NODE) {
                         // Do not merge with a physical corner node unless
                         // both nodes are very close
-                        if (length > 2.0*system->params.rann) continue;
+                        if (length > 2.0*rann) continue;
                     }
                     network->merge_nodes(n1, n2, system->dEp);
                     nrem++;
@@ -198,12 +132,16 @@ public:
     
     void remove_small_loops(System* system, SerialDisNet* network)
     {
+        double minseg = system->params.minseg;
+        double rann = system->params.rann;
+        double a = system->params.a;
+        
         // Parse the network into its physical links
         std::vector<std::vector<int> > links = network->physical_links();
         
         // Loop through the links and remove loops that have 3 or
         // less nodes and whose length is less than some criterion
-        double minlength = fmax(fmax(0.2*minseg, 2.0*system->params.rann), 2.0*system->params.a);
+        double minlength = fmax(fmax(0.2*minseg, 2.0*rann), 2.0*a);
         
         int nrem = 0;
         for (int i = 0; i < links.size(); i++) {
@@ -239,9 +177,6 @@ public:
     {
         Kokkos::fence();
         system->timer[system->TIMER_REMESH].start();
-        
-        maxseg = system->params.maxseg;
-        minseg = system->params.minseg;
         
         SerialDisNet *local_network = system->get_serial_network();
         
