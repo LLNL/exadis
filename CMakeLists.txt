@@ -104,6 +104,7 @@ set(EXADIS_INCLUDE_DIRS
 set(EXADIS_EXTERN_LIBS
     Kokkos::kokkos
     ${FFT_LIB}
+    ${EXADIS_LINK_OPTIONS}
 )
 
 add_definitions(-DEXADIS_ROOT_DIR=${CMAKE_CURRENT_SOURCE_DIR})
