@@ -1,9 +1,9 @@
 /*---------------------------------------------------------------------------
  *
- *	ExaDiS
+ *  ExaDiS
  *
- *	Nicolas Bertin
- *	bertin1@llnl.gov
+ *  Nicolas Bertin
+ *  bertin1@llnl.gov
  *
  *-------------------------------------------------------------------------*/
 
@@ -20,10 +20,10 @@ using namespace ExaDiS;
 
 /*---------------------------------------------------------------------------
  *
- *  Function:       tests
+ *    Function:     tests
  *
  *-------------------------------------------------------------------------*/
-void tests(ExaDiSApp *exadis)
+void tests(ExaDiSApp *exadis, int test_id)
 {
     System *system = exadis->system;
     
@@ -39,9 +39,7 @@ void tests(ExaDiSApp *exadis)
     std::vector<ExaDiSApp::Control> ctrls;
     std::string outputdir = "output";
     
-    int sim = 3;
-    
-    if (sim == 0) {
+    if (test_id == 0) {
     
         // Prismatic loop test case
         crystal = Crystal(BCC_CRYSTAL);
@@ -62,7 +60,7 @@ void tests(ExaDiSApp *exadis)
         ctrl.appstress = Mat33().zero();
         //ctrls.push_back(ctrl);
         
-    } else if (sim == 1) {
+    } else if (test_id == 1) {
         
         // Collision test case
         double Lbox = 300.0;
@@ -91,7 +89,7 @@ void tests(ExaDiSApp *exadis)
         ctrl.outfreq = 10;
         ctrls.push_back(ctrl);
         
-    } else if (sim == 2) {
+    } else if (test_id == 2) {
         
         // Binary junction test case
         crystal = Crystal(BCC_CRYSTAL);
@@ -130,7 +128,7 @@ void tests(ExaDiSApp *exadis)
         ctrl.outfreq = 1;
         ctrls.push_back(ctrl);
         
-    } else if (sim == 3) {
+    } else if (test_id == 3) {
         
         // MD-like BCC simulation
         crystal = Crystal(BCC_CRYSTAL);
@@ -154,7 +152,7 @@ void tests(ExaDiSApp *exadis)
         ctrl.outfreq = 10;
         ctrls.push_back(ctrl);
         
-    } else if (sim == 4) {
+    } else if (test_id == 4) {
         
         // Nodal x-slip
         crystal = Crystal(BCC_CRYSTAL);
@@ -176,7 +174,7 @@ void tests(ExaDiSApp *exadis)
         ctrl.outfreq = 10;
         ctrls.push_back(ctrl);
         
-    } else if (sim == 5) {
+    } else if (test_id == 5) {
         
         // Dislocation intersection in BCC
         crystal = Crystal(BCC_CRYSTAL);
@@ -219,7 +217,7 @@ void tests(ExaDiSApp *exadis)
         ctrl.outfreq = 1;
         ctrls.push_back(ctrl);
         
-    } else if (sim == 6) {
+    } else if (test_id == 6) {
         
         // MD-like FCC simulation
         crystal = Crystal(FCC_CRYSTAL);
@@ -243,7 +241,7 @@ void tests(ExaDiSApp *exadis)
         ctrl.outfreq = 10;
         ctrls.push_back(ctrl);
         
-    } else if (sim == 7) {
+    } else if (test_id == 7) {
         
         // Cu 15um
         crystal = Crystal(FCC_CRYSTAL);
@@ -271,7 +269,7 @@ void tests(ExaDiSApp *exadis)
         ctrl.outfreq = 1;
         ctrls.push_back(ctrl);
         
-    } else if (sim == 8) {
+    } else if (test_id == 8) {
         
         // Dislocation intersections/junctions in FCC
         crystal = Crystal(FCC_CRYSTAL);
@@ -330,6 +328,8 @@ void tests(ExaDiSApp *exadis)
         ctrl.outfreq = 1;
         ctrls.push_back(ctrl);
     
+    } else {
+        ExaDiS_fatal("Error: invalid test_id = %d\n", test_id);
     }
     
     if (crystal.type == BCC_CRYSTAL) {
@@ -439,7 +439,7 @@ void tests(ExaDiSApp *exadis)
 
 /*---------------------------------------------------------------------------
  *
- *  Function:       main
+ *    Function:     main
  *
  *-------------------------------------------------------------------------*/
 int main(int argc, char* argv[])
@@ -448,9 +448,12 @@ int main(int argc, char* argv[])
     MPI_Init(&argc, &argv);
 #endif
     Kokkos::ScopeGuard guard(argc, argv);
+    
+    int test_id = 3;
+    if (argc >= 2) test_id = atoi(argv[1]);
 
     ExaDiS::ExaDiSApp exadis(argc, argv);
-    tests(&exadis);
+    tests(&exadis, test_id);
 
 #ifdef MPI
     MPI_Finalize();

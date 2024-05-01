@@ -2,9 +2,17 @@ cmake_minimum_required(VERSION 3.14)
 
 project(exadis_tests LANGUAGES CXX)
 
-add_executable(test_main main.cpp)
-target_include_directories(test_main PRIVATE ${EXADIS_INCLUDE_DIRS})
-target_link_libraries(test_main PRIVATE exadis ${EXADIS_EXTERN_LIBS})
+add_executable(test_kokkos test_kokkos.cpp)
+target_link_libraries(test_kokkos PRIVATE Kokkos::kokkos)
+
+if(Kokkos_ENABLE_CUDA)
+    add_executable(test_cuda test_cuda.cpp)
+    target_link_libraries(test_cuda PRIVATE cudart)
+endif()
+
+add_executable(test_exadis test_exadis.cpp)
+target_include_directories(test_exadis PRIVATE ${EXADIS_INCLUDE_DIRS})
+target_link_libraries(test_exadis PRIVATE exadis ${EXADIS_EXTERN_LIBS})
 
 set(EXADIS_INCLUDE_DIRS
     ${EXADIS_INCLUDE_DIRS}
