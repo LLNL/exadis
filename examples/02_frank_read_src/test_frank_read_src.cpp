@@ -51,17 +51,18 @@ SerialDisNet* init_frank_read_src_loop(double Lbox, Vec3& b, double Lsource, boo
 void test_frank_read_src(ExaDiSApp* exadis)
 {
     // Simulation parameters
-    double burgmag = 2.55e-10;
-    double MU = 160e9;
-    double NU = 0.31;
-    double a = 0.01;
-    double Ec = 1.0e6;
+    double burgmag = 3e-10;
+    double MU = 50e9;
+    double NU = 0.3;
+    double a = 1.0;
     double Mob = 1.0;
-    Mat33 applied_stress = Mat33().symmetric(0.0, 0.0, 0.0, 0.0, -4.0e6, 0.0);
+    Mat33 applied_stress = Mat33().symmetric(0.0, 0.0, 0.0, 0.0, -4.0e8, 0.0);
     
-    double maxseg = 0.3;
-    double minseg = 0.1;
+    double Lbox = 1000.0;
+    double maxseg = 0.04*Lbox;
+    double minseg = 0.01*Lbox;
     double dt = 1.0e-8;
+    double rann = 2.0;
     
     ExaDiSApp::Control ctrl;
     ctrl.nsteps = 200;
@@ -72,20 +73,20 @@ void test_frank_read_src(ExaDiSApp* exadis)
     std::string outputdir = "output_test_frank_read_src";
     
     // Initialization
-    double Lbox = 8.0;
     Vec3 b = Vec3(1.0, 0.0, 0.0);
-    double Lsource = 1.0;
+    double Lsource = 0.125*Lbox;
     bool pbc = 0;
     SerialDisNet* config = init_frank_read_src_loop(Lbox, b, Lsource, pbc);
     
     Params params(burgmag, MU, NU, a, maxseg, minseg);
     params.nextdt = dt;
+    params.rann = rann;
     
     System* system = exadis->system;
     system->initialize(params, Crystal(), config);
     
     // Modules
-    exadis->force = new ForceType::LINE_TENSION_MODEL(system, CoreDefault::Params(Ec));
+    exadis->force = new ForceType::LINE_TENSION_MODEL(system);
     exadis->mobility = new MobilityType::GLIDE(system, MobilityType::GLIDE::Params(Mob));
     exadis->integrator = new IntegratorEuler(system);
     exadis->collision = new CollisionRetroactive(system);

@@ -37,11 +37,11 @@ def example_bcc_Ta_100nm_2e8():
     Lbox = 300.0
     G = ExaDisNet()
     G.generate_prismatic_config(params["crystal"], Lbox, 12, 0.21*Lbox, params["maxseg"])
-    net = DisNetManager({type(G): G})
+    net = DisNetManager(G)
     
     vis = None
     
-    calforce  = CalForce(force_mode='DDD_FFT_MODEL', params=params, Ngrid=64, cell=G.cell)
+    calforce  = CalForce(force_mode='DDD_FFT_MODEL', params=params, Ngrid=64, cell=net.cell)
     mobility  = MobilityLaw(mobility_law='BCC_0B', params=params, Medge=2600.0, Mscrew=20.0, Mclimb=1e-4, vmax=3400.0)
     timeint   = TimeIntegration(integrator='Trapezoid', multi=10, params=params, force=calforce, mobility=mobility)
     collision = Collision(collision_mode='Retroactive', params=params)

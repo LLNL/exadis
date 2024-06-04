@@ -276,8 +276,6 @@ SerialDisNet* generate_prismatic_config(Crystal crystal, double Lbox, int numsou
  *	Function:		read_paradis
  *
  *-------------------------------------------------------------------------*/
-typedef std::array<int,2> NodeTag;
-
 struct ParaDisSeg {
     NodeTag nt1, nt2;
     int n1, n2;
@@ -341,25 +339,25 @@ SerialDisNet* read_paradis(const char *file)
     while (getline(&line, &len, fp) != -1) {
         if (strncmp(line, "#", 1) == 0) continue; // skip comment lines
         
-        NodeTag nid;
+        NodeTag ntag;
         Vec3 pos;
         int narms, flag;
         sscanf(line, "%d, %d %lf %lf %lf %d %d",
-        &nid[0], &nid[1], &pos[0], &pos[1], &pos[2], &narms, &flag);
+        &ntag.domain, &ntag.index, &pos[0], &pos[1], &pos[2], &narms, &flag);
         
-        auto iter = nodeMap.find(nid);
+        auto iter = nodeMap.find(ntag);
         if (iter == nodeMap.end()) {
-            nodeMap.emplace(nid, network->number_of_nodes());
+            nodeMap.emplace(ntag, network->number_of_nodes());
             network->add_node(pos);
         }
         
         for (int i = 0; i < narms; i++) {
-            NodeTag nnid;
+            NodeTag nntag;
             Vec3 burg, plane;
             fscanf(fp, "%d, %d %lf %lf %lf\n",
-            &nnid[0], &nnid[1], &burg[0], &burg[1], &burg[2]);
+            &nntag.domain, &nntag.index, &burg[0], &burg[1], &burg[2]);
             fscanf(fp, "%lf %lf %lf\n", &plane[0], &plane[1], &plane[2]);
-            segs.emplace_back(nid, nnid, burg, plane);
+            segs.emplace_back(ntag, nntag, burg, plane);
         }
     }
     free(line);

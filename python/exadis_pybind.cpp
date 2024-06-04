@@ -21,6 +21,7 @@ using namespace ExaDiS;
  *
  *-------------------------------------------------------------------------*/
 namespace pybind11 { namespace detail {
+    
     template <> struct type_caster<Vec3> {
     public:
         /*
@@ -82,6 +83,23 @@ namespace pybind11 { namespace detail {
         }
     };
     
+    template <> struct type_caster<NodeTag> {
+    public:
+        PYBIND11_TYPE_CASTER(NodeTag, _("NodeTag"));
+        bool load(handle src, bool) {
+            if (!isinstance<sequence>(src)) return false;
+        	sequence seq = reinterpret_borrow<sequence>(src);
+        	if (seq.size() != 2)
+        		throw value_error("Expected sequence of length 2.");
+            value.domain = seq[0].cast<int>();
+            value.index  = seq[1].cast<int>();
+        	return true;
+        }
+        static handle cast(NodeTag src, return_value_policy, handle) {
+            return py::make_tuple(src.domain, src.index).release();
+        }
+    };
+    
 }} // namespace pybind11::detail
 
 
@@ -97,8 +115,13 @@ void SerialDisNet::set_nodes_array(std::vector<std::vector<double> >& nodes_arra
             add_node(Vec3(&nodes_array[i][0]));
         else if (nodes_array[i].size() == 4)
             add_node(Vec3(&nodes_array[i][0]), (int)nodes_array[i][3]);
+        else if (nodes_array[i].size() == 5)
+            add_node(NodeTag((int)nodes_array[i][0], (int)nodes_array[i][1]), Vec3(&nodes_array[i][2]));
+        else if (nodes_array[i].size() == 6)
+            add_node(NodeTag((int)nodes_array[i][0], (int)nodes_array[i][1]), Vec3(&nodes_array[i][2]), (int)nodes_array[i][5]);
         else
-            ExaDiS_fatal("Error: node must have 3 (x,y,z) or 4 (x,y,z,constraint) attributes\n");
+            ExaDiS_fatal("Error: node must have 3 (x,y,z), 4 (x,y,z,constraint),\n"
+            " 5 (dom,id,x,y,z) or 6 (dom,id,x,y,z,constraint) attributes\n");
     }
 }
 
@@ -118,6 +141,7 @@ std::vector<std::vector<double> > SerialDisNet::get_nodes_array() {
     std::vector<std::vector<double> > nodes_array(number_of_nodes());
     for (int i = 0; i < number_of_nodes(); i++) {
         std::vector<double> node = {
+            (double)nodes[i].tag.domain, (double)nodes[i].tag.index,
             nodes[i].pos[0], nodes[i].pos[1], nodes[i].pos[2],
             (double)nodes[i].constraint
         };
@@ -192,6 +216,40 @@ void finalize() {
     Kokkos::finalize();
 }
 
+std::vector<int> map_node_tags(DeviceDisNet* net, std::vector<NodeTag>& tags) {
+    std::vector<int> tagmap(net->Nnodes_local);
+    
+    // If no tags are provided, return the identity mapping
+    if (tags.size() == 0) {
+        for (int i = 0; i < net->Nnodes_local; i++)
+            tagmap[i] = i;
+        return tagmap;
+    }
+    
+    if (tags.size() != net->Nnodes_local)
+        ExaDiS_fatal("Error: tags list must have the same size as the number of nodes\n");
+    
+    std::map<NodeTag, int> map;
+    #if EXADIS_UNIFIED_MEMORY
+        for (int i = 0; i < net->Nnodes_local; i++)
+            map.emplace(net->nodes(i).tag, i);
+    #else
+        T_nodes::HostMirror h_nodes = Kokkos::create_mirror_view(net->nodes);
+        Kokkos::deep_copy(h_nodes, net->nodes);
+        for (int i = 0; i < net->Nnodes_local; i++)
+            map.emplace(h_nodes(i).tag, i);
+    #endif
+    
+    for (int i = 0; i < tags.size(); i++) {
+        auto iter = map.find(tags[i]);
+        if (iter == map.end())
+            ExaDiS_fatal("Error: cannot find node tag (%d,%d)\n", tags[i].domain, tags[i].index);
+        tagmap[i] = iter->second;
+    }
+    
+    return tagmap;
+}
+
 void set_positions(System* system, std::vector<Vec3>& pos) {
     auto net = system->get_device_network();
     
@@ -210,38 +268,44 @@ void set_positions(System* system, std::vector<Vec3>& pos) {
     #endif
 }
 
-void set_forces(System* system, std::vector<Vec3>& forces) {
+void set_forces(System* system, std::vector<Vec3>& forces, std::vector<NodeTag>& tags) {
     auto net = system->get_device_network();
     
     if (forces.size() != net->Nnodes_local)
         ExaDiS_fatal("Error: forces list must have the same size as the number of nodes\n");
     
+    // Map forces to nodes using tags if needed
+    std::vector<int> tagmap = map_node_tags(net, tags);
+    
     #if EXADIS_UNIFIED_MEMORY
         for (int i = 0; i < net->Nnodes_local; i++)
-            net->nodes(i).f = forces[i];
+            net->nodes(tagmap[i]).f = forces[i];
     #else
         T_nodes::HostMirror h_nodes = Kokkos::create_mirror_view(net->nodes);
         Kokkos::deep_copy(h_nodes, net->nodes);
         for (int i = 0; i < net->Nnodes_local; i++)
-            h_nodes(i).f = forces[i];
+            h_nodes(tagmap[i]).f = forces[i];
         Kokkos::deep_copy(net->nodes, h_nodes);
     #endif
 }
 
-void set_velocities(System* system, std::vector<Vec3>& vels) {
+void set_velocities(System* system, std::vector<Vec3>& vels, std::vector<NodeTag>& tags) {
     auto net = system->get_device_network();
     
     if (vels.size() != net->Nnodes_local)
         ExaDiS_fatal("Error: velocities list must have the same size as the number of nodes\n");
     
+    // Map velocities to nodes using tags if needed
+    std::vector<int> tagmap = map_node_tags(net, tags);
+    
     #if EXADIS_UNIFIED_MEMORY
         for (int i = 0; i < net->Nnodes_local; i++)
-            net->nodes(i).v = vels[i];
+            net->nodes(tagmap[i]).v = vels[i];
     #else
         T_nodes::HostMirror h_nodes = Kokkos::create_mirror_view(net->nodes);
         Kokkos::deep_copy(h_nodes, net->nodes);
         for (int i = 0; i < net->Nnodes_local; i++)
-            h_nodes(i).v = vels[i];
+            h_nodes(tagmap[i]).v = vels[i];
         Kokkos::deep_copy(net->nodes, h_nodes);
     #endif
 }
@@ -550,7 +614,8 @@ MobilityBind make_mobility(Params& params, typename M::Params mobparams)
 }
 
 std::vector<Vec3> compute_mobility(ExaDisNet& disnet, MobilityBind& mobbind,
-                                   std::vector<Vec3> forces)
+                                   std::vector<Vec3> forces,
+                                   std::vector<NodeTag> tags)
 {
     // We may need some crystal orientation here...
     System* system = disnet.system;
@@ -560,7 +625,7 @@ std::vector<Vec3> compute_mobility(ExaDisNet& disnet, MobilityBind& mobbind,
         system->crystal = Crystal(mobbind.params.crystal, mobbind.params.Rorient);
     
     // Set forces
-    set_forces(system, forces);
+    set_forces(system, forces, tags);
     
     Mobility* mobility = mobbind.mobility;
     mobility->compute(system);
@@ -608,7 +673,8 @@ IntegratorBind make_integrator(Params& params, typename I::Params itgrparams,
 }
 
 double integrate(ExaDisNet& disnet, IntegratorBind& itgrbind,
-                 std::vector<Vec3> vels, std::vector<double> applied_stress)
+                 std::vector<Vec3> vels, std::vector<double> applied_stress,
+                 std::vector<NodeTag> tags)
 {
     System* system = disnet.system;
     system->params = itgrbind.params;
@@ -619,7 +685,7 @@ double integrate(ExaDisNet& disnet, IntegratorBind& itgrbind,
     system->extstress = Mat33().symmetric(applied_stress.data());
     
     // Set velocities
-    set_velocities(system, vels);
+    set_velocities(system, vels, tags);
     
     Integrator* integrator = itgrbind.integrator;
     integrator->integrate(system);
@@ -634,20 +700,27 @@ double integrate(ExaDisNet& disnet, IntegratorBind& itgrbind,
     return dt;
 }
 
-double integrate_euler(ExaDisNet& disnet, double dt, std::vector<Vec3> vels)
+double integrate_euler(ExaDisNet& disnet, Params& _params, double dt, std::vector<Vec3> vels,
+                       std::vector<NodeTag> tags)
 {
-    Params params;
+    Params params = _params;
     params.nextdt = dt;
     
     System* system = disnet.system;
     system->params = params;
     
     // Set velocities
-    set_velocities(system, vels);
+    set_velocities(system, vels, tags);
     
     Integrator* integrator = new IntegratorEuler(system);
     integrator->integrate(system);
     delete integrator;
+    
+    // Warning: we also compute plastic strain here
+    system->plastic_strain();
+    
+    // Warning: we also reset/update glide planes here
+    system->reset_glide_planes();
     
     return dt;
 }
@@ -911,7 +984,7 @@ PYBIND11_MODULE(pyexadis, m) {
         .def("number_of_nodes", &ExaDisNet::number_of_nodes, "Returns the number of nodes in the network")
         .def("number_of_segs", &ExaDisNet::number_of_segs, "Returns the number of segments in the network")
         .def("get_cell", &ExaDisNet::get_cell, "Get the cell containing the network")
-        .def("get_nodes_array", &ExaDisNet::get_nodes_array, "Get the list of nodes (x,y,z,constraint) of the network")
+        .def("get_nodes_array", &ExaDisNet::get_nodes_array, "Get the list of nodes (dom,id,x,y,z,constraint) of the network")
         .def("get_segs_array", &ExaDisNet::get_segs_array, "Get the list of segments (n1,n2,burg,plane) of the network")
         .def("set_positions", &ExaDisNet::set_positions, "Set the list of nodes positions (x,y,z) of the network")
         .def("write_data", &ExaDisNet::write_data, "Write network in ParaDiS format")
@@ -931,6 +1004,8 @@ PYBIND11_MODULE(pyexadis, m) {
         .def(py::init<double, double>(), py::arg("Medge"), py::arg("Mscrew"));
     py::class_<MobilityType::BCC_0B::Params>(m, "Mobility_BCC_0B_Params")
         .def(py::init<double, double, double, double>(), py::arg("Medge"), py::arg("Mscrew"), py::arg("Mclimb"), py::arg("vmax")=-1.0);
+    py::class_<MobilityType::BCC_NL::Params>(m, "Mobility_BCC_NL_Params")
+        .def(py::init<double, double>(), py::arg("tempK")=300.0, py::arg("vmax")=-1.0);
     py::class_<MobilityType::FCC_0::Params>(m, "Mobility_FCC_0_Params")
         .def(py::init<double, double, double>(), py::arg("Medge"), py::arg("Mscrew"), py::arg("vmax")=-1.0);
         
@@ -985,10 +1060,12 @@ PYBIND11_MODULE(pyexadis, m) {
           py::arg("params"), py::arg("mobparams"));
     m.def("make_mobility_bcc_0b", &make_mobility<MobilityType::BCC_0B>, "Instantiate a BCC_0B mobility law",
           py::arg("params"), py::arg("mobparams"));
+    m.def("make_mobility_bcc_nl", &make_mobility<MobilityType::BCC_NL>, "Instantiate a BCC_NL mobility law",
+          py::arg("params"), py::arg("mobparams"));
     m.def("make_mobility_fcc_0", &make_mobility<MobilityType::FCC_0>, "Instantiate a FCC_0 mobility law",
           py::arg("params"), py::arg("mobparams"));
     m.def("compute_mobility", &compute_mobility, "Wrapper to compute nodal velocities",
-          py::arg("net"), py::arg("mobility"), py::arg("nodeforces"));
+          py::arg("net"), py::arg("mobility"), py::arg("nodeforces"), py::arg("nodetags")=std::vector<NodeTag>());
     
     // Integrator
     py::class_<IntegratorBind>(m, "Integrator")
@@ -1001,10 +1078,10 @@ PYBIND11_MODULE(pyexadis, m) {
     m.def("make_integrator_subclycing", &make_integrator<IntegratorSubcycling>, "Instantiate a subcycling integrator",
           py::arg("params"), py::arg("intparams"), py::arg("force"), py::arg("mobility"));
     m.def("integrate", &integrate, "Wrapper to perform a time-integration step",
-          py::arg("net"), py::arg("integrator"), py::arg("nodevels"), py::arg("applied_stress"));
+          py::arg("net"), py::arg("integrator"), py::arg("nodevels"), py::arg("applied_stress"), py::arg("nodetags")=std::vector<NodeTag>());
     
     m.def("integrate_euler", &integrate_euler, "Time-integrate positions using the euler integrator",
-          py::arg("net"), py::arg("dt"), py::arg("nodevels"));
+          py::arg("net"), py::arg("params"), py::arg("dt"), py::arg("nodevels"), py::arg("nodetags")=std::vector<NodeTag>());
     
     // Collision
     py::class_<CollisionBind>(m, "Collision")

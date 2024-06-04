@@ -20,9 +20,12 @@ except ImportError:
     # Use dummy DisNetManager if opendis is not available
     class DisNetManager:
         def __init__(self, disnet):
-            self.disnet = list(disnet.values())[0]
+            self.disnet = list(disnet.values())[0] if type(disnet) is dict else disnet
         def get_disnet(self, type):
             return self.disnet
+        @property
+        def cell(self):
+            return self.disnet.cell
 
 from enum import IntEnum
 class NodeConstraints(IntEnum):
@@ -75,16 +78,21 @@ class ExaDisNet:
     @property
     def cell(self):
         return self.net.get_cell()
+        
+    def get_nodes_data(self):
+        nodes_array = np.array(self.net.get_nodes_array())
+        nodes_dict = {
+            "tags": nodes_array[:,0:2].astype(int),
+            "positions": nodes_array[:,2:5],
+            "constraints": nodes_array[:,5:6].astype(int)
+        }
+        return nodes_dict
+    
+    def get_tags(self):
+        return self.get_nodes_data()["tags"]
     
     def get_positions(self):
-        nodes = np.array(self.net.get_nodes_array())
-        return nodes[:,0:3]
-        
-    def get_pos_dict(self):
-        return {k: v for k, v in enumerate(self.get_positions())}
-    
-    def set_positions(self, pos: np.ndarray):
-        self.net.set_positions(pos)
+        return self.get_nodes_data()["positions"]
     
 
 # This is only needed until the visualization is modified
@@ -122,9 +130,9 @@ def get_exadis_params(dict_params):
 class CalForce:
     """CalForce: wrapper class for calculating forces on dislocation network
     """
-    def __init__(self, force_mode: str='LineTension', **kwargs) -> None:
+    def __init__(self, params: dict, force_mode: str='LineTension', **kwargs) -> None:
         self.force_mode = force_mode
-        self.params = get_exadis_params(kwargs.get('params'))
+        self.params = get_exadis_params(params)
         self.mu = self.params.mu
         self.nu = self.params.nu
         Ec = kwargs.get('Ec', -1.0)
@@ -157,16 +165,16 @@ class CalForce:
     def NodeForce(self, N: DisNetManager, applied_stress: np.ndarray) -> dict:
         G = N.get_disnet(ExaDisNet)
         f = pyexadis.compute_force(G.net, force=self.force, applied_stress=applied_stress)
-        nodeforce_dict = {k: v for k, v in enumerate(f)}
-        return nodeforce_dict
+        force_dict = {"nodeforces": np.array(f), "nodetags": G.get_tags()}
+        return force_dict
 
 
 class MobilityLaw:
     """MobilityLaw: wrapper class for mobility laws
     """
-    def __init__(self, mobility_law: str='SimpleGlide', mob: float=1, **kwargs) -> None:
+    def __init__(self, params: dict, mobility_law: str='SimpleGlide', **kwargs) -> None:
         self.mobility_law = mobility_law
-        params = get_exadis_params(kwargs.get('params'))
+        params = get_exadis_params(params)
         
         if self.mobility_law == 'SimpleGlide':
             Medge = kwargs.get('Medge', -1.0)
@@ -174,6 +182,7 @@ class MobilityLaw:
             if Medge > 0.0 and Mscrew > 0.0:
                 mobparams = pyexadis.Mobility_GLIDE_Params(Medge, Mscrew)
             else:
+                mob = kwargs.get('mob', 1.0)
                 mobparams = pyexadis.Mobility_GLIDE_Params(mob)
             self.mobility = pyexadis.make_mobility_glide(params=params, mobparams=mobparams)
             
@@ -185,6 +194,12 @@ class MobilityLaw:
             mobparams = pyexadis.Mobility_BCC_0B_Params(Medge, Mscrew, Mclimb, vmax)
             self.mobility = pyexadis.make_mobility_bcc_0b(params=params, mobparams=mobparams)
             
+        elif self.mobility_law == 'BCC_NL':
+            tempK = kwargs.get('tempK', 300.0)
+            vmax = kwargs.get('vmax', -1.0)
+            mobparams = pyexadis.Mobility_BCC_NL_Params(tempK, vmax)
+            self.mobility = pyexadis.make_mobility_bcc_nl(params=params, mobparams=mobparams)
+            
         elif self.mobility_law == 'FCC_0':
             Medge = kwargs.get('Medge')
             Mscrew = kwargs.get('Mscrew')
@@ -195,22 +210,23 @@ class MobilityLaw:
         else:
             raise ValueError('Unknown mobility law %s' % mobility_law)
         
-    def Mobility(self, N: DisNetManager, nodeforce_dict: dict) -> dict:
+    def Mobility(self, N: DisNetManager, force_dict: dict) -> dict:
         G = N.get_disnet(ExaDisNet)
-        f = np.array(list(nodeforce_dict.values()))
-        v = pyexadis.compute_mobility(G.net, mobility=self.mobility, nodeforces=f)
-        vel_dict = {k: val for k, val in enumerate(v)}
+        f = force_dict["nodeforces"]
+        nodetags = force_dict.get("nodetags", np.empty((0,2)))
+        v = pyexadis.compute_mobility(G.net, mobility=self.mobility, nodeforces=f, nodetags=nodetags)
+        vel_dict = {"nodevels": np.array(v), "nodetags": G.get_tags()}
         return vel_dict
 
 
 class TimeIntegration:
     """TimeIntegration: wrapper class for time-integrator
     """
-    def __init__(self, integrator: str='EulerForward', 
+    def __init__(self, params: dict, integrator: str='EulerForward',
                  dt: float=1e-8, **kwargs) -> None:
         self.integrator_type = integrator
         self.dt = dt
-        params = get_exadis_params(kwargs.get('params'))
+        params = get_exadis_params(params)
 
         self.Update_Functions = {
             'EulerForward': self.Update_EulerForward,
@@ -219,7 +235,7 @@ class TimeIntegration:
         }
         
         if self.integrator_type == 'EulerForward':
-            pass
+            self.params = params
         elif self.integrator_type == 'Trapezoid':
             multi = kwargs.get('multi', 0)
             force = kwargs.get('force').force
@@ -249,20 +265,22 @@ class TimeIntegration:
         self.Update_Functions[self.integrator_type](G, vel_dict, applied_stress)
 
     def Update_EulerForward(self, G: ExaDisNet, vel_dict: dict, applied_stress: np.ndarray) -> None:
-        v = np.array(list(vel_dict.values()))
-        self.dt = pyexadis.integrate_euler(G.net, dt=self.dt, nodevels=v)
+        v = vel_dict["nodevels"]
+        nodetags = vel_dict.get("nodetags", np.empty((0,2)))
+        self.dt = pyexadis.integrate_euler(G.net, params=self.params, dt=self.dt, nodevels=v, nodetags=nodetags)
         
     def Integrate(self, G: ExaDisNet, vel_dict: dict, applied_stress: np.ndarray) -> None:
-        v = np.array(list(vel_dict.values()))
-        self.dt = pyexadis.integrate(G.net, integrator=self.integrator, nodevels=v, applied_stress=applied_stress)
+        v = vel_dict["nodevels"]
+        nodetags = vel_dict.get("nodetags", np.empty((0,2)))
+        self.dt = pyexadis.integrate(G.net, integrator=self.integrator, nodevels=v, nodetags=nodetags, applied_stress=applied_stress)
             
 
 class Collision:
     """Collision: wrapper class for handling collisions
     """
-    def __init__(self, collision_mode: str='Proximity', **kwargs) -> None:
+    def __init__(self, params: dict, collision_mode: str='Proximity', **kwargs) -> None:
         self.collision_mode = collision_mode
-        params = get_exadis_params(kwargs.get('params'))
+        params = get_exadis_params(params)
         if params.rann < 0.0:
             params.rann = 2.0*params.rtol
             
@@ -270,10 +288,10 @@ class Collision:
         
     def HandleCol(self, N: DisNetManager, **kwargs) -> None:
         G = N.get_disnet(ExaDisNet)
-        oldpos_dict = kwargs.get('oldpos_dict')
+        oldnodes_dict = kwargs.get('oldnodes_dict')
         dt = kwargs.get('dt', 0.0)
-        if oldpos_dict != None:
-            xold = np.array(list(oldpos_dict.values()))
+        if oldnodes_dict != None:
+            xold = oldnodes_dict["positions"]
             pyexadis.handle_collision(G.net, collision=self.collision, xold=xold, dt=dt)
         else:
             pyexadis.handle_collision(G.net, collision=self.collision)
@@ -282,9 +300,9 @@ class Collision:
 class Topology:
     """Topology: wrapper class for handling topology (e.g. split multi nodes)
     """
-    def __init__(self, topology_mode: str='TopologyParallel', **kwargs) -> None:
+    def __init__(self, params: dict, topology_mode: str='TopologyParallel', **kwargs) -> None:
         self.topology_mode = topology_mode
-        params = get_exadis_params(kwargs.get('params'))
+        params = get_exadis_params(params)
         splitMultiNodeAlpha = kwargs.get('splitMultiNodeAlpha', 1e-3)
         force = kwargs.get('force').force
         mobility = kwargs.get('mobility').mobility
@@ -301,9 +319,9 @@ class Topology:
 class Remesh:
     """Remesh: wrapper class for remeshing operations
     """
-    def __init__(self, remesh_rule: str='LengthBased', **kwargs) -> None:
+    def __init__(self, params: dict, remesh_rule: str='LengthBased', **kwargs) -> None:
         self.remesh_rule = remesh_rule
-        params = get_exadis_params(kwargs.get('params'))
+        params = get_exadis_params(params)
 
         self.remesh = pyexadis.make_remesh(params=params)
         
@@ -364,19 +382,19 @@ class SimulateNetwork:
         if self.loading_mode == 'strain_rate':
             np.savetxt('%s/stress_strain_dens.dat'%self.write_dir, np.array(self.results), fmt='%d %e %e %e %e')
     
-    def save_old_positions(self, N: DisNetManager):
-        """save_old_positions: save current nodal positions
+    def save_old_nodes(self, N: DisNetManager):
+        """save_old_nodes: save current nodal positions
         """
         if self.exadis_plastic_strain:
             # if exadis is calculating plastic strain (much faster)
             # then we don't need to save positions here
-            oldpos_dict = {}
+            oldnodes_dict = None
         else:
-            # TO DO: get_pos_dict() function from DisNetManager
-            oldpos_dict = N.get_disnet(ExaDisNet).get_pos_dict()
-        return oldpos_dict
+            # TO DO: get_nodes_data() function from DisNetManager
+            oldnodes_dict = N.get_disnet(ExaDisNet).get_nodes_data()
+        return oldnodes_dict
     
-    def plastic_strain(self, N: DisNetManager, oldpos_dict: dict):
+    def plastic_strain(self, N: DisNetManager, oldnodes_dict: dict):
         """plastic_strain: compute plastic strain
         """
         if self.exadis_plastic_strain:
@@ -392,8 +410,8 @@ class SimulateNetwork:
             segs = data.get("segs")
             cell = G.cell
             
-            r = nodes[:,0:3]
-            rold = np.array(list(oldpos_dict.values()))
+            r = nodes[:,2:5]
+            rold = oldnodes_dict["positions"]
             segsnid = segs[:,0:2].astype(int)
             burgs = segs[:,2:5]
             vol = cell.volume()
@@ -438,18 +456,18 @@ class SimulateNetwork:
     def step(self, N: DisNetManager):
         """step: take a time step of DD simulation on DisNet G
         """
-        nodeforce_dict = self.calforce.NodeForce(N, self.applied_stress)
+        force_dict = self.calforce.NodeForce(N, self.applied_stress)
 
-        vel_dict = self.mobility.Mobility(N, nodeforce_dict)
+        vel_dict = self.mobility.Mobility(N, force_dict)
         
-        oldpos_dict = self.save_old_positions(N)
+        oldnodes_dict = self.save_old_nodes(N)
         
         self.timeint.Update(N, vel_dict, self.applied_stress)
         
-        dEp, dWp = self.plastic_strain(N, oldpos_dict)
+        dEp, dWp = self.plastic_strain(N, oldnodes_dict)
 
         if self.collision is not None:
-            self.collision.HandleCol(N, oldpos_dict=oldpos_dict, dt=self.timeint.dt)
+            self.collision.HandleCol(N, oldnodes_dict=oldnodes_dict, dt=self.timeint.dt)
             
         if self.topology is not None:
             self.topology.Handle(N, dt=self.timeint.dt)
@@ -655,14 +673,14 @@ class VisualizeNetwork:
         # cell
         cell = data.get("cell")
         cell_origin = np.array(cell.get("origin", np.zeros(3))) # TO DO: cell.origin
-        cell = Cell(h=cell.get("h"), origin=cell_origin, is_periodic=cell.get("is_periodic"))
+        cell = pyexadis.Cell(h=cell.get("h"), origin=cell_origin, is_periodic=cell.get("is_periodic"))
         h = np.array(cell.h)
         cell_center = cell_origin + 0.5*np.sum(h, axis=0)
         
         # nodes
-        rn = np.array(data.get("nodes"))
+        rn = np.array(data.get("nodes"))[:,2:5]
         if rn.size > 0:
-            rn = self.closest_image(cell, Rref=cell_center, R=rn[:,0:3])
+            rn = self.closest_image(cell, Rref=cell_center, R=rn)
             
             # segments
             segs = np.array(data.get("segs"))

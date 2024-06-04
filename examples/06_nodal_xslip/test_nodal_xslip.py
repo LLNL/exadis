@@ -22,7 +22,7 @@ def test_nodal_xslip():
     
     G = ExaDisNet()
     G.read_paradis('ta-elemental-single.data')
-    N = DisNetManager({type(G): G})
+    N = DisNetManager(G)
 
     vis = VisualizeNetwork()
     
@@ -38,7 +38,7 @@ def test_nodal_xslip():
         "nextdt": 1e-13,
     }
     
-    calforce  = CalForce(force_mode='DDD_FFT_MODEL', params=params, Ec_junc_fact=0.3, Ngrid=32, cell=G.cell)
+    calforce  = CalForce(force_mode='DDD_FFT_MODEL', params=params, Ec_junc_fact=0.3, Ngrid=32, cell=N.cell)
     mobility  = MobilityLaw(mobility_law='BCC_0B', params=params, Medge=2600.0, Mscrew=20.0, Mclimb=1e-4, vmax=3400.0)
     timeint   = TimeIntegration(integrator='Trapezoid', params=params, force=calforce, mobility=mobility)
     collision = Collision(collision_mode='Proximity', params=params)

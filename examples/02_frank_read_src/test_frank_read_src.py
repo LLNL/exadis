@@ -12,11 +12,11 @@ except ImportError:
     raise ImportError('Cannot import pyexadis')
 
 
-'''
-Example of a function to generate an initial
-Frank-Read source configuration
-'''
-def init_frank_read_src_loop(arm_length=1.0, box_length=8.0, burg_vec=np.array([1.0,0.0,0.0]), pbc=False):
+def init_frank_read_src_loop(box_length, arm_length, burg_vec=np.array([1.0,0.0,0.0]), pbc=False):
+    """
+    Example of a function to generate an initial
+    Frank-Read source configuration
+    """
     print("init_frank_read_src_loop: length = %f" % (arm_length))
     cell = pyexadis.Cell(h=box_length*np.eye(3), is_periodic=[pbc,pbc,pbc])
     center = np.array(cell.center())
@@ -35,50 +35,49 @@ def init_frank_read_src_loop(arm_length=1.0, box_length=8.0, burg_vec=np.array([
         pn = pn / np.linalg.norm(pn)
         links[i,:] = np.concatenate(([i, (i+1)%N], burg_vec, pn))
 
-    G = ExaDisNet(cell, rn, links)
-    return G
+    N = DisNetManager(ExaDisNet(cell, rn, links))
+    return N
     
 
-'''
-Example of a function to compute nodal forces using
-the pyexadis binding to ExaDiS
-'''
 def test_force():
+    """
+    Example of a function to compute nodal forces using
+    the pyexadis binding to ExaDiS
+    """
     pyexadis.initialize()
     
-    G = init_frank_read_src_loop(pbc=False)
-    N = DisNetManager({type(G): G})
+    Lbox = 1000.0
+    N = init_frank_read_src_loop(box_length=Lbox, arm_length=0.125*Lbox, pbc=False)
     
-    mu, nu = 160e9, 0.31
-    a, Ec = 0.01, 1.0e6
-    applied_stress = np.array([0.0, 0.0, 0.0, 0.0, -2.0e6, 0.0])
+    mu, nu, a = 50e9, 0.3, 1.0
+    Ec = mu / 4.0 / np.pi * np.log(a/0.1)
+    applied_stress = np.array([0.0, 0.0, 0.0, 0.0, -4.0e8, 0.0])
     
     # exadis
-    params = {"burgmag": 1.0, "mu": mu, "nu": nu, "a": a, "maxseg": 0.3, "minseg": 0.1}
+    params = {"burgmag": 3e-10, "mu": mu, "nu": nu, "a": a, "maxseg": 0.04*Lbox, "minseg": 0.01*Lbox}
     calforce = CalForce(params=params, Ec=Ec, force_mode='LineTension')
-    nodeforce_dict = calforce.NodeForce(N, applied_stress=applied_stress)
-    f_pyexadis = np.array(list(nodeforce_dict.values()))
+    force_dict = calforce.NodeForce(N, applied_stress=applied_stress)
+    f_pyexadis = force_dict["nodeforces"]
     print('f_pyexadis',f_pyexadis)
 
     pyexadis.finalize()
-    
 
-'''
-Example of a script to perform a simple Frank-Read source
-simulation using the pyexadis binding to ExaDiS
-'''
+
 def main():
-    
+    """
+    Example of a script to perform a simple Frank-Read source
+    simulation using the pyexadis binding to ExaDiS
+    """
     pyexadis.initialize()
     
-    G = init_frank_read_src_loop(pbc=False)
-    N = DisNetManager({type(G): G})
+    Lbox = 1000.0
+    N = init_frank_read_src_loop(box_length=Lbox, arm_length=0.125*Lbox, pbc=False)
 
     vis = VisualizeNetwork()
     
-    params = {"burgmag": 3e-10, "mu": 160e9, "nu": 0.31, "a": 0.01, "maxseg": 0.3, "minseg": 0.1, "rann": 0.02}
+    params = {"burgmag": 3e-10, "mu": 50e9, "nu": 0.3, "a": 1.0, "maxseg": 0.04*Lbox, "minseg": 0.01*Lbox, "rann": 2.0}
     
-    calforce  = CalForce(force_mode='LineTension', params=params, Ec=1.0e6)
+    calforce  = CalForce(force_mode='LineTension', params=params)
     mobility  = MobilityLaw(mobility_law='SimpleGlide', params=params)
     timeint   = TimeIntegration(integrator='EulerForward', dt=1.0e-8, params=params)
     collision = Collision(collision_mode='Retroactive', params=params)
@@ -88,7 +87,7 @@ def main():
     sim = SimulateNetwork(calforce=calforce, mobility=mobility, timeint=timeint, 
                           collision=collision, topology=topology, remesh=remesh, vis=vis,
                           max_step=200, loading_mode='stress',
-                          applied_stress=np.array([0.0, 0.0, 0.0, 0.0, -4.0e6, 0.0]),
+                          applied_stress=np.array([0.0, 0.0, 0.0, 0.0, -4.0e8, 0.0]),
                           print_freq=10, plot_freq=10, plot_pause_seconds=0.0001,
                           write_freq=10, write_dir='output')
     sim.run(N)

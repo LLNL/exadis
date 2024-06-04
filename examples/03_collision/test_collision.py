@@ -33,8 +33,7 @@ def test_collision():
     center += np.array([0.2*Lbox, 0.0, 0.0])
     nodes, segs = insert_frank_read_src(cell, nodes, segs, burg, plane, length, center, theta=thetadeg)
     
-    G = ExaDisNet(cell, nodes, segs)
-    N = DisNetManager({type(G): G})
+    N = DisNetManager(ExaDisNet(cell, nodes, segs))
 
     vis = VisualizeNetwork()
     
@@ -49,7 +48,7 @@ def test_collision():
         "nextdt": 5e-13
     }
     
-    calforce  = CalForce(force_mode='DDD_FFT_MODEL', params=params, Ngrid=32, cell=G.cell)
+    calforce  = CalForce(force_mode='DDD_FFT_MODEL', params=params, Ngrid=32, cell=N.cell)
     mobility  = MobilityLaw(mobility_law='SimpleGlide', params=params, mob=1000.0)
     timeint   = TimeIntegration(integrator='Trapezoid', params=params, force=calforce, mobility=mobility)
     collision = Collision(collision_mode='Proximity', params=params)

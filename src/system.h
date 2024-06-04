@@ -78,6 +78,8 @@ public:
     void print_timers();
 };
 
+System* make_system(SerialDisNet* net, Crystal crystal=Crystal(), Params params=Params());
+
 } // namespace ExaDiS
 
 #endif

@@ -25,60 +25,58 @@ except ImportError:
     raise ImportError('Cannot import pyexadis')
 
 
-def init_circular_loop(Lbox=10.0, radius=1.0, N=20, burg_vec=np.array([1.0,0.0,0.0]), pbc=False):
-    print("init_circular_loop: Lbox = %f, radius = %f, N = %d" % (Lbox, radius, N))
+def init_circular_loop(Lbox=10.0, radius=1.0, Nnodes=20, burg_vec=np.array([1.0,0.0,0.0]), pbc=False):
+    print("init_circular_loop: Lbox = %f, radius = %f, N = %d" % (Lbox, radius, Nnodes))
     cell = Cell(h=Lbox*np.eye(3), is_periodic=[pbc,pbc,pbc])
     G = DisNet(cell=cell)
-    theta = np.arange(N)*2.0*np.pi/N
+    theta = np.arange(Nnodes)*2.0*np.pi/Nnodes
     rn    = np.vstack([radius*np.cos(theta), radius*np.sin(theta), np.zeros_like(theta)]).T
-    links = np.zeros((N, 8))
-    for i in range(N):
-        links[i,:] = np.concatenate(([i, (i+1)%N], burg_vec, np.zeros(3)))
+    links = np.zeros((Nnodes, 8))
+    for i in range(Nnodes):
+        links[i,:] = np.concatenate(([i, (i+1)%Nnodes], burg_vec, np.zeros(3)))
     G.add_nodes_links_from_list(rn, links)
-    return G
+    N = DisNetManager(G)
+    return N
 
 
-'''
-Example of a script to compare line-tension nodal forces
-computed using pydis and pyexadis
-'''
 def example1():
+    """example1():
+    Example of a script to compare line-tension nodal forces
+    computed using pydis and pyexadis
+    """
     
     print('EXAMPLE1')
-    pyexadis.initialize()
 
     mu, nu, a = 50.0e9, 0.3, 1.0
     Ec = 1.0e6
     applied_stress = np.array([0.0, 0.0, 0.0, 0.0, -2.0e6, 0.0])
 
-    G = init_circular_loop()
-    N = DisNetManager({type(G): G})
+    N = init_circular_loop()
+    
+    params = {"burgmag": 1.0, "mu": mu, "nu": nu, "a": a, "maxseg": 0.3, "minseg": 0.1}
     
     # pydis
-    calforce = CalForce_pydis(mu=mu, nu=nu, a=a, Ec=Ec, force_mode='LineTension',
-                        applied_stress=applied_stress)
-    nodeforce_dict, segforce_dict = calforce.NodeForce(N)
+    calforce = CalForce_pydis(params=params, Ec=Ec, force_mode='LineTension')
+    nodeforce_dict, segforce_dict = calforce.NodeForce(N, applied_stress=applied_stress)
     f_pydis = np.array(list(nodeforce_dict.values()))
     print('pydis',f_pydis)
     
     # exadis
-    params = {"burgmag": 1.0, "mu": mu, "nu": nu, "a": a, "maxseg": 0.3, "minseg": 0.1}
     calforce = CalForce_pyexadis(params=params, Ec=Ec, force_mode='LineTension')
-    nodeforce_dict = calforce.NodeForce(N, applied_stress=applied_stress)
-    f_pyexadis = np.array(list(nodeforce_dict.values()))
+    force_dict = calforce.NodeForce(N, applied_stress=applied_stress)
+    f_pyexadis = force_dict["nodeforces"]
     print('f_pyexadis',f_pyexadis)
     
     print('PASS' if np.allclose(f_pydis/mu, f_pyexadis/mu) else 'FAIL')
 
-    pyexadis.finalize()
     print('EXAMPLE1 DONE')
     
-    
-'''
-Example of a script to compare N^2 nodal forces
-computed using pydis and pyexadis
-'''
+
 def example2():
+    """example2():
+    Example of a script to compare N^2 nodal forces
+    computed using pydis and pyexadis
+    """
     import time
     from pydis.calforce.compute_stress_force_analytic_paradis import compute_segseg_force
     
@@ -106,9 +104,9 @@ def example2():
                     b12 = np.array(seg1["burg_vec"])
                     b34 = np.array(seg2["burg_vec"])
                     # PBC
-                    p2 = G.cell.map_to(p2, p1)
-                    p3 = G.cell.map_to(p3, p1)
-                    p4 = G.cell.map_to(p4, p3)
+                    p2 = G.cell.closet_image(Rref=p1, R=p2)
+                    p3 = G.cell.closet_image(Rref=p1, R=p3)
+                    p4 = G.cell.closet_image(Rref=p3, R=p4)
                     f1, f2, f3, f4 = compute_segseg_force(p1, p2, p3, p4, b12, b34, self.mu, self.nu, self.a)
                     n1 = seg1["edge"][0][1]
                     n2 = seg1["edge"][1][1]
@@ -145,22 +143,24 @@ def example2():
         return f
     
     print('EXAMPLE2')
-    pyexadis.initialize()
     
     G = ExaDisNet()
     G.generate_prismatic_config(crystal='bcc', Lbox=300.0, numsources=24, radius=60.0)
-    N = DisNetManager({type(G): G})
+    N = DisNetManager(G)
     
     f_pydis = compute_pydis(N)
     f_pyexadis = compute_pyexadis(N)
     
     print('PASS' if np.allclose(f_pydis/MU, f_pyexadis/MU) else 'FAIL')
     
-    pyexadis.finalize()
     print('EXAMPLE2 DONE')
     
     
 if __name__ == "__main__":
     
-    #example1()
+    pyexadis.initialize()
+    
+    example1()
     example2()
+    
+    pyexadis.finalize()

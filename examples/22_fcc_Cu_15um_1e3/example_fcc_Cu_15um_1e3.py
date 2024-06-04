@@ -37,11 +37,11 @@ def example_fcc_Cu_15um_1e3():
     
     G = ExaDisNet()
     G.read_paradis('180chains_16.10e.data')
-    net = DisNetManager({type(G): G})
+    net = DisNetManager(G)
     
     vis = None
     
-    calforce  = CalForce(force_mode='SUBCYCLING_MODEL', params=params, Ngrid=64, cell=G.cell)
+    calforce  = CalForce(force_mode='SUBCYCLING_MODEL', params=params, Ngrid=64, cell=net.cell)
     mobility  = MobilityLaw(mobility_law='FCC_0', params=params, Medge=64103.0, Mscrew=64103.0, vmax=4000.0)
     timeint   = TimeIntegration(integrator='Subcycling', rgroups=[0.0, 100.0, 600.0, 1600.0], params=params, force=calforce, mobility=mobility)
     collision = Collision(collision_mode='Retroactive', params=params)

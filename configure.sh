@@ -1,8 +1,15 @@
 #!/bin/sh
 
 # ./configure.sh -DSYS=mac_nicolas
+# ./configure.sh build_mac -DSYS=mac_nicolas
 
-BUILD_DIR=build
+# Get the directory name from the argument (optional)
+BUILD_DIR=$1
+
+# Check if the directory argument starts with "-D"
+if [[ $BUILD_DIR == "-D"* ]]; then
+    BUILD_DIR=build
+fi
 
 rm -rf ${BUILD_DIR}
 mkdir -p ${BUILD_DIR}

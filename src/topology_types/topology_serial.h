@@ -312,6 +312,7 @@ public:
                 // We need to do this because otherwise the order of the nodes
                 // connectivity may change, which may cause an issue when
                 // identifying the junction segment for 3-node splitting
+                network->free_tag(network->nodes[nnew].tag);
                 network->restore_node(saved_node);
                 network->nodes.pop_back();
                 if (cnew != -1) network->segs.pop_back();

@@ -270,5 +270,16 @@ void System::write_config(std::string filename)
     Kokkos::fence();
     timer[TIMER_OUTPUT].stop();
 }
+
+/*---------------------------------------------------------------------------
+ *
+ *    Function:     make_system()
+ *
+ *-------------------------------------------------------------------------*/
+System* make_system(SerialDisNet* net, Crystal crystal, Params params) {
+    System* system = exadis_new<System>();
+    system->initialize(params, crystal, net);
+    return system;
+}
     
 } // namespace ExaDiS

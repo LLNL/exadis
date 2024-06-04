@@ -336,6 +336,7 @@ void SerialDisNet::remove_nodes(std::vector<int> nodelist)
     for (int i = 0; i < number_of_nodes(); i++) offset[i] = nid[i] = i;
 
     for (int i = nodelist.size()-1; i >= 0; i--) {
+        free_tag(nodes[nodelist[i]].tag);
         nodes[nodelist[i]] = nodes.back();
         nodes.pop_back();
         conn[nodelist[i]] = conn.back();
@@ -540,7 +541,6 @@ void SerialDisNet::write_data(std::string filename)
         exit(-1);
     }
     
-    int domainID = 0;
     int version_number = 4;
     int filesegments_number = 1;
 
@@ -560,7 +560,7 @@ void SerialDisNet::write_data(std::string filename)
     fprintf(fp, "domainDecomposition = \n");
     fprintf(fp, "# Dom_ID  Minimum XYZ bounds   Maximum XYZ bounds\n");
     fprintf(fp, "  %d  %f  %f  %f  %f  %f  %f\n",
-            domainID, cell.xmin, cell.ymin, cell.zmin, cell.xmax, cell.ymax, cell.zmax);
+            domain, cell.xmin, cell.ymin, cell.zmin, cell.xmax, cell.ymax, cell.zmax);
 
     fprintf(fp, "nodalData =\n");
     fprintf(fp, "# Primary lines: node_tag, x, y, z, num_arms, constraint\n");
@@ -571,7 +571,7 @@ void SerialDisNet::write_data(std::string filename)
         Vec3 pos = cell.pbc_fold(nodes[i].pos);
 
         fprintf(fp, "%d, %4d %16.12f %16.12f %16.12f %4d %4d\n",
-                domainID, i, pos[0], pos[1], pos[2],
+                domain, i, pos[0], pos[1], pos[2],
                 conn[i].num, nodes[i].constraint);
 
         for (int j = 0; j < conn[i].num; j++) {
@@ -582,7 +582,7 @@ void SerialDisNet::write_data(std::string filename)
             Vec3 p = segs[s].plane;
 
             fprintf(fp, "%10d, %4d %16.12f %16.12f %16.12f\n",
-                    domainID, k, b[0], b[1], b[2]);
+                    domain, k, b[0], b[1], b[2]);
             fprintf(fp, "%33.12f %16.12f %16.12f\n", p[0], p[1], p[2]);
         }
     }

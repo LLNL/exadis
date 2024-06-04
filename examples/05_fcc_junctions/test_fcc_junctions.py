@@ -51,8 +51,8 @@ def init_fcc_junction(junction_type, disloc_length, phi1, phi2):
     nodes, segs = insert_frank_read_src(cell, nodes, segs, b1, p1, disloc_length, center+delta, linedir=ldir1)
     nodes, segs = insert_frank_read_src(cell, nodes, segs, b2, p2, disloc_length, center-delta, linedir=ldir2)
     
-    G = ExaDisNet(cell, nodes, segs)
-    return G
+    N = DisNetManager(ExaDisNet(cell, nodes, segs))
+    return N
 
 
 def test_fcc_junctions():
@@ -67,8 +67,7 @@ def test_fcc_junctions():
     disloc_length = 1000.0 # length of dislocation lines
     phi1 = 30.0 # angle (deg) of the first dislocation with intersection direction
     phi2 = 30.0 # angle (deg) of the second dislocation with intersection direction
-    G = init_fcc_junction(junction_type, disloc_length, phi1, phi2)
-    N = DisNetManager({type(G): G})
+    N = init_fcc_junction(junction_type, disloc_length, phi1, phi2)
 
     vis = VisualizeNetwork()
     
@@ -85,7 +84,7 @@ def test_fcc_junctions():
         "maxdt": 1e-10,
     }
     
-    calforce  = CalForce(force_mode='DDD_FFT_MODEL', params=params, Ngrid=32, cell=G.cell)
+    calforce  = CalForce(force_mode='DDD_FFT_MODEL', params=params, Ngrid=32, cell=N.cell)
     mobility  = MobilityLaw(mobility_law='FCC_0', params=params, Medge=64103.0, Mscrew=64103.0, vmax=4000.0)
     timeint   = TimeIntegration(integrator='Trapezoid', params=params, force=calforce, mobility=mobility)
     collision = Collision(collision_mode='Proximity', params=params)

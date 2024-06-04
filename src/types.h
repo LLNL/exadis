@@ -265,6 +265,17 @@ private:
     DeviceDisNet *d_network;
 };
 
+/*---------------------------------------------------------------------------
+ *
+ *    Function:     make_network_manager
+ *                  Helper function to create a network manager object
+ *
+ *-------------------------------------------------------------------------*/
+inline DisNetManager* make_network_manager(SerialDisNet* net) {
+    net->generate_connectivity();
+    return exadis_new<DisNetManager>(net);
+}
+
 } // namespace ExaDiS
 
 

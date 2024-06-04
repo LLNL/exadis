@@ -13,6 +13,7 @@
 
 #include <Kokkos_Core.hpp>
 #include "vec.h"
+#include <stack>
 
 namespace ExaDiS {
     
@@ -21,11 +22,35 @@ enum NodeConstraints {UNCONSTRAINED = 0, PINNED_NODE = 7, CORNER_NODE = 1};
 
 /*---------------------------------------------------------------------------
  *
+ *    Struct:        NodeTag
+ *
+ *-------------------------------------------------------------------------*/
+struct NodeTag
+{
+    int domain;
+    int index;
+    
+    NodeTag() = default;
+    
+    KOKKOS_FORCEINLINE_FUNCTION
+    NodeTag(int _domain, int _index) : domain(_domain), index(_index) {}
+    
+    KOKKOS_INLINE_FUNCTION
+    bool operator<(const NodeTag& t) const {
+        if (domain < t.domain) return 1;
+        if (domain > t.domain) return 0;
+        return (index < t.index);
+    }
+};
+
+/*---------------------------------------------------------------------------
+ *
  *    Struct:        DisNode
  *
  *-------------------------------------------------------------------------*/
 struct DisNode
 {
+    NodeTag tag;
     //uint8_t flag;
     int constraint;
     Vec3 pos;
@@ -35,7 +60,8 @@ struct DisNode
     DisNode() = default;
     
     KOKKOS_FORCEINLINE_FUNCTION
-    DisNode(const Vec3& _pos) {
+    DisNode(const NodeTag& _tag, const Vec3& _pos) {
+        tag = _tag;
         pos = _pos;
         //flag = 0;
         constraint = UNCONSTRAINED;
@@ -43,20 +69,12 @@ struct DisNode
     }
     
     KOKKOS_FORCEINLINE_FUNCTION
-    DisNode(const Vec3& _pos, int _constraint) {
+    DisNode(const NodeTag& _tag, const Vec3& _pos, int _constraint) {
+        tag = _tag;
         pos = _pos;
         //flag = 0;
         constraint = _constraint;
         f = v = Vec3(0.0);
-    }
-    
-    KOKKOS_FORCEINLINE_FUNCTION
-    DisNode(const DisNode& node) {
-        pos = node.pos;
-        //flag = node.flag;
-        constraint = node.constraint;
-        f = node.f;
-        v = node.v;
     }
 };
 
@@ -87,14 +105,6 @@ struct DisSeg
         n2 = _n2;
         burg = _burg;
         plane = _plane;
-    }
-    
-    KOKKOS_FORCEINLINE_FUNCTION
-    DisSeg(const DisSeg& seg) {
-        n1 = seg.n1;
-        n2 = seg.n2;
-        burg = seg.burg;
-        plane = seg.plane;
     }
 };
 
@@ -298,11 +308,32 @@ class SerialDisNet {
 public:
     typedef typename Kokkos::Serial ExecutionSpace;
     static const char* name() { return "SerialDisNet"; }
+    int domain = 0;
     
     Cell cell;
     std::vector<DisNode> nodes;
     std::vector<DisSeg> segs;
     std::vector<Conn> conn;
+    
+    int maxindex = -1;
+    bool recycle = true;
+    std::stack<int> recycled_indices;
+    inline void set_max_tag(const NodeTag& tag) {
+        if (tag.index > maxindex) maxindex = tag.index;
+    }
+    inline NodeTag get_new_tag() {
+        int index = maxindex+1;
+        if (recycle && !recycled_indices.empty()) { 
+            index = recycled_indices.top();
+            recycled_indices.pop();
+        }
+        NodeTag tag(domain, index);
+        set_max_tag(tag);
+        return tag;
+    }
+    inline void free_tag(NodeTag& tag) {
+        if (recycle) recycled_indices.push(tag.index);
+    }
     
     // We need these to avoid accessing STL functions directly from devices
     int Nnodes_local, Nsegs_local;
@@ -335,12 +366,19 @@ public:
     inline int number_of_nodes() { return nodes.size(); }
     inline int number_of_segs() { return segs.size(); }
     
-    inline void add_node(const Vec3 &pos) { nodes.emplace_back(pos); }
-    inline void add_node(const Vec3 &pos, int constraint) { nodes.emplace_back(pos, constraint); }
-    inline void add_node(const DisNode &node) { nodes.emplace_back(node); }
+    inline void add_node(const Vec3& pos) { add_node(get_new_tag(), pos); }
+    inline void add_node(const Vec3& pos, int constraint) { add_node(get_new_tag(), pos, constraint); }
+    inline void add_node(const NodeTag& tag, const Vec3& pos) {
+        set_max_tag(tag);
+        nodes.emplace_back(tag, pos);
+    }
+    inline void add_node(const NodeTag& tag, const Vec3& pos, int constraint) {
+        set_max_tag(tag);
+        nodes.emplace_back(tag, pos, constraint);
+    }
+    
     inline void add_seg(int n1, int n2, const Vec3 &b) { segs.emplace_back(n1, n2, b); }
     inline void add_seg(int n1, int n2, const Vec3 &b, const Vec3 &p) { segs.emplace_back(n1, n2, b, p); }
-    inline void add_seg(const DisSeg &seg) { segs.emplace_back(seg); }
     
     inline int find_connection(int n1, int n2) {
         for (int i = 0; i < conn[n1].num; i++)
