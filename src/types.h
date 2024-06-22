@@ -32,11 +32,13 @@ template <unsigned int error> void print_(const char *format, ...);
  *    Functions:    Memory management and defintions
  *
  *-------------------------------------------------------------------------*/
-#define EXADIS_UNIFIED_MEMORY 1
+#ifndef EXADIS_FULL_UNIFIED_MEMORY
+#define EXADIS_FULL_UNIFIED_MEMORY 1
+#endif
 
 template<typename T, typename... Args>
 inline T* exadis_new(Args... args) {
-#if EXADIS_UNIFIED_MEMORY
+#if 1 //EXADIS_UNIFIED_MEMORY
     void* p = Kokkos::kokkos_malloc<Kokkos::SharedSpace>(sizeof(T));
     return new(p) T(args...);
 #else
@@ -46,7 +48,7 @@ inline T* exadis_new(Args... args) {
 
 template<typename T>
 inline void exadis_delete(T *p) {
-#if EXADIS_UNIFIED_MEMORY
+#if 1 //EXADIS_UNIFIED_MEMORY
     if (p) p->~T();
     Kokkos::kokkos_free<Kokkos::SharedSpace>(p);
 #else
@@ -54,11 +56,12 @@ inline void exadis_delete(T *p) {
 #endif
 }
 
-#if EXADIS_UNIFIED_MEMORY
+#if EXADIS_FULL_UNIFIED_MEMORY
 typedef typename Kokkos::SharedSpace T_memory_space;
 #else
 typedef typename Kokkos::DefaultExecutionSpace::memory_space T_memory_space;
 #endif
+typedef typename Kokkos::SharedSpace T_memory_shared;
 
 typedef Kokkos::View<DisNode*, T_memory_space> T_nodes;
 typedef Kokkos::View<DisSeg*, T_memory_space> T_segs;
@@ -151,7 +154,7 @@ public:
             s_network->segs.resize(d_network->Nsegs_local);
             s_network->conn.resize(d_network->Nnodes_local);
             
-        #if EXADIS_UNIFIED_MEMORY
+        #if EXADIS_FULL_UNIFIED_MEMORY
             for (int i = 0; i < d_network->Nnodes_local; i++)
                 s_network->nodes[i] = d_network->nodes(i);
             for (int i = 0; i < d_network->Nsegs_local; i++)
@@ -193,7 +196,7 @@ public:
             Kokkos::resize(d_network->segs, s_network->number_of_segs());
             Kokkos::resize(d_network->conn, s_network->number_of_nodes());
             
-        #if EXADIS_UNIFIED_MEMORY
+        #if EXADIS_FULL_UNIFIED_MEMORY
             for (int i = 0; i < s_network->number_of_nodes(); i++)
                 d_network->nodes(i) = s_network->nodes[i];
             for (int i = 0; i < s_network->number_of_segs(); i++)

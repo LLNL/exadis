@@ -36,7 +36,7 @@ SerialDisNet* init_frank_read_src_loop(double Lbox, Vec3& b, double Lsource, boo
     int N = nodes.size();
     for (int i = 0; i < N; i++) {
         Vec3 p = cross(b, nodes[(i+1)%N].pos-nodes[i].pos).normalized();
-        network->add_node(nodes[i]);
+        network->add_node(nodes[i].pos, nodes[i].constraint);
         network->add_seg(i, (i+1)%N, b, p);
     }
     

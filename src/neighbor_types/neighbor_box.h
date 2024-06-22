@@ -47,9 +47,6 @@ public:
     
     NeighborBox(System* system, double _cutoff, NeiType _type)
     {
-#if !EXADIS_UNIFIED_MEMORY
-        ExaDiS_fatal("Error: NeighborBox requires use of unified memory\n");
-#endif
         DeviceDisNet* net = system->get_device_network();
         build(system, net, _cutoff, _type);
     }
@@ -65,7 +62,7 @@ public:
     
     KOKKOS_INLINE_FUNCTION
     Vec3i find_box_coord(const Vec3& p) const {
-        Vec3 rp = binHinv * (cell.pbc_fold(p) - cell.origin());
+        Vec3 rp = binHinv * (cell.pbc_fold(p) - cell.origin);
         Vec3i id;
         for (int k = 0; k < 3; k++) {
             id[k] = (int)floor(rp[k]);
@@ -135,14 +132,15 @@ public:
             cutoff += system->params.maxseg;
         
         cell = net->cell;
-        cellHinv = cell.H.inverse();
+        cellHinv = cell.Hinv;
         
         pbc[0] = cell.xpbc;
         pbc[1] = cell.ypbc;
         pbc[2] = cell.zpbc;
         
-        for (int i = 0; i < 3; i++)
-            cbox[i] = cell.H[i];
+        cbox[0] = cell.H.colx();
+        cbox[1] = cell.H.coly();
+        cbox[2] = cell.H.colz();
         
         // Determine the dimensions of the 3d bin array
         Vec3 perpVecs[3];

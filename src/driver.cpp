@@ -180,12 +180,11 @@ void ExaDiSApp::write_restart(std::string restartfile)
     SerialDisNet* net = system->get_serial_network();
     
     fprintf(fp, "pbc %d %d %d\n", net->cell.xpbc, net->cell.ypbc, net->cell.zpbc);
-    fprintf(fp, "bmin %.17g %.17g %.17g\n", net->cell.xmin, net->cell.ymin, net->cell.zmin);
-    fprintf(fp, "bmax %.17g %.17g %.17g\n", net->cell.xmax, net->cell.ymax, net->cell.zmax);
     fprintf(fp, "H %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g\n",
     net->cell.H.xx(), net->cell.H.xy(), net->cell.H.xz(),
     net->cell.H.yx(), net->cell.H.yy(), net->cell.H.yz(),
     net->cell.H.zx(), net->cell.H.zy(), net->cell.H.zz());
+    fprintf(fp, "origin %.17g %.17g %.17g\n", net->cell.origin.x, net->cell.origin.y, net->cell.origin.z);
     fprintf(fp, "\n");
     
     fprintf(fp, "Nnodes %d\n", system->Nnodes_total());
@@ -294,14 +293,13 @@ void ExaDiSApp::read_restart(std::string restartfile)
         
         // cell
         else if (strncmp(line, "pbc", 3) == 0) { sscanf(line, "pbc %d %d %d\n", &cell.xpbc, &cell.ypbc, &cell.zpbc); }
-        else if (strncmp(line, "bmin", 4) == 0) { sscanf(line, "bmin %lf %lf %lf\n", &cell.xmin, &cell.ymin, &cell.zmin); }
-        else if (strncmp(line, "bmax", 4) == 0) { sscanf(line, "bmax %lf %lf %lf\n", &cell.xmax, &cell.ymax, &cell.zmax); }
         else if (strncmp(line, "H", 1) == 0) {
             sscanf(line, "H %lf %lf %lf %lf %lf %lf %lf %lf %lf\n",
             &cell.H[0][0], &cell.H[0][1], &cell.H[0][2],
             &cell.H[1][0], &cell.H[1][1], &cell.H[1][2],
             &cell.H[2][0], &cell.H[2][1], &cell.H[2][2]);
         }
+        else if (strncmp(line, "origin", 6) == 0) { sscanf(line, "origin %lf %lf %lf\n", &cell.origin.x, &cell.origin.y, &cell.origin.z); }
         
         // network
         else if (strncmp(line, "Nnodes", 6) == 0) {

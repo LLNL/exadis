@@ -1407,7 +1407,7 @@ void CollisionRetroactive::retroactive_collision(System* system)
     double mindist = rann;
     double mindist2 = mindist * mindist;
 
-#if EXADIS_UNIFIED_MEMORY
+#if EXADIS_FULL_UNIFIED_MEMORY
     T_x& xold = system->xold;
 #else
     T_x::HostMirror xold = Kokkos::create_mirror_view(system->xold);
@@ -1843,7 +1843,7 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
     auto segs = net->get_segs();
     auto cell = net->cell;
     
-    Kokkos::View<double, T_memory_space> dr2max("dr2max");
+    Kokkos::View<double, T_memory_shared> dr2max("dr2max");
     Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int i) {
         Vec3 r = nodes[i].pos;
         Vec3 rold = cell.pbc_position(r, xold(i));
@@ -1851,7 +1851,7 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
         Kokkos::atomic_max(&dr2max(), dr2);
     });
     
-    Kokkos::View<double, T_memory_space> l2max("l2max");
+    Kokkos::View<double, T_memory_shared> l2max("l2max");
     Kokkos::parallel_for(net->Nsegs_local, KOKKOS_LAMBDA(const int i) {
         int n1 = segs[i].n1;
         int n2 = segs[i].n2;
@@ -1867,12 +1867,11 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
     
     // Look for collisions between segments
     int max_collisions = 2 * net->Nsegs_local;
-    Kokkos::View<int, T_memory_space> ncollisions("ncollisions");
-    Kokkos::View<int**, T_memory_space> collisions("collisions", max_collisions, 2);
-    Kokkos::View<double**, T_memory_space> Lcollisions("Lcollisions", max_collisions, 2);
+    Kokkos::View<int, T_memory_shared> ncollisions("ncollisions");
+    Kokkos::View<int**, T_memory_shared> collisions("collisions", max_collisions, 2);
+    Kokkos::View<double**, T_memory_shared> Lcollisions("Lcollisions", max_collisions, 2);
     
     Kokkos::parallel_for(net->Nsegs_local, KOKKOS_LAMBDA(const int& i) {
-        
         int n1 = segs[i].n1;
         int n2 = segs[i].n2;
         Vec3 p1 = nodes[n1].pos;
@@ -2118,6 +2117,13 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
     }
     
     
+#if EXADIS_FULL_UNIFIED_MEMORY
+    T_x& h_xold = system->xold;
+#else
+    T_x::HostMirror h_xold = Kokkos::create_mirror_view(system->xold);
+    Kokkos::deep_copy(h_xold, system->xold);
+#endif     
+    
     // Now we have to loop for collisions on hinge joints (i.e zipping)
     for (int i = 0; i < nnodes; i++) {
         
@@ -2145,9 +2151,9 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
                 Vec3 l14 = p1-p4;
                 if (l14.norm2() < 1e-20) continue;
                 
-                Vec3 pold1 = network->cell.pbc_position(p1, xold(i));
-                Vec3 pold3 = network->cell.pbc_position(p3, xold(n3));
-                Vec3 pold4 = network->cell.pbc_position(p4, xold(n4));
+                Vec3 pold1 = network->cell.pbc_position(p1, h_xold(i));
+                Vec3 pold3 = network->cell.pbc_position(p3, h_xold(n3));
+                Vec3 pold4 = network->cell.pbc_position(p4, h_xold(n4));
                 
                 /* First interval considered : [t-delta t, t] */
                 //double dist2 = 0.0;

@@ -62,8 +62,8 @@ struct DisNode
     KOKKOS_FORCEINLINE_FUNCTION
     DisNode(const NodeTag& _tag, const Vec3& _pos) {
         tag = _tag;
-        pos = _pos;
         //flag = 0;
+        pos = _pos;
         constraint = UNCONSTRAINED;
         f = v = Vec3(0.0);
     }
@@ -71,8 +71,15 @@ struct DisNode
     KOKKOS_FORCEINLINE_FUNCTION
     DisNode(const NodeTag& _tag, const Vec3& _pos, int _constraint) {
         tag = _tag;
-        pos = _pos;
         //flag = 0;
+        pos = _pos;
+        constraint = _constraint;
+        f = v = Vec3(0.0);
+    }
+    
+    DisNode(const Vec3& _pos, int _constraint) {
+        //flag = 0;
+        pos = _pos;
         constraint = _constraint;
         f = v = Vec3(0.0);
     }
@@ -161,71 +168,37 @@ struct Conn
 struct Cell 
 {
     int xpbc, ypbc, zpbc;
-    double xmin, ymin, zmin;
-    double xmax, ymax, zmax;
     Mat33 H, Hinv;
+    Vec3 origin;
     
     Cell() = default;
     
     KOKKOS_FORCEINLINE_FUNCTION
     Cell(double Lbox) {
         xpbc = ypbc = zpbc = PBC_BOUND;
-        xmin = ymin = zmin = 0.0;
-        xmax = ymax = zmax = Lbox;
+        origin = Vec3(0.0);
         H = Mat33().diag(Lbox);
         Hinv = H.inverse();
     }
     
     Cell(const Vec3& bmin, const Vec3& bmax) {
         xpbc = ypbc = zpbc = PBC_BOUND;
-        xmin = bmin.x; ymin = bmin.y; zmin = bmin.z;
-        xmax = bmax.x; ymax = bmax.y; zmax = bmax.z;
-        H = Mat33().diag(xmax-xmin, ymax-ymin, zmax-zmin);
+        origin = Vec3(bmin.x, bmin.y, bmin.z);
+        H = Mat33().diag(bmax.x-bmin.x, bmax.y-bmin.y, bmax.z-bmin.z);
         Hinv = H.inverse();
     }
     
-    Cell(const Mat33& _H, const Vec3& origin, std::vector<int> pbc) {
+    Cell(const Mat33& _H, const Vec3& _origin, std::vector<int> pbc) {
         xpbc = pbc[0]; ypbc = pbc[1]; zpbc = pbc[2];
-        H = _H;
+        origin = _origin;
+        H = _H; // cell column vectors H = [c1|c2|c3]
         Hinv = H.inverse();
-        if (is_triclinic()) {
-            std::vector<Vec3> corners = {
-                origin,
-                origin + H.rowx,
-                origin + H.rowy,
-                origin + H.rowz,
-                origin + H.rowx + H.rowy,
-                origin + H.rowx + H.rowz,
-                origin + H.rowy + H.rowz,
-                origin + H.rowx + H.rowy + H.rowz
-            };
-            xmin = xmax = origin.x;
-            ymin = ymax = origin.y;
-            zmin = zmax = origin.z;
-            for (int i = 1; i < 8; i++) {
-                xmin = fmin(corners[i].x, xmin);
-                ymin = fmin(corners[i].y, ymin);
-                zmin = fmin(corners[i].z, zmin);
-                xmax = fmax(corners[i].x, xmax);
-                ymax = fmax(corners[i].y, ymax);
-                zmax = fmax(corners[i].z, zmax);
-            }
-        } else {
-            Vec3 c = origin + H.rowx + H.rowy + H.rowz;
-            xmin = origin.x; ymin = origin.y; zmin = origin.z;
-            xmax = c.x; ymax = c.y; zmax = c.z;
-        }
     }
     
     KOKKOS_INLINE_FUNCTION
     bool is_triclinic() const {
-        return (H.xy() > 0.0 || H.xz() > 0.0 || H.yz() > 0.0 ||
-                H.yx() > 0.0 || H.zx() > 0.0 || H.zy() > 0.0);
-    }
-    
-    KOKKOS_INLINE_FUNCTION
-    Vec3 origin() const {
-        return Vec3(xmin, ymin, zmin);
+        return (fabs(H.xy()) > 0.0 || fabs(H.xz()) > 0.0 || fabs(H.yz()) > 0.0 ||
+                fabs(H.yx()) > 0.0 || fabs(H.zx()) > 0.0 || fabs(H.zy()) > 0.0);
     }
     
     KOKKOS_INLINE_FUNCTION
@@ -235,12 +208,12 @@ struct Cell
     
     KOKKOS_INLINE_FUNCTION
     Vec3 real_position(const Vec3 &s) const {
-        return origin() + H * s;
+        return origin + H * s;
     }
     
     KOKKOS_INLINE_FUNCTION
     Vec3 scaled_position(const Vec3 &p) const {
-        return Hinv * (p - origin());
+        return Hinv * (p - origin);
     }
     
     KOKKOS_INLINE_FUNCTION
@@ -255,7 +228,7 @@ struct Cell
             v = H * w;
             rpbc -= v;
         } else {
-            Vec3 Lbox(xmax-xmin, ymax-ymin, zmax-zmin);
+            Vec3 Lbox(H.xx(), H.yy(), H.zz());
             if (xpbc == PBC_BOUND) rpbc.x -= rint((rpbc.x-r0.x)/Lbox.x) * Lbox.x;
             if (ypbc == PBC_BOUND) rpbc.y -= rint((rpbc.y-r0.y)/Lbox.y) * Lbox.y;
             if (zpbc == PBC_BOUND) rpbc.z -= rint((rpbc.z-r0.z)/Lbox.z) * Lbox.z;
@@ -269,26 +242,53 @@ struct Cell
     }
     
     KOKKOS_INLINE_FUNCTION
-    double bounding_volume() {
-        return (xmax-xmin)*(ymax-ymin)*(zmax-zmin);
-    }
-
-    KOKKOS_INLINE_FUNCTION
-    double triclinic_volume() {
+    double volume() const {
         return fabs(H.det());
     }
-
-    KOKKOS_INLINE_FUNCTION
-    double volume() {
-        if (is_triclinic())
-            return triclinic_volume();
-        else
-            return bounding_volume();
+    
+    std::vector<Vec3> get_cell_vectors() const {
+        std::vector<Vec3> vectors = {H.colx(), H.coly(), H.colz()};
+        return vectors;
+    }
+    
+    std::vector<Vec3> get_corners() const {
+        std::vector<Vec3> c = get_cell_vectors();
+        std::vector<Vec3> corners = {
+            origin,
+            origin + c[0],
+            origin + c[1],
+            origin + c[2],
+            origin + c[0] + c[1],
+            origin + c[0] + c[2],
+            origin + c[1] + c[2],
+            origin + c[0] + c[1] + c[2]
+        };
+        return corners;
+    }
+    
+    std::vector<Vec3> get_bounds() const {
+        std::vector<Vec3> bounds;
+        if (is_triclinic()) {
+            Vec3 bmin = origin;
+            Vec3 bmax = origin;
+            std::vector<Vec3> corners = get_corners();
+            for (int i = 1; i < 8; i++) {
+                bmin.x = fmin(corners[i].x, bmin.x);
+                bmin.y = fmin(corners[i].y, bmin.y);
+                bmin.z = fmin(corners[i].z, bmin.z);
+                bmax.x = fmax(corners[i].x, bmax.x);
+                bmax.y = fmax(corners[i].y, bmax.y);
+                bmax.z = fmax(corners[i].z, bmax.z);
+            }
+            bounds = {bmin, bmax};
+        } else {
+            bounds = {origin, origin + Vec3(H.xx(), H.yy(), H.zz())};
+        }
+        return bounds;
     }
     
     // Python binding
     std::vector<int> get_pbc();
-    std::vector<Vec3> get_bounds();
     std::vector<Vec3> pbc_position_array(std::vector<Vec3>& r0, std::vector<Vec3>& r);
     std::vector<Vec3> pbc_position_array(Vec3& r0, std::vector<Vec3>& r);
     std::vector<Vec3> pbc_fold_array(std::vector<Vec3>& r);

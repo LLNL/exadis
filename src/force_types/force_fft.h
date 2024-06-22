@@ -224,7 +224,7 @@ private:
     T_grid w;
     double wsum;
     
-#if !EXADIS_UNIFIED_MEMORY
+#if !EXADIS_FULL_UNIFIED_MEMORY
     T_grid::HostMirror h_gridval[6];
     bool host_synced;
 #endif
@@ -279,7 +279,7 @@ public:
         for (int i = 0; i < 9; i++)
             Kokkos::resize(gridval[i], Ngrid, Ngrid, Ngrid);
             
-#if !EXADIS_UNIFIED_MEMORY
+#if !EXADIS_FULL_UNIFIED_MEMORY
         host_synced = false;
 #endif
         
@@ -335,9 +335,9 @@ public:
     {
         // Non-singular kernel
         SerialDisNet *network = system->get_serial_network();
-        Lbox.x = network->cell.xmax - network->cell.xmin;
-        Lbox.y = network->cell.ymax - network->cell.ymin;
-        Lbox.z = network->cell.zmax - network->cell.zmin;
+        Lbox.x = network->cell.H.xx();
+        Lbox.y = network->cell.H.yy();
+        Lbox.z = network->cell.H.zz();
         
         H = 1.0/Ngrid * Lbox;
         double Hmax = fmax(fmax(H.x, H.y), H.z);
@@ -696,12 +696,12 @@ public:
         if (d_net->cell.is_triclinic())
             ExaDiS_fatal("Error: ForceFFT only implemented for orthorombic cells\n");
         
-        Lbox.x = d_net->cell.xmax - d_net->cell.xmin;
-        Lbox.y = d_net->cell.ymax - d_net->cell.ymin;
-        Lbox.z = d_net->cell.zmax - d_net->cell.zmin;
+        Lbox.x = d_net->cell.H.xx();
+        Lbox.y = d_net->cell.H.yy();
+        Lbox.z = d_net->cell.H.zz();
         H = 1.0/Ngrid * Lbox;
         V = H.x * H.y * H.z;
-        bmin = Vec3(d_net->cell.xmin, d_net->cell.ymin, d_net->cell.zmin);
+        bmin = d_net->cell.origin;
         
         Kokkos::fence();
         system->devtimer[TIMER_FFTALPHA].start();
@@ -709,7 +709,7 @@ public:
         for (int i = 0; i < 9; i++)
             Kokkos::deep_copy(gridval[i], 0.0);
         
-#if !EXADIS_UNIFIED_MEMORY
+#if !EXADIS_FULL_UNIFIED_MEMORY
         host_synced = false;
 #endif
         
@@ -747,7 +747,7 @@ public:
     
     inline void synchronize_stress_gridval()
     {
-#if !EXADIS_UNIFIED_MEMORY
+#if !EXADIS_FULL_UNIFIED_MEMORY
         if (!host_synced) {
             for (int i = 0; i < 6; i++) {
                 h_gridval[i] = Kokkos::create_mirror_view(gridval[stress_comps[i]]);
@@ -758,24 +758,21 @@ public:
 #endif
     }
     
-#if EXADIS_UNIFIED_MEMORY
+#if EXADIS_FULL_UNIFIED_MEMORY
     template<class N>
     KOKKOS_INLINE_FUNCTION
     double get_stress_gridval(N* n, int i, int kx, int ky, int kz) {
         return gridval[stress_comps[i]](kx, ky, kz).real();
     }
 #else
+    template<class N>
     KOKKOS_INLINE_FUNCTION
-    double get_stress_gridval(DeviceDisNet *n, int i, int kx, int ky, int kz) {
-        return gridval[stress_comps[i]](kx, ky, kz).real();
-    }
-    KOKKOS_INLINE_FUNCTION
-    double get_stress_gridval(SerialDisNet *n, int i, int kx, int ky, int kz) { 
-#if EXADIS_UNIFIED_MEMORY
-        return gridval[stress_comps[i]](kx, ky, kz).real();
-#else
-        return h_gridval[i](kx, ky, kz).real();
-#endif
+    double get_stress_gridval(N *n, int i, int kx, int ky, int kz) {
+        if constexpr (std::is_same<N, SerialDisNet>::value) {
+            return h_gridval[i](kx, ky, kz).real();
+        } else {
+            return gridval[stress_comps[i]](kx, ky, kz).real();
+        }
     }
 #endif
     

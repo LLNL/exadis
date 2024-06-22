@@ -104,9 +104,9 @@ def example2():
                     b12 = np.array(seg1["burg_vec"])
                     b34 = np.array(seg2["burg_vec"])
                     # PBC
-                    p2 = G.cell.closet_image(Rref=p1, R=p2)
-                    p3 = G.cell.closet_image(Rref=p1, R=p3)
-                    p4 = G.cell.closet_image(Rref=p3, R=p4)
+                    p2 = G.cell.closest_image(Rref=p1, R=p2)
+                    p3 = G.cell.closest_image(Rref=p1, R=p3)
+                    p4 = G.cell.closest_image(Rref=p3, R=p4)
                     f1, f2, f3, f4 = compute_segseg_force(p1, p2, p3, p4, b12, b34, self.mu, self.nu, self.a)
                     n1 = seg1["edge"][0][1]
                     n2 = seg1["edge"][1][1]

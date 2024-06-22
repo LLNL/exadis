@@ -20,9 +20,11 @@ except ImportError:
     # Use dummy DisNetManager if opendis is not available
     class DisNetManager:
         def __init__(self, disnet):
-            self.disnet = list(disnet.values())[0] if type(disnet) is dict else disnet
-        def get_disnet(self, type):
+            self.disnet = disnet
+        def get_disnet(self, disnet_type=None):
             return self.disnet
+        def export_data(self):
+            return self.get_disnet().export_data()
         @property
         def cell(self):
             return self.disnet.cell
@@ -64,12 +66,12 @@ class ExaDisNet:
     
     def import_data(self, data):
         cell = data.get("cell")
-        cell = pyexadis.Cell(h=cell.get("h"), is_periodic=cell.get("is_periodic")) # need cell.origin
+        cell = pyexadis.Cell(h=cell.get("h"), origin=cell.get("origin"), is_periodic=cell.get("is_periodic"))
         self.net = pyexadis.ExaDisNet(cell=cell, nodes=data.get("nodes"), segs=data.get("segs"))
     
     def export_data(self):
         cell = self.net.get_cell()
-        cell = {"h": np.array(cell.h), "origin": np.array(cell.origin()), "is_periodic": cell.get_pbc()}
+        cell = {"h": np.array(cell.h), "origin": np.array(cell.origin), "is_periodic": cell.get_pbc()}
         nodes = np.array(self.net.get_nodes_array())
         segs = np.array(self.net.get_segs_array())
         data = {"cell": cell, "nodes": nodes, "segs": segs}
@@ -146,7 +148,7 @@ class CalForce:
             Ngrid = kwargs.get('Ngrid')
             cell = kwargs.get('cell')
             if not isinstance(cell, pyexadis.Cell):
-                cell = pyexadis.Cell(h=cell.h, is_periodic=cell.is_periodic) # need cell.origin
+                cell = pyexadis.Cell(h=cell.h, origin=cell.origin, is_periodic=cell.is_periodic)
             self.force = pyexadis.make_force_ddd_fft(params=self.params, coreparams=coreparams, 
                                                      Ngrid=Ngrid, cell=cell)
             
@@ -154,7 +156,7 @@ class CalForce:
             Ngrid = kwargs.get('Ngrid')
             cell = kwargs.get('cell')
             if not isinstance(cell, pyexadis.Cell):
-                cell = pyexadis.Cell(h=cell.h, is_periodic=cell.is_periodic) # need cell.origin
+                cell = pyexadis.Cell(h=cell.h, origin=cell.origin, is_periodic=cell.is_periodic)
             drift = kwargs.get('drift', 1)
             self.force = pyexadis.make_force_subcycling(params=self.params, coreparams=coreparams,
                                                         Ngrid=Ngrid, cell=cell, drift=drift)
@@ -238,6 +240,8 @@ class TimeIntegration:
             self.params = params
         elif self.integrator_type == 'Trapezoid':
             multi = kwargs.get('multi', 0)
+            if kwargs.get('force').force_mode == 'SUBCYCLING_MODEL':
+                raise ValueError('Force SUBCYCLING_MODEL can only be used with Subcycling integrator')
             force = kwargs.get('force').force
             mobility = kwargs.get('mobility').mobility
             if multi > 1:
@@ -488,8 +492,7 @@ class SimulateNetwork:
                 ax = plt.axes(projection='3d')
             except NameError: print('plt not defined'); return
             # plot initial configuration
-            G = N.get_disnet(DisNet)
-            self.vis.plot_disnet(G, fig=fig, ax=ax, trim=True, block=False)
+            self.vis.plot_disnet(N, fig=fig, ax=ax, trim=True, block=False)
             
         if self.write_freq != None:
             N.get_disnet(ExaDisNet).write_data(os.path.join(self.write_dir, 'config.0.data'))
@@ -510,8 +513,7 @@ class SimulateNetwork:
 
             if self.vis != None and self.plot_freq != None:
                 if (tstep+1) % self.plot_freq == 0:
-                    G = N.get_disnet(DisNet)
-                    self.vis.plot_disnet(G, fig=fig, ax=ax, trim=True, block=False, pause_seconds=self.plot_pause_seconds)
+                    self.vis.plot_disnet(N, fig=fig, ax=ax, trim=True, block=False, pause_seconds=self.plot_pause_seconds)
             
             if self.write_freq != None:
                 if (tstep+1) % self.write_freq == 0:
@@ -525,8 +527,7 @@ class SimulateNetwork:
 
         # plot final configuration
         if self.vis != None:
-            G = N.get_disnet(DisNet)
-            self.vis.plot_disnet(G, fig=fig, ax=ax, trim=True, block=False)
+            self.vis.plot_disnet(N, fig=fig, ax=ax, trim=True, block=False)
             
         t1 = time.perf_counter()
         print('RUN TIME: %f sec' % (t1-t0))
@@ -650,15 +651,7 @@ class VisualizeNetwork:
     def __init__(self, bounds=None, **kwargs) -> None:
         self.bounds = bounds
         
-    def closest_image(self, cell, Rref, R):
-        # TO BE REMOVED: only for backward compatibility for now
-        try:
-            R = np.array(cell.closest_image(Rref=Rref, R=R))
-        except:
-            R = cell.map_to(R, Rref)
-        return R
-
-    def plot_disnet(self, DM: DisNet, # should be DisNetManager eventually
+    def plot_disnet(self, N: DisNetManager,
                     plot_nodes=True, plot_segs=True, plot_cell=True, trim=False,
                     fig=None, ax=None, block=False, pause_seconds=0.01):
         if fig==None:
@@ -668,11 +661,11 @@ class VisualizeNetwork:
             try: ax = plt.axes(projection='3d')
             except NameError: print('plt not defined'); return
             
-        data = DM.export_data() # TO DO: export_data() from DisNetManager
+        data = N.export_data()
         
         # cell
         cell = data.get("cell")
-        cell_origin = np.array(cell.get("origin", np.zeros(3))) # TO DO: cell.origin
+        cell_origin = np.array(cell.get("origin", np.zeros(3)))
         cell = pyexadis.Cell(h=cell.get("h"), origin=cell_origin, is_periodic=cell.get("is_periodic"))
         h = np.array(cell.h)
         cell_center = cell_origin + 0.5*np.sum(h, axis=0)
@@ -680,7 +673,7 @@ class VisualizeNetwork:
         # nodes
         rn = np.array(data.get("nodes"))[:,2:5]
         if rn.size > 0:
-            rn = self.closest_image(cell, Rref=cell_center, R=rn)
+            rn = np.array(cell.closest_image(Rref=cell_center, R=rn))
             
             # segments
             segs = np.array(data.get("segs"))
@@ -689,7 +682,7 @@ class VisualizeNetwork:
             if plot_segs:
                 segsnid = segs[:,0:2].astype(int)
                 r1 = rn[segsnid[:,0]]
-                r2 = self.closest_image(cell, Rref=cell_center, R=rn[segsnid[:,1]])
+                r2 = np.array(cell.closest_image(Rref=cell_center, R=rn[segsnid[:,1]]))
                 # handle pbc properly for segments that cross the cell boundary
                 hinv = np.linalg.inv(h)
                 d = np.max(np.abs(np.dot(r2-r1, hinv.T)), axis=1)

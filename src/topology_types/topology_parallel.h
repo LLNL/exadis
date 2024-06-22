@@ -38,15 +38,11 @@ private:
     double splitMultiNodeAlpha;
 
     static const int MAX_SPLITTABLE_DEGREE = MAX_CONN;
-    Kokkos::View<bool**, T_memory_space> armsets[MAX_SPLITTABLE_DEGREE+1];
+    Kokkos::View<bool**, T_memory_shared> armsets[MAX_SPLITTABLE_DEGREE+1];
 
 public:
     TopologyParallel(System* system, Force* _force, Mobility* _mobility, Params params=Params()) 
-    {    
-#if !EXADIS_UNIFIED_MEMORY
-        ExaDiS_fatal("Error: TopologyParallel requires use of unified memory\n");
-#endif
-
+    {
         // Precompute arms sets splits
         int numSets, **armSets;
         for (int nconn = 3; nconn <= MAX_SPLITTABLE_DEGREE; nconn++) {
@@ -204,7 +200,7 @@ public:
      *---------------------------------------------------------------------*/
     struct SplitMultiNode
     {
-        Kokkos::View<bool**, T_memory_space> armsets[MAX_SPLITTABLE_DEGREE+1];
+        Kokkos::View<bool**, T_memory_shared> armsets[MAX_SPLITTABLE_DEGREE+1];
         double splitDist, vNoise;
         double eps = 1e-12;
         
@@ -215,9 +211,9 @@ public:
         NeighborList* neilist;
         bool update_neighbors = false;
 
-        Kokkos::View<int**, T_memory_space> splits;
-        Kokkos::View<double**, T_memory_space> power;
-        Kokkos::View<Vec3**, T_memory_space> splitpos;
+        Kokkos::View<int**, T_memory_shared> splits;
+        Kokkos::View<double**, T_memory_shared> power;
+        Kokkos::View<Vec3**, T_memory_shared> splitpos;
 
         SplitMultiNode(System* _system, DeviceDisNet* _net, TopologyParallel* topology, 
                        F* _force, Mob* _mob) : 
@@ -538,8 +534,8 @@ public:
         
         
         // Find nodes to split and the number of splits for each node
-        Kokkos::View<int*, T_memory_space> nsplits("nsplits", 3);
-        Kokkos::View<int*, T_memory_space> splitnum("splitnum", net->Nnodes_local);
+        Kokkos::View<int*, T_memory_shared> nsplits("nsplits", 3);
+        Kokkos::View<int*, T_memory_shared> splitnum("splitnum", net->Nnodes_local);
         Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int& i) {
             auto nodes = net->get_nodes();
             auto conn = net->get_conn();
@@ -572,7 +568,7 @@ public:
         // These will be fully processed in parallel
         Kokkos::deep_copy(nsplits, 0);
         Kokkos::resize(smn->splits, numsplits, 2);
-        Kokkos::View<int**, T_memory_space>& splits = smn->splits;
+        Kokkos::View<int**, T_memory_shared>& splits = smn->splits;
         Kokkos::View<int*, T_memory_space> splitnodes("splitnodes", nsplitnodes);
         
         Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int& i) {
@@ -610,7 +606,6 @@ public:
         // configurations for all nodes in parallel
         Kokkos::resize(smn->power, numsplits, 2);
         Kokkos::resize(smn->splitpos, numsplits, 2);
-        
         Kokkos::parallel_for(Kokkos::TeamPolicy<>(numsplits, Kokkos::AUTO), *smn);
         Kokkos::fence();
         

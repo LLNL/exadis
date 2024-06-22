@@ -38,15 +38,16 @@ void NeighborBin_t<Tnode>::initialize(const Cell &_cell, double _cutoff)
     cutoff = _cutoff;
     cutoff2 = _cutoff * _cutoff;
 
-    binOrigin = cell.origin();
-    cellHinv = cell.H.inverse();
+    binOrigin = cell.origin;
+    cellHinv = cell.Hinv;
 
     pbc[0] = cell.xpbc;
     pbc[1] = cell.ypbc;
     pbc[2] = cell.zpbc;
 
-    for (int i = 0; i < 3; i++)
-        cbox[i] = cell.H[i];
+    cbox[0] = cell.H.colx();
+    cbox[1] = cell.H.coly();
+    cbox[2] = cell.H.colz();
 
     // Determine the dimensions of the 3d bin array
     Vec3 perpVecs[3];

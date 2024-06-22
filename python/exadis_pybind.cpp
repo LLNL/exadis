@@ -168,13 +168,6 @@ std::vector<int> Cell::get_pbc() {
     return pbc;
 }
 
-std::vector<Vec3> Cell::get_bounds() {
-    std::vector<Vec3> bounds = {
-        Vec3(xmin, ymin, zmin), Vec3(xmax, ymax, zmax)
-    };
-    return bounds;
-}
-
 std::vector<Vec3> Cell::pbc_position_array(std::vector<Vec3>& r0, std::vector<Vec3>& r) {
     if (r0.size() != r.size())
         ExaDiS_fatal("Error: reference and target position arrays must have the same size for closest_image()\n");
@@ -230,7 +223,7 @@ std::vector<int> map_node_tags(DeviceDisNet* net, std::vector<NodeTag>& tags) {
         ExaDiS_fatal("Error: tags list must have the same size as the number of nodes\n");
     
     std::map<NodeTag, int> map;
-    #if EXADIS_UNIFIED_MEMORY
+    #if EXADIS_FULL_UNIFIED_MEMORY
         for (int i = 0; i < net->Nnodes_local; i++)
             map.emplace(net->nodes(i).tag, i);
     #else
@@ -256,7 +249,7 @@ void set_positions(System* system, std::vector<Vec3>& pos) {
     if (pos.size() != net->Nnodes_local)
         ExaDiS_fatal("Error: positions list must have the same size as the number of nodes\n");
     
-    #if EXADIS_UNIFIED_MEMORY
+    #if EXADIS_FULL_UNIFIED_MEMORY
         for (int i = 0; i < net->Nnodes_local; i++)
             net->nodes(i).pos = pos[i];
     #else
@@ -277,7 +270,7 @@ void set_forces(System* system, std::vector<Vec3>& forces, std::vector<NodeTag>&
     // Map forces to nodes using tags if needed
     std::vector<int> tagmap = map_node_tags(net, tags);
     
-    #if EXADIS_UNIFIED_MEMORY
+    #if EXADIS_FULL_UNIFIED_MEMORY
         for (int i = 0; i < net->Nnodes_local; i++)
             net->nodes(tagmap[i]).f = forces[i];
     #else
@@ -298,7 +291,7 @@ void set_velocities(System* system, std::vector<Vec3>& vels, std::vector<NodeTag
     // Map velocities to nodes using tags if needed
     std::vector<int> tagmap = map_node_tags(net, tags);
     
-    #if EXADIS_UNIFIED_MEMORY
+    #if EXADIS_FULL_UNIFIED_MEMORY
         for (int i = 0; i < net->Nnodes_local; i++)
             net->nodes(tagmap[i]).v = vels[i];
     #else
@@ -314,7 +307,7 @@ std::vector<Vec3> get_forces(System* system) {
     std::vector<Vec3> forces;
     
     auto net = system->get_device_network();
-    #if EXADIS_UNIFIED_MEMORY
+    #if EXADIS_FULL_UNIFIED_MEMORY
         for (int i = 0; i < net->Nnodes_local; i++)
             forces.emplace_back(net->nodes(i).f);
     #else
@@ -331,7 +324,7 @@ std::vector<Vec3> get_velocities(System* system) {
     std::vector<Vec3> vels;
     
     auto net = system->get_device_network();
-    #if EXADIS_UNIFIED_MEMORY
+    #if EXADIS_FULL_UNIFIED_MEMORY
         for (int i = 0; i < net->Nnodes_local; i++)
             vels.emplace_back(net->nodes(i).v);
     #else
@@ -348,7 +341,7 @@ std::vector<Vec3> get_positions(System* system) {
     std::vector<Vec3> pos;
     
     auto net = system->get_device_network();
-    #if EXADIS_UNIFIED_MEMORY
+    #if EXADIS_FULL_UNIFIED_MEMORY
         for (int i = 0; i < net->Nnodes_local; i++)
             pos.emplace_back(net->nodes(i).pos);
     #else
@@ -963,7 +956,7 @@ PYBIND11_MODULE(pyexadis, m) {
         .def(py::init<const Mat33&, const Vec3&, std::vector<int> >(), py::arg("h"), py::arg("origin")=Vec3(0.0),
              py::arg("is_periodic")=std::vector<int>({PBC_BOUND,PBC_BOUND,PBC_BOUND}))
         .def_readonly("h", &Cell::H, "Cell matrix")
-        .def("origin", &Cell::origin, "Returns the origin of the cell")
+        .def_readonly("origin", &Cell::origin, "Origin of the cell")
         .def("center", &Cell::center, "Returns the center of the cell")
         .def("closest_image", (std::vector<Vec3> (Cell::*)(std::vector<Vec3>&, std::vector<Vec3>&)) &Cell::pbc_position_array, 
              "Returns the closest image of an array of positions from another", py::arg("Rref"), py::arg("R"))

@@ -42,11 +42,11 @@ struct Crystal
     int num_glissile_burgs = 0;
     int num_planes = 0;
     int num_sys = 0;
-    Kokkos::View<Vec3*, T_memory_space> ref_burgs;
-    Kokkos::View<Vec3*, T_memory_space> ref_planes;
-    Kokkos::View<int**, T_memory_space> ref_sys;
-    Kokkos::View<int*, T_memory_space> planes_per_burg;
-    Kokkos::View<int*, T_memory_space> burg_start_plane;
+    Kokkos::View<Vec3*, T_memory_shared> ref_burgs;
+    Kokkos::View<Vec3*, T_memory_shared> ref_planes;
+    Kokkos::View<int**, T_memory_shared> ref_sys;
+    Kokkos::View<int*, T_memory_shared> planes_per_burg;
+    Kokkos::View<int*, T_memory_shared> burg_start_plane;
     
     RandomGenerator random_gen;
     

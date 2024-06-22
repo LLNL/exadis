@@ -532,13 +532,11 @@ void SerialDisNet::write_data(std::string filename)
     
     FILE *fp = fopen(filename.c_str(), "w");
     if (fp == NULL) {
-        printf("Error: cannot open output file %s\n", filename.c_str());
-        exit(-1);
+        ExaDiS_fatal("Error: cannot open output file %s\n", filename.c_str());
     }
 
     if (cell.is_triclinic()) {
-        printf("Error in write_data(): volume must be orthorombic\n");
-        exit(-1);
+        ExaDiS_fatal("Error in write_data(): volume must be orthorombic\n");
     }
     
     int version_number = 4;
@@ -547,8 +545,9 @@ void SerialDisNet::write_data(std::string filename)
     fprintf(fp, "dataFileVersion = %d\n", version_number);
     fprintf(fp, "numFileSegments = %d\n", filesegments_number);
 
-    fprintf(fp, "minCoordinates = [\n %f\n %f\n %f\n ]\n", cell.xmin, cell.ymin, cell.zmin);
-    fprintf(fp, "maxCoordinates = [\n %f\n %f\n %f\n ]\n", cell.xmax, cell.ymax, cell.zmax);
+    std::vector<Vec3> bounds = cell.get_bounds();
+    fprintf(fp, "minCoordinates = [\n %f\n %f\n %f\n ]\n", bounds[0].x, bounds[0].y, bounds[0].z);
+    fprintf(fp, "maxCoordinates = [\n %f\n %f\n %f\n ]\n", bounds[1].x, bounds[1].y, bounds[1].z);
 
     fprintf(fp, "nodeCount = %d\n", number_of_nodes());
 
@@ -560,7 +559,7 @@ void SerialDisNet::write_data(std::string filename)
     fprintf(fp, "domainDecomposition = \n");
     fprintf(fp, "# Dom_ID  Minimum XYZ bounds   Maximum XYZ bounds\n");
     fprintf(fp, "  %d  %f  %f  %f  %f  %f  %f\n",
-            domain, cell.xmin, cell.ymin, cell.zmin, cell.xmax, cell.ymax, cell.zmax);
+            domain, bounds[0].x, bounds[0].y, bounds[0].z, bounds[1].x, bounds[1].y, bounds[1].z);
 
     fprintf(fp, "nodalData =\n");
     fprintf(fp, "# Primary lines: node_tag, x, y, z, num_arms, constraint\n");

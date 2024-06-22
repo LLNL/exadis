@@ -185,7 +185,7 @@ struct SegSegGroups
     static const int Ngroups = Ng;
     double r2groups[Ng-1];
     int Nsegseg[Ng];
-    Kokkos::View<int*, T_memory_space> gcount;
+    Kokkos::View<int*> gcount;
     Kokkos::DualView<SegSeg*> segseglist[Ng];
     int Nsegseg_tot;
     double gfrac[Ng];
@@ -193,7 +193,7 @@ struct SegSegGroups
     SegSegList* ssl;
     Kokkos::View<double*> gdist2;
     double rg9s;
-    Kokkos::View<int*, T_memory_space> countmove;
+    Kokkos::View<int*> countmove;
     Kokkos::View<int*> nflag;
     
     SegSegGroups(System* system, std::vector<double> rgroups, double cutoff) {
@@ -232,8 +232,10 @@ struct SegSegGroups
     
     void init_groups(SegSegList* _ssl) {
         Nsegseg_tot = 0;
+        auto h_gcount = Kokkos::create_mirror_view(gcount);
+        Kokkos::deep_copy(h_gcount, gcount);
         for (int i = 0; i < Ngroups; i++) {
-            Nsegseg[i] = gcount(i);
+            Nsegseg[i] = h_gcount(i);
             Kokkos::resize(segseglist[i], Nsegseg[i]);
             Nsegseg_tot += Nsegseg[i];
         }
@@ -241,7 +243,7 @@ struct SegSegGroups
         Kokkos::resize(ssl->segsegflag, Nsegseg[Ngroups-1]);
         Kokkos::deep_copy(ssl->segsegflag, 1);
         Kokkos::resize(gdist2, Nsegseg[Ngroups-1]);
-        countmove(0) = 0;
+        Kokkos::deep_copy(countmove, 0);
         for (int i = 0; i < Ngroups; i++)
             gfrac[i] = 1.0*Nsegseg[i]/Nsegseg_tot;
     }
@@ -302,7 +304,9 @@ struct SegSegGroups
     }
     
     void update_interactions() {
-        Nsegseg[Ngroups-2] += countmove(0);
+        auto h_countmove = Kokkos::create_mirror_view(countmove);
+        Kokkos::deep_copy(h_countmove, countmove);
+        Nsegseg[Ngroups-2] += h_countmove(0);
         Kokkos::resize(segseglist[Ngroups-2], Nsegseg[Ngroups-2]);
         using policy = Kokkos::RangePolicy<typename MoveInteractions::TagMove>;
         Kokkos::parallel_for(policy(0, Nsegseg[Ngroups-1]), MoveInteractions(this));
