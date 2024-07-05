@@ -53,18 +53,19 @@ def example1():
 
     N = init_circular_loop()
     
-    params = {"burgmag": 1.0, "mu": mu, "nu": nu, "a": a, "maxseg": 0.3, "minseg": 0.1}
+    state = {"burgmag": 1.0, "mu": mu, "nu": nu, "a": a, "maxseg": 0.3, "minseg": 0.1}
+    state["applied_stress"] = applied_stress
     
     # pydis
-    calforce = CalForce_pydis(params=params, Ec=Ec, force_mode='LineTension')
-    nodeforce_dict, segforce_dict = calforce.NodeForce(N, applied_stress=applied_stress)
-    f_pydis = np.array(list(nodeforce_dict.values()))
+    calforce = CalForce_pydis(state=state, Ec=Ec, force_mode='LineTension')
+    state = calforce.NodeForce(N, state)
+    f_pydis = state["nodeforces"]
     print('pydis',f_pydis)
     
     # exadis
-    calforce = CalForce_pyexadis(params=params, Ec=Ec, force_mode='LineTension')
-    force_dict = calforce.NodeForce(N, applied_stress=applied_stress)
-    f_pyexadis = force_dict["nodeforces"]
+    calforce = CalForce_pyexadis(state=state, Ec=Ec, force_mode='LineTension')
+    state = calforce.NodeForce(N, state)
+    f_pyexadis = state["nodeforces"]
     print('f_pyexadis',f_pyexadis)
     
     print('PASS' if np.allclose(f_pydis/mu, f_pyexadis/mu) else 'FAIL')

@@ -39,31 +39,7 @@ def init_frank_read_src_loop(box_length, arm_length, burg_vec=np.array([1.0,0.0,
     return N
     
 
-def test_force():
-    """
-    Example of a function to compute nodal forces using
-    the pyexadis binding to ExaDiS
-    """
-    pyexadis.initialize()
-    
-    Lbox = 1000.0
-    N = init_frank_read_src_loop(box_length=Lbox, arm_length=0.125*Lbox, pbc=False)
-    
-    mu, nu, a = 50e9, 0.3, 1.0
-    Ec = mu / 4.0 / np.pi * np.log(a/0.1)
-    applied_stress = np.array([0.0, 0.0, 0.0, 0.0, -4.0e8, 0.0])
-    
-    # exadis
-    params = {"burgmag": 3e-10, "mu": mu, "nu": nu, "a": a, "maxseg": 0.04*Lbox, "minseg": 0.01*Lbox}
-    calforce = CalForce(params=params, Ec=Ec, force_mode='LineTension')
-    force_dict = calforce.NodeForce(N, applied_stress=applied_stress)
-    f_pyexadis = force_dict["nodeforces"]
-    print('f_pyexadis',f_pyexadis)
-
-    pyexadis.finalize()
-
-
-def main():
+def test_frank_read_src():
     """
     Example of a script to perform a simple Frank-Read source
     simulation using the pyexadis binding to ExaDiS
@@ -75,26 +51,25 @@ def main():
 
     vis = VisualizeNetwork()
     
-    params = {"burgmag": 3e-10, "mu": 50e9, "nu": 0.3, "a": 1.0, "maxseg": 0.04*Lbox, "minseg": 0.01*Lbox, "rann": 2.0}
+    state = {"burgmag": 3e-10, "mu": 50e9, "nu": 0.3, "a": 1.0, "maxseg": 0.04*Lbox, "minseg": 0.01*Lbox, "rann": 2.0}
     
-    calforce  = CalForce(force_mode='LineTension', params=params)
-    mobility  = MobilityLaw(mobility_law='SimpleGlide', params=params)
-    timeint   = TimeIntegration(integrator='EulerForward', dt=1.0e-8, params=params)
-    collision = Collision(collision_mode='Retroactive', params=params)
+    calforce  = CalForce(force_mode='LineTension', state=state)
+    mobility  = MobilityLaw(mobility_law='SimpleGlide', state=state)
+    timeint   = TimeIntegration(integrator='EulerForward', state=state, dt=1.0e-8)
+    collision = Collision(collision_mode='Retroactive', state=state)
     topology  = None
-    remesh    = Remesh(remesh_rule='LengthBased', params=params)
+    remesh    = Remesh(remesh_rule='LengthBased', state=state)
     
     sim = SimulateNetwork(calforce=calforce, mobility=mobility, timeint=timeint, 
                           collision=collision, topology=topology, remesh=remesh, vis=vis,
-                          max_step=200, loading_mode='stress',
+                          state=state, max_step=200, loading_mode='stress',
                           applied_stress=np.array([0.0, 0.0, 0.0, 0.0, -4.0e8, 0.0]),
                           print_freq=10, plot_freq=10, plot_pause_seconds=0.0001,
                           write_freq=10, write_dir='output')
-    sim.run(N)
+    sim.run(N, state)
     
     pyexadis.finalize()
 
 
 if __name__ == "__main__":
-    #test_force()
-    main()
+    test_frank_read_src()

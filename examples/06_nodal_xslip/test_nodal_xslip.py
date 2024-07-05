@@ -26,7 +26,7 @@ def test_nodal_xslip():
 
     vis = VisualizeNetwork()
     
-    params = {
+    state = {
         "crystal": 'bcc',
         "burgmag": 2.85e-10,
         "mu": 55.0e9,
@@ -38,19 +38,19 @@ def test_nodal_xslip():
         "nextdt": 1e-13,
     }
     
-    calforce  = CalForce(force_mode='DDD_FFT_MODEL', params=params, Ec_junc_fact=0.3, Ngrid=32, cell=N.cell)
-    mobility  = MobilityLaw(mobility_law='BCC_0B', params=params, Medge=2600.0, Mscrew=20.0, Mclimb=1e-4, vmax=3400.0)
-    timeint   = TimeIntegration(integrator='Trapezoid', params=params, force=calforce, mobility=mobility)
-    collision = Collision(collision_mode='Proximity', params=params)
-    topology  = Topology(topology_mode='TopologySerial', params=params, force=calforce, mobility=mobility)
-    remesh    = Remesh(remesh_rule='LengthBased', params=params)
+    calforce  = CalForce(force_mode='DDD_FFT_MODEL', state=state, Ec_junc_fact=0.3, Ngrid=32, cell=N.cell)
+    mobility  = MobilityLaw(mobility_law='BCC_0B', state=state, Medge=2600.0, Mscrew=20.0, Mclimb=1e-4, vmax=3400.0)
+    timeint   = TimeIntegration(integrator='Trapezoid', state=state, force=calforce, mobility=mobility)
+    collision = Collision(collision_mode='Proximity', state=state)
+    topology  = Topology(topology_mode='TopologySerial', state=state, force=calforce, mobility=mobility)
+    remesh    = Remesh(remesh_rule='LengthBased', state=state)
     
     sim = SimulateNetwork(calforce=calforce, mobility=mobility, timeint=timeint, 
                           collision=collision, topology=topology, remesh=remesh, vis=vis,
-                          max_step=500, loading_mode='strain_rate', erate=-2e8,
+                          state=state, max_step=500, loading_mode='strain_rate', erate=-2e8,
                           print_freq=1, plot_freq=10, plot_pause_seconds=0.0001,
                           write_freq=10, write_dir='output')
-    sim.run(N)
+    sim.run(N, state)
     
     pyexadis.finalize()
 

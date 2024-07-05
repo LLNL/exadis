@@ -21,7 +21,7 @@ def example_bcc_Ta_100nm_2e8():
     
     pyexadis.initialize()
     
-    params = {
+    state = {
         "crystal": 'bcc',
         "burgmag": 2.85e-10,
         "mu": 55.0e9,
@@ -36,25 +36,25 @@ def example_bcc_Ta_100nm_2e8():
     
     Lbox = 300.0
     G = ExaDisNet()
-    G.generate_prismatic_config(params["crystal"], Lbox, 12, 0.21*Lbox, params["maxseg"])
+    G.generate_prismatic_config(state["crystal"], Lbox, 12, 0.21*Lbox, state["maxseg"])
     net = DisNetManager(G)
     
     vis = None
     
-    calforce  = CalForce(force_mode='DDD_FFT_MODEL', params=params, Ngrid=64, cell=net.cell)
-    mobility  = MobilityLaw(mobility_law='BCC_0B', params=params, Medge=2600.0, Mscrew=20.0, Mclimb=1e-4, vmax=3400.0)
-    timeint   = TimeIntegration(integrator='Trapezoid', multi=10, params=params, force=calforce, mobility=mobility)
-    collision = Collision(collision_mode='Retroactive', params=params)
-    topology  = Topology(topology_mode='TopologyParallel', params=params, force=calforce, mobility=mobility)
-    remesh    = Remesh(remesh_rule='LengthBased', params=params)
+    calforce  = CalForce(force_mode='DDD_FFT_MODEL', state=state, Ngrid=64, cell=net.cell)
+    mobility  = MobilityLaw(mobility_law='BCC_0B', state=state, Medge=2600.0, Mscrew=20.0, Mclimb=1e-4, vmax=3400.0)
+    timeint   = TimeIntegration(integrator='Trapezoid', multi=10, state=state, force=calforce, mobility=mobility)
+    collision = Collision(collision_mode='Retroactive', state=state)
+    topology  = Topology(topology_mode='TopologyParallel', state=state, force=calforce, mobility=mobility)
+    remesh    = Remesh(remesh_rule='LengthBased', state=state)
     
     sim = SimulateNetworkPerf(calforce=calforce, mobility=mobility, timeint=timeint, 
                               collision=collision, topology=topology, remesh=remesh, vis=vis,
                               loading_mode='strain_rate', erate=2e8, edir=np.array([0.,0.,1.]),
-                              max_step=10000, burgmag=params["burgmag"],
+                              max_step=10000, burgmag=state["burgmag"], state=state,
                               print_freq=1, plot_freq=2, plot_pause_seconds=0.0001,
                               write_freq=100, write_dir='output_bcc_Ta_100nm_2e8')
-    sim.run(net)
+    sim.run(net, state)
     
     pyexadis.finalize()
 

@@ -71,7 +71,7 @@ def test_fcc_junctions():
 
     vis = VisualizeNetwork()
     
-    params = {
+    state = {
         "crystal": 'fcc',
         "burgmag": 2.55e-10,
         "mu": 54.6e9,
@@ -84,19 +84,19 @@ def test_fcc_junctions():
         "maxdt": 1e-10,
     }
     
-    calforce  = CalForce(force_mode='DDD_FFT_MODEL', params=params, Ngrid=32, cell=N.cell)
-    mobility  = MobilityLaw(mobility_law='FCC_0', params=params, Medge=64103.0, Mscrew=64103.0, vmax=4000.0)
-    timeint   = TimeIntegration(integrator='Trapezoid', params=params, force=calforce, mobility=mobility)
-    collision = Collision(collision_mode='Proximity', params=params)
-    topology  = Topology(topology_mode='TopologySerial', params=params, force=calforce, mobility=mobility)
-    remesh    = Remesh(remesh_rule='LengthBased', params=params)
+    calforce  = CalForce(force_mode='DDD_FFT_MODEL', state=state, Ngrid=32, cell=N.cell)
+    mobility  = MobilityLaw(mobility_law='FCC_0', state=state, Medge=64103.0, Mscrew=64103.0, vmax=4000.0)
+    timeint   = TimeIntegration(integrator='Trapezoid', state=state, force=calforce, mobility=mobility)
+    collision = Collision(collision_mode='Proximity', state=state)
+    topology  = Topology(topology_mode='TopologySerial', state=state, force=calforce, mobility=mobility)
+    remesh    = Remesh(remesh_rule='LengthBased', state=state)
     
     sim = SimulateNetwork(calforce=calforce, mobility=mobility, timeint=timeint, 
                           collision=collision, topology=topology, remesh=remesh, vis=vis,
-                          max_step=200, loading_mode='stress',
+                          state=state, max_step=200, loading_mode='stress',
                           print_freq=1, plot_freq=10, plot_pause_seconds=0.0001,
                           write_freq=10, write_dir='output')
-    sim.run(N)
+    sim.run(N, state)
     
     pyexadis.finalize()
 

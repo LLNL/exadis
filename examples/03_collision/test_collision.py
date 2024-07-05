@@ -37,7 +37,7 @@ def test_collision():
 
     vis = VisualizeNetwork()
     
-    params = {
+    state = {
         "burgmag": 2.55e-10,
         "mu": 54.6e9,
         "nu": 0.324,
@@ -48,20 +48,20 @@ def test_collision():
         "nextdt": 5e-13
     }
     
-    calforce  = CalForce(force_mode='DDD_FFT_MODEL', params=params, Ngrid=32, cell=N.cell)
-    mobility  = MobilityLaw(mobility_law='SimpleGlide', params=params, mob=1000.0)
-    timeint   = TimeIntegration(integrator='Trapezoid', params=params, force=calforce, mobility=mobility)
-    collision = Collision(collision_mode='Proximity', params=params)
+    calforce  = CalForce(force_mode='DDD_FFT_MODEL', state=state, Ngrid=32, cell=N.cell)
+    mobility  = MobilityLaw(mobility_law='SimpleGlide', state=state, mob=1000.0)
+    timeint   = TimeIntegration(integrator='Trapezoid', state=state, force=calforce, mobility=mobility)
+    collision = Collision(collision_mode='Proximity', state=state)
     topology  = None
-    remesh    = Remesh(remesh_rule='LengthBased', params=params)
+    remesh    = Remesh(remesh_rule='LengthBased', state=state)
     
     sim = SimulateNetwork(calforce=calforce, mobility=mobility, timeint=timeint, 
                           collision=collision, topology=topology, remesh=remesh, vis=vis,
-                          max_step=200, loading_mode='stress',
+                          state=state, max_step=200, loading_mode='stress',
                           applied_stress=np.array([0.0, 0.0, 0.0, 5e8, 0.0, 0.0]),
                           print_freq=1, plot_freq=10, plot_pause_seconds=0.0001,
                           write_freq=10, write_dir='output')
-    sim.run(N)
+    sim.run(N, state)
     
     pyexadis.finalize()
 
