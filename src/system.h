@@ -66,7 +66,7 @@ public:
                  TIMER_TOPOLOGY, TIMER_REMESH, TIMER_OUTPUT, TIMER_END};
     SystemTimer timer[TIMER_END];
     
-    static const int MAX_DEV_TIMERS = 10;
+    static const int MAX_DEV_TIMERS = 20;
     int numdevtimer = 0;
     SystemTimer devtimer[MAX_DEV_TIMERS];
     int add_timer(std::string label) {

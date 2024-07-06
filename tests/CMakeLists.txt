@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.14)
 project(exadis_tests LANGUAGES CXX)
 
 add_executable(test_kokkos test_kokkos.cpp)
-target_link_libraries(test_kokkos PRIVATE Kokkos::kokkos)
+target_link_libraries(test_kokkos PRIVATE Kokkos::kokkos ${EXADIS_LINK_OPTIONS})
 
 if(Kokkos_ENABLE_CUDA)
     add_executable(test_cuda test_cuda.cpp)
@@ -19,6 +19,7 @@ set(EXADIS_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+add_subdirectory(benchmark)
 #add_subdirectory(test_bind)
 #add_subdirectory(test_operator)
 #add_subdirectory(test_neighbor)
