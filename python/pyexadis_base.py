@@ -67,13 +67,17 @@ class ExaDisNet:
     def import_data(self, data):
         cell = data.get("cell")
         cell = pyexadis.Cell(h=cell.get("h"), origin=cell.get("origin"), is_periodic=cell.get("is_periodic"))
-        self.net = pyexadis.ExaDisNet(cell=cell, nodes=data.get("nodes"), segs=data.get("segs"))
+        nodes = data.get("nodes")
+        nodes_array = np.hstack((nodes["tags"], nodes["positions"], nodes["constraints"]))
+        segs = data.get("segs")
+        segs_array = np.hstack((segs["nodeids"], segs["burgers"], segs["planes"]))
+        self.net = pyexadis.ExaDisNet(cell=cell, nodes=nodes_array, segs=segs_array)
     
     def export_data(self):
         cell = self.net.get_cell()
         cell = {"h": np.array(cell.h), "origin": np.array(cell.origin), "is_periodic": cell.get_pbc()}
-        nodes = np.array(self.net.get_nodes_array())
-        segs = np.array(self.net.get_segs_array())
+        nodes = self.get_nodes_data()
+        segs = self.get_segs_data()
         data = {"cell": cell, "nodes": nodes, "segs": segs}
         return data
     
@@ -95,6 +99,15 @@ class ExaDisNet:
     
     def get_positions(self):
         return self.get_nodes_data()["positions"]
+        
+    def get_segs_data(self):
+        segs_array = np.array(self.net.get_segs_array())
+        segs_dict = {
+            "nodeids": segs_array[:,0:2].astype(int),
+            "burgers": segs_array[:,2:5],
+            "planes": segs_array[:,5:8]
+        }
+        return segs_dict 
     
 
 # This is only needed until the visualization is modified
@@ -427,9 +440,9 @@ class SimulateNetwork:
             oldnodes_dict = state["oldnodes_dict"]
             rold = oldnodes_dict["positions"]
             
-            r = nodes[:,2:5]
-            segsnid = segs[:,0:2].astype(int)
-            burgs = segs[:,2:5]
+            r = nodes.get("positions")
+            segsnid = segs.get("nodeids")
+            burgs = segs.get("burgers")
             vol = cell.volume()
             
             r1 = r[segsnid[:,0]]
@@ -694,16 +707,17 @@ class VisualizeNetwork:
         cell_center = cell_origin + 0.5*np.sum(h, axis=0)
         
         # nodes
-        rn = np.array(data.get("nodes"))[:,2:5]
+        nodes = data.get("nodes")
+        rn = nodes.get("positions")
         if rn.size > 0:
             rn = np.array(cell.closest_image(Rref=cell_center, R=rn))
             
             # segments
-            segs = np.array(data.get("segs"))
-            if segs.size == 0: plot_segs = False
+            segs = data.get("segs")
+            if segs.get("nodeids").size == 0: plot_segs = False
             p_segs = np.empty((0,6))
             if plot_segs:
-                segsnid = segs[:,0:2].astype(int)
+                segsnid = segs.get("nodeids")
                 r1 = rn[segsnid[:,0]]
                 r2 = np.array(cell.closest_image(Rref=cell_center, R=rn[segsnid[:,1]]))
                 # handle pbc properly for segments that cross the cell boundary
