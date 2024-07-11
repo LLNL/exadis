@@ -506,12 +506,7 @@ class SimulateNetwork:
         t0 = time.perf_counter()
         
         if self.vis != None and self.plot_freq != None:
-            try: 
-                fig = plt.figure(figsize=(8,8))
-                ax = plt.axes(projection='3d')
-            except NameError: print('plt not defined'); return
-            # plot initial configuration
-            self.vis.plot_disnet(N, fig=fig, ax=ax, trim=True, block=False)
+            self.vis.plot_disnet(N, trim=True, block=False)
             
         if self.write_freq != None:
             N.get_disnet(ExaDisNet).write_data(os.path.join(self.write_dir, 'config.0.data'))
@@ -532,7 +527,7 @@ class SimulateNetwork:
 
             if self.vis != None and self.plot_freq != None:
                 if (tstep+1) % self.plot_freq == 0:
-                    self.vis.plot_disnet(N, fig=fig, ax=ax, trim=True, block=False, pause_seconds=self.plot_pause_seconds)
+                    self.vis.plot_disnet(N, trim=True, block=False, pause_seconds=self.plot_pause_seconds)
             
             if self.write_freq != None:
                 if (tstep+1) % self.write_freq == 0:
@@ -546,7 +541,7 @@ class SimulateNetwork:
 
         # plot final configuration
         if self.vis != None:
-            self.vis.plot_disnet(N, fig=fig, ax=ax, trim=True, block=False)
+            self.vis.plot_disnet(N, trim=True, block=False)
             
         t1 = time.perf_counter()
         print('RUN TIME: %f sec' % (t1-t0))
@@ -673,18 +668,21 @@ except ImportError:
 class VisualizeNetwork:
     """VisualizeNetwork: class for plotting dislocation network
     """    
-    def __init__(self, bounds=None, **kwargs) -> None:
+    def __init__(self, bounds=None, fig=None, ax=None, **kwargs) -> None:
         self.bounds = bounds
+        self.fig, self.ax = fig, ax
+        if self.fig == None:
+            try: self.fig = plt.figure(figsize=(8,8))
+            except NameError: print('plt not defined'); return
+        if self.ax == None:
+            try: self.ax = plt.axes(projection='3d')
+            except NameError: print('plt not defined'); return
         
     def plot_disnet(self, N: DisNetManager,
                     plot_nodes=True, plot_segs=True, plot_cell=True, trim=False,
                     fig=None, ax=None, block=False, pause_seconds=0.01):
-        if fig==None:
-            try: fig = plt.figure(figsize=(8,8))
-            except NameError: print('plt not defined'); return
-        if ax==None:
-            try: ax = plt.axes(projection='3d')
-            except NameError: print('plt not defined'); return
+        if fig == None: fig = self.fig
+        if ax == None: ax = self.ax
             
         data = N.export_data()
         
