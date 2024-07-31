@@ -14,10 +14,11 @@ from typing import Tuple
 
 import pyexadis
 try:
-    # Try importing DisNetManager from opendis
+    # Try importing DisNetManager and DisNet_Base from OpenDiS
     from framework.disnet_manager import DisNetManager
+    from base_classes.disnet_base import DisNet_Base
 except ImportError:
-    # Use dummy DisNetManager if opendis is not available
+    # Use dummy DisNetManager and DisNet_Base if OpenDiS is not available
     class DisNetManager:
         def __init__(self, disnet):
             self.disnet = disnet
@@ -28,6 +29,8 @@ except ImportError:
         @property
         def cell(self):
             return self.disnet.cell
+    class DisNet_Base:
+        pass
 
 from enum import IntEnum
 class NodeConstraints(IntEnum):
@@ -40,7 +43,7 @@ except ImportError:
     print('Cannot import matplotlib')
 
 
-class ExaDisNet:
+class ExaDisNet(DisNet_Base):
     """ExaDisNet: wrapper class for exadis dislocation network
     Implements basic functions to manipulate the network
     """
@@ -109,17 +112,6 @@ class ExaDisNet:
         }
         return segs_dict 
     
-
-# This is only needed until the visualization is modified
-# to accept generic DisNet_BASE types
-try:
-    # Try importing DisNet, Cell from pydis
-    from pydis.disnet import DisNet, Cell
-except ImportError:
-    # Use dummy DisNet if pydis is not available
-    DisNet = ExaDisNet
-    Cell = pyexadis.Cell
-
 
 def get_exadis_params(state):
     """get_exadis_params: helper function to get exadis global state object
@@ -490,7 +482,7 @@ class SimulateNetwork:
         return state
     
     def step(self, N: DisNetManager, state: dict):
-        """step: take a time step of DD simulation on DisNet G
+        """step: take a time step of DD simulation on DisNetManager N
         """
         self.calforce.NodeForce(N, state)
 
