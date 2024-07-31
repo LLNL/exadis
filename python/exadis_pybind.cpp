@@ -485,6 +485,7 @@ struct ForceBind {
     int model = -1;
     Params params;
     double neighbor_cutoff = 0.0;
+    bool pre_computed = false;
     ForceBind() {}
     ForceBind(Force* _force, int _model, Params _params, double cutoff=0.0) : 
     force(_force), model(_model), params(_params), neighbor_cutoff(cutoff) {}
@@ -552,6 +553,7 @@ std::vector<Vec3> compute_force(ExaDisNet& disnet, ForceBind& forcebind,
     
     Force* force = forcebind.force;
     force->pre_compute(system);
+    forcebind.pre_computed = true;
     force->compute(system);
     
     std::vector<Vec3> forces = get_forces(system);
@@ -576,6 +578,40 @@ std::vector<Vec3> compute_force_n2(ExaDisNet& disnet, double MU, double NU, doub
     delete force;
     
     return forces;
+}
+
+void pre_compute_force(ExaDisNet& disnet, ForceBind& forcebind)
+{
+    System* system = disnet.system;
+    system->params = forcebind.params;
+    if (system->crystal.type != forcebind.params.crystal ||
+        system->crystal.R != forcebind.params.Rorient)
+        system->crystal = Crystal(forcebind.params.crystal, forcebind.params.Rorient);
+    
+    Force* force = forcebind.force;
+    force->pre_compute(system);
+    forcebind.pre_computed = true;
+}
+
+Vec3 compute_node_force(ExaDisNet& disnet, int i, ForceBind& forcebind, 
+                        std::vector<double> applied_stress)
+{
+    System* system = disnet.system;
+    system->params = forcebind.params;
+    if (system->crystal.type != forcebind.params.crystal ||
+        system->crystal.R != forcebind.params.Rorient)
+        system->crystal = Crystal(forcebind.params.crystal, forcebind.params.Rorient);
+    
+    system->extstress = Mat33().symmetric(applied_stress.data());
+    
+    Force* force = forcebind.force;
+    // Warning: the user must ensure the pre_compute is up-to-date...
+    if (!forcebind.pre_computed) {
+        force->pre_compute(system);
+        forcebind.pre_computed = true;
+    }
+    Vec3 f = force->node_force(system, i);
+    return f;
 }
 
 /*---------------------------------------------------------------------------
@@ -1041,6 +1077,10 @@ PYBIND11_MODULE(pyexadis, m) {
           py::arg("params"), py::arg("coreparams"), py::arg("Ngrid"), py::arg("cell"), py::arg("drift")=1);
     m.def("compute_force", &compute_force, "Wrapper to compute nodal forces",
           py::arg("net"), py::arg("force"), py::arg("applied_stress"));
+    m.def("pre_compute_force", &pre_compute_force, "Wrapper to perform pre-computations before compute_node_force",
+          py::arg("net"), py::arg("force"));
+    m.def("compute_node_force", &compute_node_force, "Wrapper to compute the force on a single node",
+          py::arg("net"), py::arg("i"), py::arg("force"), py::arg("applied_stress"));
     
     m.def("compute_force_n2", &compute_force_n2, "Compute forces using the brute-force N^2 calculation",
           py::arg("net"), py::arg("mu"), py::arg("nu"), py::arg("a"));

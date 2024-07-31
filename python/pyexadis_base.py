@@ -176,6 +176,37 @@ class CalForce:
         state["nodeforces"] = np.array(f)
         state["nodeforcetags"] = G.get_tags()
         return state
+    
+    def PreCompute(self, N: DisNetManager, state: dict) -> dict:
+        G = N.get_disnet(ExaDisNet)
+        pyexadis.pre_compute_force(G.net, force=self.force)
+        return state
+    
+    def OneNodeForce(self, N: DisNetManager, state: dict, tag, update_state=True) -> np.array:
+        applied_stress = state["applied_stress"]
+        G = N.get_disnet(ExaDisNet)
+        # find node index
+        tags = G.get_tags()
+        ind = np.where((tags[:,0]==tag[0])&(tags[:,1]==tag[1]))[0]
+        if ind.size != 1:
+            raise ValueError("Cannot find node tag (%d,%d) in OneNodeForce" % tuple(tag))
+        # compute node force
+        f = pyexadis.compute_node_force(G.net, ind[0], force=self.force, applied_stress=applied_stress)
+        f = np.array(f)
+        # update force dictionary if needed
+        if update_state:
+            if "nodeforces" in state and "nodeforcetags" in state:
+                nodeforcetags = state["nodeforcetags"]
+                ind = np.where((nodeforcetags[:,0]==tag[0])&(nodeforcetags[:,1]==tag[1]))[0]
+                if ind.size == 1:
+                    state["nodeforces"][ind[0]] = f
+                else:
+                    state["nodeforces"] = np.vstack((state["nodeforces"], f))
+                    state["nodeforcetags"] = np.vstack((state["nodeforcetags"], tag))
+            else:
+                state["nodeforces"] = np.array([f])
+                state["nodeforcetags"] = np.array([tag])
+        return f
 
 
 class MobilityLaw:
