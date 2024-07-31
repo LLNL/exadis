@@ -28,14 +28,12 @@ except ImportError:
 def init_circular_loop(Lbox=10.0, radius=1.0, Nnodes=20, burg_vec=np.array([1.0,0.0,0.0]), pbc=False):
     print("init_circular_loop: Lbox = %f, radius = %f, N = %d" % (Lbox, radius, Nnodes))
     cell = Cell(h=Lbox*np.eye(3), is_periodic=[pbc,pbc,pbc])
-    G = DisNet(cell=cell)
     theta = np.arange(Nnodes)*2.0*np.pi/Nnodes
     rn    = np.vstack([radius*np.cos(theta), radius*np.sin(theta), np.zeros_like(theta)]).T
     links = np.zeros((Nnodes, 8))
     for i in range(Nnodes):
         links[i,:] = np.concatenate(([i, (i+1)%Nnodes], burg_vec, np.zeros(3)))
-    G.add_nodes_links_from_list(rn, links)
-    N = DisNetManager(G)
+    N = DisNetManager(DisNet(cell=cell, rn=rn, links=links))
     return N
 
 
@@ -88,36 +86,34 @@ def example2():
             self.a = a
             
         def NodeForce(self, G: DisNet):
-            segments = G.seg_list()
-            N = len(segments)
-            nseg = len(segments)
-            ntot = nseg*(nseg-1)//2
-            k = 0
-            f = np.zeros((G._G.number_of_nodes(),3))
-            for i in range(nseg):
-                for j in range(i+1, nseg):
-                    seg1 = segments[i]
-                    seg2 = segments[j]
-                    p1 = np.array(seg1["R1"])
-                    p2 = np.array(seg1["R2"])
-                    p3 = np.array(seg2["R1"])
-                    p4 = np.array(seg2["R2"])
-                    b12 = np.array(seg1["burg_vec"])
-                    b34 = np.array(seg2["burg_vec"])
+            segs_data = G.get_segs_data_with_positions()
+            source_tags = segs_data["tag1"]
+            target_tags = segs_data["tag2"]
+            R1 = segs_data["R1"]
+            R2 = segs_data["R2"]
+            burg_vecs = segs_data["burgers"]
+            Nseg = segs_data["nodeids"].shape[0]
+            Nnodes = len(G.all_nodes_tags())
+            f = np.zeros((Nnodes,3))
+            for i in range(Nseg):
+                for j in range(i+1, Nseg):
+                    p1 = R1[i,:].copy()
+                    p2 = R2[i,:].copy()
+                    p3 = R1[j,:].copy()
+                    p4 = R2[j,:].copy()
+                    b12 = burg_vecs[i,:].copy()
+                    b34 = burg_vecs[j,:].copy()
                     # PBC
                     p2 = G.cell.closest_image(Rref=p1, R=p2)
                     p3 = G.cell.closest_image(Rref=p1, R=p3)
                     p4 = G.cell.closest_image(Rref=p3, R=p4)
                     f1, f2, f3, f4 = compute_segseg_force(p1, p2, p3, p4, b12, b34, self.mu, self.nu, self.a)
-                    n1 = seg1["edge"][0][1]
-                    n2 = seg1["edge"][1][1]
-                    n3 = seg2["edge"][0][1]
-                    n4 = seg2["edge"][1][1]
+                    n1, n2 = source_tags[i][1], target_tags[i][1]
+                    n3, n4 = source_tags[j][1], target_tags[j][1]
                     f[n1] += f1
                     f[n2] += f2
                     f[n3] += f3
-                    f[n4] += f4
-                    k += 1        
+                    f[n4] += f4     
             return f
     
     MU, NU, a = 50.0e9, 0.3, 1.0
