@@ -16,7 +16,7 @@ import pyexadis
 try:
     # Try importing DisNetManager and DisNet_Base from OpenDiS
     from framework.disnet_manager import DisNetManager
-    from base_classes.disnet_base import DisNet_Base
+    from framework.disnet_base import DisNet_Base
 except ImportError:
     # Use dummy DisNetManager and DisNet_Base if OpenDiS is not available
     class DisNetManager:
@@ -51,6 +51,8 @@ class ExaDisNet(DisNet_Base):
         if len(args) == 3:
             cell, nodes, segs = args[0], args[1], args[2]
             self.net = pyexadis.ExaDisNet(cell=cell, nodes=nodes, segs=segs)
+        elif len(args) == 1:
+            self.net = args[0] # pyexadis.ExaDisNet object
         else:
             self.net = pyexadis.ExaDisNet()
         
@@ -102,6 +104,12 @@ class ExaDisNet(DisNet_Base):
     
     def get_positions(self):
         return self.get_nodes_data()["positions"]
+    
+    def get_forces(self):
+        return np.array(self.net.get_forces())
+        
+    def get_velocities(self):
+        return np.array(self.net.get_velocities())
         
     def get_segs_data(self):
         segs_array = np.array(self.net.get_segs_array())
@@ -132,6 +140,24 @@ def get_exadis_params(state):
     if "nextdt" in state: params.nextdt = state["nextdt"]
     if "split3node" in state: params.split3node = state["split3node"]
     return params
+
+def get_exadis_force(force_module, state, params):
+    if not isinstance(force_module, CalForce):
+        force_python = CalForcePython(force_module, state)
+        force = pyexadis.make_force_python(params=params, force=force_python)
+    else:
+        force_python = None
+        force = force_module.force
+    return force, force_python
+
+def get_exadis_mobility(mobility_module, state, params):
+    if not isinstance(mobility_module, MobilityLaw):
+        mobility_python = MobilityLawPython(mobility_module, state)
+        mobility = pyexadis.make_mobility_python(params=params, mobility=mobility_python)
+    else:
+        mobility_python = None
+        mobility = mobility_module.mobility
+    return mobility, mobility_python
     
 
 class CalForce:
@@ -209,6 +235,30 @@ class CalForce:
         return f
 
 
+class CalForcePython:
+    """CalForcePython: wrapper class for python-based force object
+    This allows to call arbitrary force python modules from within ExaDiS
+    """
+    def __init__(self, force_module, state):
+        self.force = force_module
+        self.state = state
+        
+    def NodeForce(self, net):
+        N = DisNetManager(ExaDisNet(net))
+        self.force.NodeForce(N, self.state)
+        nodeforces = self.state["nodeforces"]
+        nodetags = self.state["nodeforcetags"]
+        net.set_forces(nodeforces, nodetags)
+        
+    def PreCompute(self, net):
+        N = DisNetManager(ExaDisNet(net))
+        self.force.PreCompute(N, self.state)
+        
+    def OneNodeForce(self, net, tag):
+        N = DisNetManager(ExaDisNet(net))
+        return self.force.OneNodeForce(N, self.state, tag)
+
+
 class MobilityLaw:
     """MobilityLaw: wrapper class for mobility laws
     """
@@ -258,6 +308,56 @@ class MobilityLaw:
         state["nodevels"] = np.array(v)
         state["nodeveltags"] = G.get_tags()
         return state
+        
+    def OneNodeMobility(self, N: DisNetManager, state: dict, tag, f, update_state=True) -> np.array:
+        G = N.get_disnet(ExaDisNet)
+        # find node index
+        tags = G.get_tags()
+        ind = np.where((tags[:,0]==tag[0])&(tags[:,1]==tag[1]))[0]
+        if ind.size != 1:
+            raise ValueError("Cannot find node tag (%d,%d) in OneNodeMobility" % tuple(tag))
+        # compute node force
+        v = pyexadis.compute_node_mobility(G.net, ind[0], mobility=self.mobility, fi=np.array(f))
+        v = np.array(v)
+        # update force dictionary if needed
+        if update_state:
+            if "nodevels" in state and "nodeveltags" in state:
+                nodeveltags = state["nodeveltags"]
+                ind = np.where((nodeforcetags[:,0]==tag[0])&(nodeforcetags[:,1]==tag[1]))[0]
+                if ind.size == 1:
+                    state["nodevels"][ind[0]] = v
+                else:
+                    state["nodevels"] = np.vstack((state["nodevels"], v))
+                    state["nodeveltags"] = np.vstack((state["nodeveltags"], tag))
+            else:
+                state["nodevels"] = np.array([v])
+                state["nodeveltags"] = np.array([tag])
+        return f
+
+
+class MobilityLawPython:
+    """MobilityLawPython: wrapper class for python-based mobility object
+    This allows to call arbitrary mobility python modules from within ExaDiS
+    """
+    def __init__(self, mobility_module, state):
+        self.mobility = mobility_module
+        self.state = state
+        
+    def Mobility(self, net):
+        G = ExaDisNet(net)
+        # we need to update the current state forces, as forces
+        # may have only been updated internally within ExaDiS
+        self.state["nodeforces"] = G.get_forces()
+        self.state["nodeforcetags"] = G.get_tags()
+        N = DisNetManager(G)
+        self.mobility.Mobility(N, self.state)
+        nodevels = self.state["nodevels"]
+        nodetags = self.state["nodeveltags"]
+        net.set_velocities(nodevels, nodetags)
+        
+    def OneNodeMobility(self, net, tag, f):
+        N = DisNetManager(ExaDisNet(net))
+        return self.mobility.OneNodeMobility(N, self.state, tag, f)
 
 
 class TimeIntegration:
@@ -268,6 +368,8 @@ class TimeIntegration:
         self.integrator_type = integrator
         self.dt = dt
         params = get_exadis_params(state)
+        self.force_python = None
+        self.mobility_python = None
 
         self.Update_Functions = {
             'EulerForward': self.Update_EulerForward,
@@ -279,10 +381,16 @@ class TimeIntegration:
             self.params = params
         elif self.integrator_type == 'Trapezoid':
             multi = kwargs.get('multi', 0)
-            if kwargs.get('force').force_mode == 'SUBCYCLING_MODEL':
-                raise ValueError('Force SUBCYCLING_MODEL can only be used with Subcycling integrator')
-            force = kwargs.get('force').force
-            mobility = kwargs.get('mobility').mobility
+            
+            force_module = kwargs.get('force')
+            if isinstance(force_module, CalForce):
+                if force_module.force_mode == 'SUBCYCLING_MODEL':
+                    raise ValueError('Force SUBCYCLING_MODEL can only be used with Subcycling integrator')
+            force, self.force_python = get_exadis_force(force_module, state, params)
+            
+            mobility_module = kwargs.get('mobility')
+            mobility, self.mobility_python = get_exadis_mobility(mobility_module, state, params)
+            
             if multi > 1:
                 intparams = pyexadis.Integrator_Multi_Params(multi)
                 self.integrator = pyexadis.make_integrator_trapezoid_multi(params=params, intparams=intparams, 
@@ -295,8 +403,15 @@ class TimeIntegration:
             rgroups = kwargs.get('rgroups')
             rtolth = kwargs.get('rtolth', 1.0)
             rtolrel = kwargs.get('rtolrel', 0.1)
-            force = kwargs.get('force').force
-            mobility = kwargs.get('mobility').mobility
+            
+            force_module = kwargs.get('force')
+            if force_module.force_mode != 'SUBCYCLING_MODEL':
+                raise ValueError('Force SUBCYCLING_MODEL must be used with Subcycling integrator')
+            force = force_module.force
+            
+            mobility_module = kwargs.get('mobility')
+            mobility, self.mobility_python = get_exadis_mobility(mobility_module, state, params)
+            
             intparams = pyexadis.Integrator_Subcycling_Params(rgroups, rtolth, rtolrel)
             self.integrator = pyexadis.make_integrator_subclycing(params=params, intparams=intparams, 
                                                                  force=force, mobility=mobility)
@@ -317,7 +432,13 @@ class TimeIntegration:
     def Integrate(self, G: ExaDisNet, state: dict) -> None:
         applied_stress = state["applied_stress"]
         v = state["nodevels"]
-        nodetags = state.get("nodeveltags", np.empty((0,2)))
+        nodetags = state["nodeveltags"]
+        # update state dictionary if force/mobility are python-based
+        # so that ExaDiS can internally call the wrappers with up-to-date state
+        if self.force_python is not None:
+            self.force_python.state = state
+        if self.mobility_python is not None:
+            self.mobility_python.state = state
         self.dt = pyexadis.integrate(G.net, integrator=self.integrator, nodevels=v, nodetags=nodetags, applied_stress=applied_stress)
             
 
@@ -329,7 +450,6 @@ class Collision:
         params = get_exadis_params(state)
         if params.rann < 0.0:
             params.rann = 2.0*params.rtol
-            
         self.collision = pyexadis.make_collision(params=params)
         
     def HandleCol(self, N: DisNetManager, state: dict) -> None:
@@ -351,8 +471,17 @@ class Topology:
         self.topology_mode = topology_mode
         params = get_exadis_params(state)
         splitMultiNodeAlpha = kwargs.get('splitMultiNodeAlpha', 1e-3)
-        force = kwargs.get('force').force
-        mobility = kwargs.get('mobility').mobility
+        
+        force_module = kwargs.get('force')
+        force, self.force_python = get_exadis_force(force_module, state, params)
+        if self.topology_mode == 'TopologyParallel' and self.force_python is not None:
+            raise TypeError('TopologyParallel requires pyexadis force module')
+        
+        mobility_module = kwargs.get('mobility')
+        mobility, self.mobility_python = get_exadis_mobility(mobility_module, state, params)
+        if self.topology_mode == 'TopologyParallel' and self.mobility_python is not None:
+            raise TypeError('TopologyParallel requires pyexadis mobility module')
+        
         topolparams = pyexadis.Topology_Params(splitMultiNodeAlpha)
         self.topology = pyexadis.make_topology(topology_mode, params=params, topolparams=topolparams,
                                                force=force, mobility=mobility)
@@ -360,6 +489,12 @@ class Topology:
     def Handle(self, N: DisNetManager, state: dict) -> None:
         dt = state.get('dt', 0.0)
         G = N.get_disnet(ExaDisNet)
+        # update state dictionary if force/mobility are python-based
+        # so that ExaDiS can internally call the wrappers with up-to-date state
+        if self.force_python is not None:
+            self.force_python.state = state
+        if self.mobility_python is not None:
+            self.mobility_python.state = state
         pyexadis.handle_topology(G.net, topology=self.topology, dt=dt)
         return state
 
@@ -370,7 +505,6 @@ class Remesh:
     def __init__(self, state: dict, remesh_rule: str='LengthBased', **kwargs) -> None:
         self.remesh_rule = remesh_rule
         params = get_exadis_params(state)
-
         self.remesh = pyexadis.make_remesh(params=params)
         
     def Remesh(self, N: DisNetManager, state: dict) -> None:

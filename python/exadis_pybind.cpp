@@ -385,8 +385,12 @@ struct ExaDisNet {
     Cell get_cell() { return system->get_serial_network()->cell; }
     std::vector<std::vector<double> > get_nodes_array() { return system->get_serial_network()->get_nodes_array(); }
     std::vector<std::vector<double> > get_segs_array() { return system->get_serial_network()->get_segs_array(); }
+    std::vector<Vec3> get_forces() { return ::get_forces(system); }
+    std::vector<Vec3> get_velocities() { return ::get_velocities(system); }
     
     void set_positions(std::vector<Vec3>& pos) { ::set_positions(system, pos); }
+    void set_forces(std::vector<Vec3>& forces, std::vector<NodeTag>& tags) { ::set_forces(system, forces, tags); }
+    void set_velocities(std::vector<Vec3>& vels, std::vector<NodeTag>& tags) { ::set_velocities(system, vels, tags); }
     
     void write_data(std::string filename) { system->get_serial_network()->write_data(filename); }
     
@@ -480,7 +484,7 @@ void Params::set_crystal(std::string crystalname) {
  *
  *-------------------------------------------------------------------------*/
 struct ForceBind {
-    enum ForceModel {LINE_TENSION_MODEL, DDD_FFT_MODEL, SUBCYCLING_MODEL};
+    enum ForceModel {LINE_TENSION_MODEL, DDD_FFT_MODEL, SUBCYCLING_MODEL, PYTHON_MODEL};
     Force* force = nullptr;
     int model = -1;
     Params params;
@@ -492,6 +496,41 @@ struct ForceBind {
     void pre_compute(SystemBind& sysbind) { force->pre_compute(sysbind.system); }
     void compute(SystemBind& sysbind) { force->compute(sysbind.system); }
 };
+
+class ForcePython : public Force {
+private:
+    py::object pyforce;
+    
+public:
+    ForcePython(py::object _pyforce) : pyforce(_pyforce) {}
+    
+    void pre_compute(System* system) {
+        ExaDisNet disnet(system);
+        pyforce.attr("PreCompute")(disnet);
+    }
+    
+    void compute(System* system, bool zero=true) {
+        ExaDisNet disnet(system);
+        pyforce.attr("NodeForce")(disnet);
+    }
+    
+    Vec3 node_force(System* system, const int& i) {
+        SerialDisNet* net = system->get_serial_network();
+        NodeTag tag = net->nodes[i].tag;
+        ExaDisNet disnet(system);
+        return pyforce.attr("OneNodeForce")(disnet, tag).cast<Vec3>();
+    }
+    
+    ~ForcePython() {}
+    const char* name() { return "ForcePython"; }
+};
+
+ForceBind make_force_python(Params& params, py::object pyforce)
+{
+    params.check_params();
+    Force* force = exadis_new<ForcePython>(pyforce);
+    return ForceBind(force, ForceBind::PYTHON_MODEL, params);
+}
 
 template<class F>
 ForceBind make_force(Params& params, typename F::Params fparams)
@@ -628,6 +667,36 @@ struct MobilityBind {
     void compute(SystemBind& sysbind) { mobility->compute(sysbind.system); }
 };
 
+class MobilityPython : public Mobility {
+private:
+    py::object pymobility;
+    
+public:
+    MobilityPython(py::object _pymobility) : pymobility(_pymobility) {}
+    
+    void compute(System* system) {
+        ExaDisNet disnet(system);
+        pymobility.attr("Mobility")(disnet);
+    }
+    
+    Vec3 node_velocity(System *system, const int& i, const Vec3& fi) {
+        SerialDisNet* net = system->get_serial_network();
+        NodeTag tag = net->nodes[i].tag;
+        ExaDisNet disnet(system);
+        return pymobility.attr("OneNodeMobility")(disnet, tag, fi).cast<Vec3>();
+    }
+    
+    ~MobilityPython() {}
+    const char* name() { return "MobilityPython"; }
+};
+
+MobilityBind make_mobility_python(Params& params, py::object pymobility)
+{
+    params.check_params();
+    Mobility* mobility = exadis_new<MobilityPython>(pymobility);
+    return MobilityBind(mobility, params);
+}
+
 template<class M>
 MobilityBind make_mobility(Params& params, typename M::Params mobparams)
 {
@@ -646,7 +715,6 @@ std::vector<Vec3> compute_mobility(ExaDisNet& disnet, MobilityBind& mobbind,
                                    std::vector<Vec3> forces,
                                    std::vector<NodeTag> tags)
 {
-    // We may need some crystal orientation here...
     System* system = disnet.system;
     system->params = mobbind.params;
     if (system->crystal.type != mobbind.params.crystal ||
@@ -661,6 +729,18 @@ std::vector<Vec3> compute_mobility(ExaDisNet& disnet, MobilityBind& mobbind,
     std::vector<Vec3> vels = get_velocities(system);
     
     return vels;
+}
+
+Vec3 compute_node_mobility(ExaDisNet& disnet, int i, MobilityBind& mobbind, Vec3 fi)
+{
+    System* system = disnet.system;
+    system->params = mobbind.params;
+    if (system->crystal.type != mobbind.params.crystal ||
+        system->crystal.R != mobbind.params.Rorient)
+        system->crystal = Crystal(mobbind.params.crystal, mobbind.params.Rorient);
+    
+    Mobility* mobility = mobbind.mobility;
+    return mobility->node_velocity(system, i, fi);
 }
 
 /*---------------------------------------------------------------------------
@@ -1015,7 +1095,11 @@ PYBIND11_MODULE(pyexadis, m) {
         .def("get_cell", &ExaDisNet::get_cell, "Get the cell containing the network")
         .def("get_nodes_array", &ExaDisNet::get_nodes_array, "Get the list of nodes (dom,id,x,y,z,constraint) of the network")
         .def("get_segs_array", &ExaDisNet::get_segs_array, "Get the list of segments (n1,n2,burg,plane) of the network")
-        .def("set_positions", &ExaDisNet::set_positions, "Set the list of nodes positions (x,y,z) of the network")
+        .def("get_forces", &ExaDisNet::get_forces, "Get the list of node forces (fx,fy,fz) of the network")
+        .def("get_velocities", &ExaDisNet::get_velocities, "Get the list of node velocities (vx,vy,vz) of the network")
+        .def("set_positions", &ExaDisNet::set_positions, "Set the list of node positions (x,y,z) of the network")
+        .def("set_forces", &ExaDisNet::set_forces, "Set the list of node forces (fx,fy,fz) of the network")
+        .def("set_velocities", &ExaDisNet::set_velocities, "Set the list of node velocities (vx,vy,vz) of the network")
         .def("write_data", &ExaDisNet::write_data, "Write network in ParaDiS format")
         .def("get_plastic_strain", &ExaDisNet::get_plastic_strain, "Returns plastic strain as computed since the last integration step");
         
@@ -1075,6 +1159,9 @@ PYBIND11_MODULE(pyexadis, m) {
           py::arg("params"), py::arg("coreparams"), py::arg("Ngrid"), py::arg("cell"), py::arg("drift")=0);
     m.def("make_force_subcycling", &make_force_ddd_fft<1>, "Instantiate a subcycling force model",
           py::arg("params"), py::arg("coreparams"), py::arg("Ngrid"), py::arg("cell"), py::arg("drift")=1);
+    m.def("make_force_python", &make_force_python, "Instantiate a python-based force model",
+          py::arg("params"), py::arg("force"));
+    
     m.def("compute_force", &compute_force, "Wrapper to compute nodal forces",
           py::arg("net"), py::arg("force"), py::arg("applied_stress"));
     m.def("pre_compute_force", &pre_compute_force, "Wrapper to perform pre-computations before compute_node_force",
@@ -1097,8 +1184,13 @@ PYBIND11_MODULE(pyexadis, m) {
           py::arg("params"), py::arg("mobparams"));
     m.def("make_mobility_fcc_0", &make_mobility<MobilityType::FCC_0>, "Instantiate a FCC_0 mobility law",
           py::arg("params"), py::arg("mobparams"));
+    m.def("make_mobility_python", &make_mobility_python, "Instantiate a python-based mobility model",
+          py::arg("params"), py::arg("mobility"));
+    
     m.def("compute_mobility", &compute_mobility, "Wrapper to compute nodal velocities",
           py::arg("net"), py::arg("mobility"), py::arg("nodeforces"), py::arg("nodetags")=std::vector<NodeTag>());
+    m.def("compute_node_mobility", &compute_node_mobility, "Wrapper to compute the mobility of a single node",
+          py::arg("net"), py::arg("i"), py::arg("mobility"), py::arg("fi"));
     
     // Integrator
     py::class_<IntegratorBind>(m, "Integrator")
