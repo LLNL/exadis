@@ -238,11 +238,11 @@ Tnode* NeighborBin_t<Tnode>::iterator::next()
  *
  *-------------------------------------------------------------------------*/
 template<class Tnode>
-std::vector<Tnode*> NeighborBin_t<Tnode>::query(Tnode *node)
+std::vector<int> NeighborBin_t<Tnode>::query(Tnode* node)
 {
-    std::vector<Tnode*> list;
+    std::vector<int> list;
     for (NeighborBin_t::iterator niter(*this, node); !niter.atEnd(); niter.next()) {
-        list.push_back(niter.current());
+        list.push_back(niter.current()->index);
     }
     return list;
 }
@@ -253,11 +253,11 @@ std::vector<Tnode*> NeighborBin_t<Tnode>::query(Tnode *node)
  *
  *-------------------------------------------------------------------------*/
 template<class Tnode>
-std::vector<Tnode*> NeighborBin_t<Tnode>::query(const Vec3 &pos)
+std::vector<int> NeighborBin_t<Tnode>::query(const Vec3& pos)
 {
-    std::vector<Tnode*> list;
+    std::vector<int> list;
     for (NeighborBin_t::iterator niter(*this, pos); !niter.atEnd(); niter.next()) {
-        list.push_back(niter.current());
+        list.push_back(niter.current()->index);
     }
     return list;
 }
@@ -268,11 +268,11 @@ std::vector<Tnode*> NeighborBin_t<Tnode>::query(const Vec3 &pos)
  *
  *-------------------------------------------------------------------------*/
 template<class Tnode>
-std::vector<std::pair<Tnode*,double> > NeighborBin_t<Tnode>::query_distance(Tnode *node)
+std::vector<std::pair<int,double> > NeighborBin_t<Tnode>::query_distance(Tnode* node)
 {
-    std::vector<std::pair<Tnode*,double> > list;
+    std::vector<std::pair<int,double> > list;
     for (NeighborBin_t::iterator niter(*this, node); !niter.atEnd(); niter.next()) {
-        list.push_back(std::make_pair(niter.current(), niter.dist()));
+        list.push_back(std::make_pair(niter.current()->index, niter.dist()));
     }
     return list;
 }
@@ -283,11 +283,11 @@ std::vector<std::pair<Tnode*,double> > NeighborBin_t<Tnode>::query_distance(Tnod
  *
  *-------------------------------------------------------------------------*/
 template<class Tnode>
-std::vector<std::pair<Tnode*,double> > NeighborBin_t<Tnode>::query_distance(const Vec3 &pos)
+std::vector<std::pair<int,double> > NeighborBin_t<Tnode>::query_distance(const Vec3& pos)
 {
-    std::vector<std::pair<Tnode*,double> > list;
+    std::vector<std::pair<int,double> > list;
     for (NeighborBin_t::iterator niter(*this, pos); !niter.atEnd(); niter.next()) {
-        list.push_back(std::make_pair(niter.current(), niter.dist()));
+        list.push_back(std::make_pair(niter.current()->index, niter.dist()));
     }
     return list;
 }
@@ -297,12 +297,12 @@ std::vector<std::pair<Tnode*,double> > NeighborBin_t<Tnode>::query_distance(cons
  *    Function:        generate_neighbor_nodes
  *
  *-------------------------------------------------------------------------*/
-NeighborBin *generate_neighbor_nodes(SerialDisNet *network, double cutoff)
+NeighborBin* generate_neighbor_nodes(SerialDisNet* network, double cutoff)
 {
-    NeighborBin *neighbor = new NeighborBin(network->cell, cutoff, true);
+    NeighborBin* neighbor = new NeighborBin(network->cell, cutoff, true);
     // Sort nodes into the 3d bin grid
     for (int i = 0; i < network->number_of_nodes(); i++) {
-        NeighborBinNode_t *node = new NeighborBinNode_t(i, network->nodes[i].pos);
+        NeighborBinNode_t* node = new NeighborBinNode_t(i, network->nodes[i].pos);
         neighbor->insert_node(node);
     }
     return neighbor;
@@ -313,12 +313,12 @@ NeighborBin *generate_neighbor_nodes(SerialDisNet *network, double cutoff)
  *    Function:        generate_neighbor_segs
  *
  *-------------------------------------------------------------------------*/
-NeighborBin *generate_neighbor_segs(SerialDisNet *network, double cutoff, double maxseg)
+NeighborBin* generate_neighbor_segs(SerialDisNet* network, double cutoff, double maxseg)
 {
     // For segs we use the mid point for binning, so we need to increase
     // the cutoff to make sure that all neighboring segments will be found
     cutoff = cutoff + maxseg;
-    NeighborBin *neighbor = new NeighborBin(network->cell, cutoff, true);
+    NeighborBin* neighbor = new NeighborBin(network->cell, cutoff, true);
     // Sort segs into the 3d bin grid
     for (int i = 0; i < network->number_of_segs(); i++) {
         int n1 = network->segs[i].n1;
@@ -326,13 +326,13 @@ NeighborBin *generate_neighbor_segs(SerialDisNet *network, double cutoff, double
         Vec3 r1 = network->nodes[n1].pos;
         Vec3 r2 = network->cell.pbc_position(r1, network->nodes[n2].pos);
         Vec3 rmid = 0.5 * (r1 + r2);
-        NeighborBinNode_t *node = new NeighborBinNode_t(i, rmid);
+        NeighborBinNode_t* node = new NeighborBinNode_t(i, rmid);
         neighbor->insert_node(node);
     }
     return neighbor;
 }
 
-template std::vector<NeighborBinNode_t*> NeighborBin::query(const Vec3&);
-template std::vector<std::pair<NeighborBinNode_t*,double> > NeighborBin::query_distance(const Vec3&);
+template std::vector<int> NeighborBin::query(const Vec3&);
+template std::vector<std::pair<int,double> > NeighborBin::query_distance(const Vec3&);
 
 } // namespace ExaDiS

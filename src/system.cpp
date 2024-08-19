@@ -51,18 +51,12 @@ void System::initialize(Params _params, Crystal _crystal, SerialDisNet *network)
     // Allocate network manager on unified host/device space
     if (!network)
         ExaDiS_fatal("Error: undefined initial dislocation configuration\n");
-    network->generate_connectivity();
-    if (crystal.use_glide_planes) {
-        network->update_ptr();
-        for (int i = 0; i < network->number_of_segs(); i++) {
-            Vec3 p = crystal.find_seg_glide_plane(network, i);
-            if (p.norm2() > 1e-5) network->segs[i].plane = p;
-        }
-    }
-    net_mngr = exadis_new<DisNetManager>(network);
-    neighbor_cutoff = 0.0;
     
-    // Initialize variables 
+    net_mngr = make_network_manager(network);
+    reset_glide_planes();
+    
+    // Initialize variables
+    neighbor_cutoff = 0.0;
     extstress.zero();
     dEp.zero();
     dWp.zero();
@@ -87,20 +81,13 @@ System::~System()
 
 /*---------------------------------------------------------------------------
  *
- *    Function:     System::print_timers()
+ *    Function:     System::register_neighbor_cutoff()
  *
  *-------------------------------------------------------------------------*/
-void System::print_timers()
+void System::register_neighbor_cutoff(double cutoff)
 {
-    ExaDiS_log("------------------------------------------\n");
-    ExaDiS_log("Force time: %f sec\n", timer[TIMER_FORCE].accumtime);
-    ExaDiS_log("Mobility time: %f sec\n", timer[TIMER_MOBILITY].accumtime);
-    ExaDiS_log("Integration time: %f sec\n", timer[TIMER_INTEGRATION].accumtime);
-    ExaDiS_log("Collision time: %f sec\n", timer[TIMER_COLLISION].accumtime);
-    ExaDiS_log("Topology time: %f sec\n", timer[TIMER_TOPOLOGY].accumtime);
-    ExaDiS_log("Remesh time: %f sec\n", timer[TIMER_REMESH].accumtime);
-    ExaDiS_log("Output time: %f sec\n", timer[TIMER_OUTPUT].accumtime);
-    ExaDiS_log("------------------------------------------\n");
+    if (cutoff > neighbor_cutoff)
+        neighbor_cutoff = cutoff;
 }
 
 /*---------------------------------------------------------------------------
@@ -193,49 +180,51 @@ void System::reset_glide_planes()
     if (!crystal.use_glide_planes) return;
     
     DeviceDisNet* net = get_device_network();
-    Crystal* cryst = &crystal;
     
     // Fix glide plane violations
-    T_x& xprev = xold;
-    Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int& i) {
-        auto nodes = net->get_nodes();
-        auto segs = net->get_segs();
-        auto conn = net->get_conn();
-        auto cell = net->cell;
-        
-        // Determine the number of unique glide planes.
-        int numplanes = 0;
-        Vec3 planes[MAX_CONN];
-        for (int j = 0; j < conn[i].num; j++) {
-            int s = conn[i].seg[j];
-            Vec3 p = segs[s].plane;
-            if (j == 0) {
-                planes[0] = p;
-                numplanes = 1;
-            } else {
-                for (int k = 0; k < numplanes; k++)
-                    p = p.orthogonalize(planes[k]);
-                if (p.norm2() > 1e-5)
-                    planes[numplanes++] = p.normalized();
+    if (xold.extent(0) > 0) {
+        T_x& xprev = xold;
+        Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int& i) {
+            auto nodes = net->get_nodes();
+            auto segs = net->get_segs();
+            auto conn = net->get_conn();
+            auto cell = net->cell;
+            
+            // Determine the number of unique glide planes.
+            int numplanes = 0;
+            Vec3 planes[MAX_CONN];
+            for (int j = 0; j < conn[i].num; j++) {
+                int s = conn[i].seg[j];
+                Vec3 p = segs[s].plane;
+                if (j == 0) {
+                    planes[0] = p;
+                    numplanes = 1;
+                } else {
+                    for (int k = 0; k < numplanes; k++)
+                        p = p.orthogonalize(planes[k]);
+                    if (p.norm2() > 1e-5)
+                        planes[numplanes++] = p.normalized();
+                }
             }
-        }
-        
-        Vec3 p = cell.pbc_position(xprev(i), nodes[i].pos);
-        if (numplanes == 1) {
-            double eqn = dot(planes[0], p) - dot(planes[0], xprev(i));
-            p -= eqn * planes[0];
-        } else if (numplanes == 2) {
-            Vec3 l = cross(planes[0], planes[1]).normalized();
-            Vec3 dr = p - xprev(i);
-            p = xprev(i) + dot(l, dr) * l;
-        } else {
-            p = xprev(i);
-        }
-        nodes[i].pos = cell.pbc_fold(p);
-    });
-    Kokkos::fence();
+            
+            Vec3 p = cell.pbc_position(xprev(i), nodes[i].pos);
+            if (numplanes == 1) {
+                double eqn = dot(planes[0], p) - dot(planes[0], xprev(i));
+                p -= eqn * planes[0];
+            } else if (numplanes == 2) {
+                Vec3 l = cross(planes[0], planes[1]).normalized();
+                Vec3 dr = p - xprev(i);
+                p = xprev(i) + dot(l, dr) * l;
+            } else {
+                p = xprev(i);
+            }
+            nodes[i].pos = cell.pbc_fold(p);
+        });
+        Kokkos::fence();
+    }
     
     // Now reset the glide planes
+    Crystal* cryst = &crystal;
     Kokkos::parallel_for(net->Nsegs_local, KOKKOS_LAMBDA(const int& i) {
         auto segs = net->get_segs();
         Vec3 p = cryst->find_seg_glide_plane(net, i);
@@ -273,6 +262,36 @@ void System::write_config(std::string filename)
 
 /*---------------------------------------------------------------------------
  *
+ *    Function:     System::print_timers()
+ *
+ *-------------------------------------------------------------------------*/
+void System::print_timers(bool dev)
+{
+    double timetot = 0.0;
+    for (int i = 0; i < TIMER_END; i++)
+        timetot += timer[i].accumtime;
+    double ftime[TIMER_END];
+    for (int i = 0; i < TIMER_END; i++)
+        ftime[i] = (timetot > 0.0) ? timer[i].accumtime/timetot*100.0 : 0.0;
+    
+    ExaDiS_log("----------------------------------------------\n");
+    ExaDiS_log("%-20s %11.3f sec (%.2f%%)\n", "Force time:", timer[TIMER_FORCE].accumtime, ftime[TIMER_FORCE]);
+    ExaDiS_log("%-20s %11.3f sec (%.2f%%)\n", "Mobility time:", timer[TIMER_MOBILITY].accumtime, ftime[TIMER_MOBILITY]);
+    ExaDiS_log("%-20s %11.3f sec (%.2f%%)\n", "Integration time:", timer[TIMER_INTEGRATION].accumtime, ftime[TIMER_INTEGRATION]);
+    ExaDiS_log("%-20s %11.3f sec (%.2f%%)\n", "Collision time:", timer[TIMER_COLLISION].accumtime, ftime[TIMER_COLLISION]);
+    ExaDiS_log("%-20s %11.3f sec (%.2f%%)\n", "Topology time:", timer[TIMER_TOPOLOGY].accumtime, ftime[TIMER_TOPOLOGY]);
+    ExaDiS_log("%-20s %11.3f sec (%.2f%%)\n", "Remesh time:", timer[TIMER_REMESH].accumtime, ftime[TIMER_REMESH]);
+    ExaDiS_log("%-20s %11.3f sec (%.2f%%)\n", "Output time:", timer[TIMER_OUTPUT].accumtime, ftime[TIMER_OUTPUT]);
+    ExaDiS_log("----------------------------------------------\n");
+    if (dev && numdevtimer > 0) {
+        for (int i = 0; i < numdevtimer; i++)
+            ExaDiS_log("%s time: %.3f sec\n", devtimer[i].label.c_str(), devtimer[i].accumtime);
+        ExaDiS_log("----------------------------------------------\n");
+    }
+}
+
+/*---------------------------------------------------------------------------
+ *
  *    Function:     make_system()
  *
  *-------------------------------------------------------------------------*/
@@ -280,6 +299,18 @@ System* make_system(SerialDisNet* net, Crystal crystal, Params params) {
     System* system = exadis_new<System>();
     system->initialize(params, crystal, net);
     return system;
+}
+
+/*---------------------------------------------------------------------------
+ *
+ *    Function:     make_network_manager
+ *                  Helper function to create a network manager object
+ *
+ *-------------------------------------------------------------------------*/
+DisNetManager* make_network_manager(SerialDisNet* net) {
+    net->update_ptr();
+    net->generate_connectivity();
+    return exadis_new<DisNetManager>(net);
 }
     
 } // namespace ExaDiS

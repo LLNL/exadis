@@ -82,15 +82,14 @@ public:
         }
     }
     
-    void insert_node(Tnode *node);
+    void insert_node(Tnode* node);
     
-    std::vector<Tnode*> query(Tnode *node);
-    std::vector<std::pair<Tnode*,double> > query_distance(Tnode *node);
+    std::vector<int> query(Tnode* node);
+    std::vector<std::pair<int,double> > query_distance(Tnode* node);
 
-    std::vector<Tnode*> query(const Vec3 &pos);
-    std::vector<std::pair<Tnode*,double> > query_distance(const Vec3 &pos);
+    std::vector<int> query(const Vec3& pos);
+    std::vector<std::pair<int,double> > query_distance(const Vec3& pos);
     
-    //void handle() {}
     const char* name() { return "NeighborBin"; }
 };
 
@@ -102,14 +101,14 @@ public:
 struct NeighborBinNode_t {
     int index;
     Vec3 pos;
-    NeighborBinNode_t *nextInBin;
-    NeighborBinNode_t(int i, const Vec3 &p) : index(i), pos(p) {}
+    NeighborBinNode_t* nextInBin;
+    NeighborBinNode_t(int i, const Vec3& p) : index(i), pos(p) {}
 };
 
 typedef NeighborBin_t<NeighborBinNode_t> NeighborBin;
 
-NeighborBin *generate_neighbor_nodes(SerialDisNet *network, double cutoff);
-NeighborBin *generate_neighbor_segs(SerialDisNet *network, double cutoff, double maxseg);
+NeighborBin* generate_neighbor_nodes(SerialDisNet* network, double cutoff);
+NeighborBin* generate_neighbor_segs(SerialDisNet* network, double cutoff, double maxseg);
 
 } // namespace ExaDiS
 

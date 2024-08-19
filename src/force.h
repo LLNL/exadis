@@ -208,25 +208,27 @@ class ForceLongShort : public Force {
 protected:
     FLong *flong;
     FShort *fshort;
-    
-    typedef typename FLong::Params FLongParams;
 
 public:
-    struct Params {
-        int Ngrid;
-        Params(int _Ngrid) : Ngrid(_Ngrid) {}
-    };
+    typedef typename FLong::Params Params;
     
     ForceLongShort(System *system, Params params) {
         // Long-range
-        flong = exadis_new<FLong>(system, params.Ngrid);
+        flong = exadis_new<FLong>(system, params);
         // Short-range
         fshort = exadis_new<FShort>(system, flong);
     }
     
     ForceLongShort(System *system, int Ngrid) {
         // Long-range
-        flong = exadis_new<FLong>(system, FLongParams(Ngrid));
+        flong = exadis_new<FLong>(system, Params(Ngrid));
+        // Short-range
+        fshort = exadis_new<FShort>(system, flong);
+    }
+    
+    ForceLongShort(System *system, int Nx, int Ny, int Nz) {
+        // Long-range
+        flong = exadis_new<FLong>(system, Params(Nx, Ny, Nz));
         // Short-range
         fshort = exadis_new<FShort>(system, flong);
     }
@@ -306,6 +308,21 @@ public:
             Kokkos::atomic_add(&nodes[n1].f, fseg.f1);
             Kokkos::atomic_add(&nodes[n2].f, fseg.f2);
         }
+        
+        KOKKOS_INLINE_FUNCTION
+        void operator()(const team_handle& team) const {
+            int i = team.league_rank(); // seg id
+            
+            auto nodes = net->get_nodes();
+            auto segs = net->get_segs();
+            int n1 = segs[i].n1;
+            int n2 = segs[i].n2;
+            
+            SegForce fseg = force->segment_force(system, net, i, team);
+            
+            Kokkos::atomic_add(&nodes[n1].f, fseg.f1);
+            Kokkos::atomic_add(&nodes[n2].f, fseg.f2);
+        }
     };
     
     void pre_compute(System *system)
@@ -327,7 +344,14 @@ public:
         
         DeviceDisNet *net = system->get_device_network();
         if (zero) zero_force(net);
-        Kokkos::parallel_for(net->Nsegs_local, AddSegmentForce<DeviceDisNet>(system, force, net));
+        
+        if constexpr (F::has_compute_team) {
+            Kokkos::parallel_for(Kokkos::TeamPolicy<>(net->Nsegs_local, Kokkos::AUTO),
+                AddSegmentForce<DeviceDisNet>(system, force, net)
+            );
+        } else {
+            Kokkos::parallel_for(net->Nsegs_local, AddSegmentForce<DeviceDisNet>(system, force, net));
+        }
         
         Kokkos::fence();
         system->timer[system->TIMER_FORCE].stop();
@@ -390,10 +414,10 @@ public:
 // Available force types
 #include "force_common.h"
 #include "force_iso.h"
-#include "force_segseglist.h"
 #include "force_core.h"
 #include "force_lt.h"
 #include "force_n2.h"
+#include "force_segseglist.h"
 #include "force_fft.h"
 
 #endif

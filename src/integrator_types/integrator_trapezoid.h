@@ -26,7 +26,7 @@ private:
     Mobility *mobility;
     
     double newdt, currdt, maxdt;
-    double rtol, errormax;
+    double rtol;
     double dtIncrementFact, dtDecrementFact, dtVariableAdjustment, dtExponent;
     
     System *s;
@@ -122,6 +122,8 @@ public:
         int convergent = 0;
         int maxIterations = 2;
         int incrDelta = 1;
+        errmax = Kokkos::View<double*>("IntegratorTrapezoid:errmax", 1);
+        auto h_errmax = Kokkos::create_mirror_view(errmax);
         
         while (!convergent) {
             
@@ -137,16 +139,14 @@ public:
                 force->compute(system);
                 mobility->compute(system);
                 
-                errmax = Kokkos::View<double*>("IntegratorTrapezoid:errmax", 1);
+                Kokkos::deep_copy(errmax, 0.0);
                 Kokkos::parallel_for("IntegratorTrapezoid::ErrorNodes",
                     Kokkos::RangePolicy<TagErrorNodes>(0, network->Nnodes_local), *this
                 );
                 Kokkos::fence();
-                auto h_errmax = Kokkos::create_mirror_view(errmax);
                 Kokkos::deep_copy(h_errmax, errmax);
-                errormax = h_errmax(0);
                 
-                if (errormax < rtol) {
+                if (h_errmax(0) < rtol) {
                     convergent = 1;
                     break;
                 } else {
@@ -177,7 +177,7 @@ public:
             if (dtVariableAdjustment) {
                 double tmp1, tmp2, tmp3, tmp4, factor;
                 tmp1 = pow(dtIncrementFact, dtExponent);
-                tmp2 = errormax/rtol;
+                tmp2 = h_errmax(0)/rtol;
                 tmp3 = 1.0 / dtExponent;
                 tmp4 = pow(1.0/(1.0+(tmp1-1.0)*tmp2), tmp3);
                 factor = dtIncrementFact * tmp4;

@@ -30,6 +30,7 @@ template<class F>
 struct ForceSegN2
 {
     static const bool has_pre_compute = false;
+    static const bool has_compute_team = true;
     static const bool has_node_force = true;
     
     typedef typename F::Params Params;
@@ -60,6 +61,25 @@ struct ForceSegN2
             fs1 += fs.f1;
             fs2 += fs.f2;
         }
+        
+        return SegForce(fs1, fs2);
+    }
+    
+    template<class N>
+    KOKKOS_INLINE_FUNCTION
+    SegForce segment_force(System* system, N* net, const int& i, const team_handle& team)
+    {
+        int Nsegs = net->Nsegs_local;
+        
+        Vec3 fs1(0.0), fs2(0.0);
+        Kokkos::parallel_reduce(Kokkos::TeamThreadRange(team, Nsegs), [&] (const int& j, Vec3& fs1sum, Vec3& fs2sum) {
+            if (j != i) { // skip self-force
+                SegSegForce fs = force->segseg_force(system, net, SegSeg(i, j), 1, 0);
+                fs1sum += fs.f1;
+                fs2sum += fs.f2;
+            }
+        }, fs1, fs2);
+        team.team_barrier();
         
         return SegForce(fs1, fs2);
     }

@@ -206,8 +206,12 @@ public:
     KOKKOS_FORCEINLINE_FUNCTION Vec3_t<T> coly() const { return Vec3_t<T>(xy(), yy(), zy()); }
     KOKKOS_FORCEINLINE_FUNCTION Vec3_t<T> colz() const { return Vec3_t<T>(xz(), yz(), zz()); }
     
-    Mat33_t() = default;
-
+    KOKKOS_FORCEINLINE_FUNCTION
+    Mat33_t() { 
+        rowx = Vec3_t<T>();
+        rowy = Vec3_t<T>();
+        rowz = Vec3_t<T>();
+    }
     KOKKOS_FORCEINLINE_FUNCTION
     Mat33_t(const T &_v) { 
         rowx = Vec3_t<T>(_v);
@@ -315,6 +319,21 @@ public:
         rowx = Vec3_t<T>(p[0], p[3], p[4]);
         rowy = Vec3_t<T>(p[3], p[1], p[5]);
         rowz = Vec3_t<T>(p[4], p[5], p[2]);
+        return (*this);
+    }
+    KOKKOS_FORCEINLINE_FUNCTION
+    Mat33_t voigt(const T &_xx, const T &_yy, const T &_zz, 
+                  const T &_yz, const T &_xz, const T &_xy) {
+        rowx = Vec3_t<T>(_xx, _xy, _xz);
+        rowy = Vec3_t<T>(_xy, _yy, _yz);
+        rowz = Vec3_t<T>(_xz, _yz, _zz);
+        return (*this);
+    }
+    KOKKOS_FORCEINLINE_FUNCTION
+    Mat33_t voigt(T* p) {
+        rowx = Vec3_t<T>(p[0], p[5], p[4]);
+        rowy = Vec3_t<T>(p[5], p[1], p[3]);
+        rowz = Vec3_t<T>(p[4], p[3], p[2]);
         return (*this);
     }
     KOKKOS_FORCEINLINE_FUNCTION

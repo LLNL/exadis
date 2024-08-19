@@ -23,7 +23,7 @@ ExaDiSApp::ExaDiSApp(int argc, char* argv[])
     // Allocate system on unified host/device space
     system = exadis_new<System>();
     
-    step = 0;
+    istep = 0;
     Etot = Mat33().zero();
     stress = strain = pstrain = 0.0;
     tottime = 0.0;
@@ -40,6 +40,14 @@ ExaDiSApp::ExaDiSApp(int argc, char* argv[])
 #endif
         Kokkos::DefaultExecutionSpace{}.print_configuration(std::cout);
     }
+}
+
+ExaDiSApp::ExaDiSApp()
+{
+    istep = 0;
+    Etot = Mat33().zero();
+    stress = strain = pstrain = 0.0;
+    tottime = 0.0;
 }
 
 /*---------------------------------------------------------------------------
@@ -144,7 +152,7 @@ void ExaDiSApp::write_restart(std::string restartfile)
     fprintf(fp, "\n");
     
     // driver
-    fprintf(fp, "step %d\n", step);
+    fprintf(fp, "step %d\n", istep);
     fprintf(fp, "Etot %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g\n",
     Etot.xx(), Etot.xy(), Etot.xz(), Etot.yx(), Etot.yy(), Etot.yz(), Etot.zx(), Etot.zy(), Etot.zz());
     fprintf(fp, "stress %.17g\n", stress);
@@ -237,7 +245,7 @@ void ExaDiSApp::read_restart(std::string restartfile)
         if (strncmp(line, "version", 7) == 0) { sscanf(line, "version %lf\n", &version); }
         
         // driver
-        else if (strncmp(line, "step", 4) == 0) { sscanf(line, "step %d\n", &step); }
+        else if (strncmp(line, "step", 4) == 0) { sscanf(line, "step %d\n", &istep); }
         else if (strncmp(line, "Etot", 4) == 0) {
             sscanf(line, "Etot %lf %lf %lf %lf %lf %lf %lf %lf %lf\n",
             &Etot[0][0], &Etot[0][1], &Etot[0][2],
@@ -346,25 +354,6 @@ void ExaDiSApp::read_restart(std::string restartfile)
 
 /*---------------------------------------------------------------------------
  *
- *    Function:     ExaDiSApp::check_init()
- *                  Checks before running a simulation
- *
- *-------------------------------------------------------------------------*/
-void ExaDiSApp::check_init()
-{
-    if (system == nullptr) ExaDiS_fatal("Error: undefined system\n");
-    if (force == nullptr) ExaDiS_fatal("Error: undefined force\n");
-    if (mobility == nullptr) ExaDiS_fatal("Error: undefined mobility\n");
-    if (integrator == nullptr) ExaDiS_fatal("Error: undefined integrator\n");
-    if (collision == nullptr) ExaDiS_fatal("Error: undefined collision\n");
-    if (topology == nullptr) ExaDiS_fatal("Error: undefined topology\n");
-    if (remesh == nullptr) ExaDiS_fatal("Error: undefined remesh\n");
-    system->params.check_params();
-    if (!setup) set_simulation();
-}
-
-/*---------------------------------------------------------------------------
- *
  *    Function:     ExaDiSApp::update_mechanics()
  *                  Update stress, strain, crystal rotation, etc.
  *
@@ -430,26 +419,26 @@ void ExaDiSApp::update_mechanics(Control& ctrl)
 void ExaDiSApp::output(Control& ctrl)
 {
     // Print info in the console
-    if (step%ctrl.printfreq == 0) {
+    if (istep%ctrl.printfreq == 0) {
         if (ctrl.loading == STRAIN_RATE_CONTROL) {
             ExaDiS_log("Step = %6d: nodes = %d, dt = %e, strain = %e, elapsed = %.1f sec\n",
-            step, system->Nnodes_total(), system->realdt, strain, timer.seconds());
+            istep, system->Nnodes_total(), system->realdt, strain, timer.seconds());
         } else {
             ExaDiS_log("Step = %6d: nodes = %d, dt = %e, time = %e, elapsed = %.1f sec\n",
-            step, system->Nnodes_total(), system->realdt, tottime, timer.seconds());
+            istep, system->Nnodes_total(), system->realdt, tottime, timer.seconds());
         }
     }
     
     // Output properties
-    if (step%ctrl.propfreq == 0 || step == 1) {
+    if (istep%ctrl.propfreq == 0 || istep == 1) {
         std::string filename = outputdir+"/stress_strain_dens.dat";
         FILE *fp = fopen(filename.c_str(), "a");
         if (fp == NULL)
             ExaDiS_fatal("Error: cannot open output file %s\n", filename.c_str());
-        int init = (step == 0);
+        int init = (istep == 0);
         if (init) fprintf(fp, "#");
         for (auto field : ctrl.props) {
-            if (field == Prop::STEP) if (init) { fprintf(fp, " Step"); } else { fprintf(fp, "%d ", step); }
+            if (field == Prop::STEP) if (init) { fprintf(fp, " Step"); } else { fprintf(fp, "%d ", istep); }
             else if (field == Prop::STRAIN) if (init) { fprintf(fp, " Strain"); } else { fprintf(fp, "%e ", strain); }
             else if (field == Prop::STRESS) if (init) { fprintf(fp, " Stress"); } else { fprintf(fp, "%e ", stress); }
             else if (field == Prop::DENSITY) if (init) { fprintf(fp, " Density"); } else { fprintf(fp, "%e ", system->density); }
@@ -470,21 +459,21 @@ void ExaDiSApp::output(Control& ctrl)
     }
     
     // Output configuration
-    if (step%ctrl.outfreq == 0) {
-        system->write_config(outputdir+"/config."+std::to_string(step)+".data");
+    if (istep%ctrl.outfreq == 0) {
+        system->write_config(outputdir+"/config."+std::to_string(istep)+".data");
         
         // Restart files
-        write_restart(outputdir+"/restart."+std::to_string(step)+".exadis");
+        write_restart(outputdir+"/restart."+std::to_string(istep)+".exadis");
         
         // Timers
-        if (step > 0) {
+        if (istep > 0) {
             std::string filename;
             if (timeronefile) filename = outputdir+"/timer.dat";
-            else filename = outputdir+"/timer."+std::to_string(step)+".dat";
+            else filename = outputdir+"/timer."+std::to_string(istep)+".dat";
             FILE *fp = fopen(filename.c_str(), "a");
             if (fp == NULL)
                 ExaDiS_fatal("Error: cannot open output file %s\n", filename.c_str());
-            fprintf(fp, "Step = %d\n", step);
+            fprintf(fp, "Step = %d\n", istep);
             fprintf(fp, "\n");
             fprintf(fp, "Force time:        %12.3f sec\n", system->timer[system->TIMER_FORCE].accumtime);
             fprintf(fp, "Mobility time:     %12.3f sec\n", system->timer[system->TIMER_MOBILITY].accumtime);
@@ -511,31 +500,100 @@ void ExaDiSApp::output(Control& ctrl)
 
 /*---------------------------------------------------------------------------
  *
- *    Function:     ExaDiSApp::Stepper::step()
+ *    Function:     ExaDiSApp::Stepper::iterate()
  *                  Controls the number of steps in a run
  *
  *-------------------------------------------------------------------------*/
-bool ExaDiSApp::Stepper::step(ExaDiSApp* exadis, bool& init)
+bool ExaDiSApp::Stepper::iterate(ExaDiSApp* exadis)
 {    
-    if (init) {
-        if (type == NUM_STEPS) maxsteps += exadis->step;
-        if (type == NUM_STEPS || type == MAX_STEPS) ExaDiS_log("Run for %d steps\n", maxsteps - exadis->step);
+    if (exadis->init) {
+        if (type == NUM_STEPS) maxsteps += exadis->istep;
+        if (type == NUM_STEPS || type == MAX_STEPS) ExaDiS_log("Run for %d steps\n", maxsteps - exadis->istep);
         if (type == MAX_STRAIN) ExaDiS_log("Run until reaching strain = %f\n", stopval);
         if (type == MAX_TIME) ExaDiS_log("Run until reaching time = %f\n", stopval);
         if (type == MAX_WALLTIME) ExaDiS_log("Run until reaching wall time = %f sec\n", stopval);
-        init = false;
+        exadis->init = false;
     }
     
-    exadis->step++;
+    exadis->istep++;
     if (exadis->system->Nnodes_total() == 0 || exadis->system->Nsegs_total() == 0) {
         ExaDiS_log("No dislocation in the system. Stopping.\n");
         return false;
     }
-    if (type == NUM_STEPS || type == MAX_STEPS) return (exadis->step <= maxsteps);
+    if (type == NUM_STEPS || type == MAX_STEPS) return (exadis->istep <= maxsteps);
     if (type == MAX_STRAIN) return (exadis->strain < stopval);
     if (type == MAX_TIME) return (exadis->tottime < stopval);
     if (type == MAX_WALLTIME) return (exadis->timer.seconds() < stopval);
     return false;
+}
+
+/*---------------------------------------------------------------------------
+ *
+ *    Function:     ExaDiSApp::initialize()
+ *                  Iniatialize and check that everything is setup properly
+ *
+ *-------------------------------------------------------------------------*/
+void ExaDiSApp::initialize(Control& ctrl)
+{
+    if (system == nullptr) ExaDiS_fatal("Error: undefined system\n");
+    if (force == nullptr) ExaDiS_fatal("Error: undefined force\n");
+    if (mobility == nullptr) ExaDiS_fatal("Error: undefined mobility\n");
+    if (integrator == nullptr) ExaDiS_fatal("Error: undefined integrator\n");
+    if (collision == nullptr) ExaDiS_fatal("Error: undefined collision\n");
+    if (topology == nullptr) ExaDiS_fatal("Error: undefined topology\n");
+    if (remesh == nullptr) ExaDiS_fatal("Error: undefined remesh\n");
+    
+    system->params.check_params();
+    if (!setup) set_simulation();
+    
+    if (!restart) {
+        system->extstress = ctrl.appstress;
+        edir = ctrl.edir;
+    }
+    
+    init = true;
+}
+
+/*---------------------------------------------------------------------------
+ *
+ *    Function:     ExaDiSApp::step()
+ *                  Genereric DDD single simulation step
+ *
+ *-------------------------------------------------------------------------*/
+void ExaDiSApp::step(Control& ctrl)
+{
+    // Do some force pre-computation for the step if needed
+    force->pre_compute(system);
+    
+    // Nodal force calculation
+    force->compute(system);
+    
+    // Mobility calculation
+    mobility->compute(system);
+    
+    // Time-integration
+    integrator->integrate(system);
+    
+    // Compute plastic strain
+    system->plastic_strain();
+    
+    // Reset glide planes
+    system->reset_glide_planes();
+    
+    // Collision
+    collision->handle(system);
+    
+    // Topology
+    topology->handle(system);
+    
+    // Remesh
+    remesh->remesh(system);
+    
+    // Update stress
+    update_mechanics(ctrl);
+    
+    // Output
+    output(ctrl);
 }
 
 /*---------------------------------------------------------------------------
@@ -546,57 +604,18 @@ bool ExaDiSApp::Stepper::step(ExaDiSApp* exadis, bool& init)
  *                  Control argument.
  *
  *-------------------------------------------------------------------------*/
-void ExaDiSApp::run(Control ctrl)
+void ExaDiSApp::run(Control& ctrl)
 {
-    // Check that everything is setup properly
-    check_init();
-    
-    if (!restart) {
-        system->extstress = ctrl.appstress;
-        edir = ctrl.edir;
-    }
-    
-    timer.reset();
+    // Iniatialize and check that everything is setup properly
+    initialize(ctrl);
     
     // Initial output at step 0
     output(ctrl);
     
     // Main loop
-    bool init = true;
-    while (ctrl.nsteps.step(this, init)) {
-        
-        // Do some force pre-computation for the step if needed
-        force->pre_compute(system);
-        
-        // Nodal force calculation
-        force->compute(system);
-        
-        // Mobility calculation
-        mobility->compute(system);
-        
-        // Time-integration
-        integrator->integrate(system);
-        
-        // Compute plastic strain
-        system->plastic_strain();
-        
-        // Reset glide planes
-        system->reset_glide_planes();
-        
-        // Collision
-        collision->handle(system);
-        
-        // Topology
-        topology->handle(system);
-        
-        // Remesh
-        remesh->remesh(system);
-        
-        // Update stress
-        update_mechanics(ctrl);
-        
-        // Output
-        output(ctrl);
+    timer.reset();
+    while (ctrl.nsteps.iterate(this)) {
+        step(ctrl);
     }
     
     Kokkos::fence();

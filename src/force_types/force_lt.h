@@ -29,6 +29,7 @@ template<class C, bool selfforce>
 struct ForceSegLT
 {
     static const bool has_pre_compute = false;
+    static const bool has_compute_team = false;
     static const bool has_node_force = false;
     
     typedef typename C::Params Params;

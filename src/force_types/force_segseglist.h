@@ -52,8 +52,7 @@ public:
         if (cutoff < 0)
             ExaDiS_fatal("Error: undefined cutoff parameter in SegSegList\n");
         // Set the general neighbor cutoff for the simulation
-        system->neighbor_cutoff = cutoff;
-        
+        system->register_neighbor_cutoff(cutoff);
     }
     
     void initialize() {
@@ -100,7 +99,7 @@ public:
                     double dist2 = get_min_dist2_segseg(net, i, j);
                     
                     int groupid = 0;
-                    if (dist2 < cutoff2) {
+                    if (dist2 >= 0.0 && dist2 < cutoff2) {
                         if (count_only) {
                             Kokkos::atomic_increment(&gcount[groupid]);
                         } else {
@@ -505,6 +504,7 @@ public:
         
         if (use_compute_map) {
             // Assemble at nodes using the compute map
+            Kokkos::fence();
             Kokkos::parallel_for("ForceSegSeg::AddSegSegForceMap", net->Nnodes_local,
                 AddSegSegForceMap<DeviceDisNet>(system, net, segseglist)
             );
@@ -521,16 +521,15 @@ public:
         auto conn = net->get_conn();
         
         // Recompute neighbor list for now...
-        NeighborBox* neighbor = new NeighborBox(system, net, segseglist->cutoff, Neighbor::NeiSeg);
+        NeighborBin* neighbor = generate_neighbor_segs(net, segseglist->cutoff, system->params.maxseg);
         
-        Vec3 p = nodes[i].pos;
-        auto neilist = neighbor->query(net, p);
+        auto neilist = neighbor->query(nodes[i].pos);
         
         Vec3 f(0.0);
         for (int j = 0; j < conn[i].num; j++) {
             int k = conn[i].seg[j];
             for (int l = 0; l < neilist.size(); l++) {
-                int n = neilist[l];//->index;
+                int n = neilist[l];
                 if (n == k) continue;
                 SegSegForce fs = force->segseg_force(system, net, SegSeg(k, n), 1, 0);
                 f += ((conn[i].order[j] == 1) ? fs.f1 : fs.f2);
@@ -581,6 +580,11 @@ public:
 
     const char* name() { return "ForceSegSegList"; }
 };
+
+namespace ForceType {
+    typedef ForceSegSegList<SegSegIso,false> FORCE_SEGSEG_ISO;
+    typedef ForceCollection2<CORE_SELF_PKEXT,FORCE_SEGSEG_ISO> CUTOFF_MODEL;
+}
 
 } // namespace ExaDiS
 

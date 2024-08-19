@@ -34,10 +34,11 @@ public:
     std::string outputdir = "";
     
     bool setup = false;
+    bool init = false;
     bool log = true;
     bool restart = false;
     
-    int step;
+    int istep;
     Mat33 Etot;
     double stress, strain, pstrain;
     double tottime;
@@ -47,14 +48,14 @@ public:
     bool timeronefile = true;
     
     struct Stepper {
-        enum {NUM_STEPS, MAX_STEPS, MAX_STRAIN, MAX_TIME, MAX_WALLTIME};
+        enum Types {NUM_STEPS, MAX_STEPS, MAX_STRAIN, MAX_TIME, MAX_WALLTIME};
         int type = NUM_STEPS;
         int maxsteps = 0;
         double stopval = 0.0;
         Stepper(int _type, int _maxsteps) : type(_type), maxsteps(_maxsteps) {}
         Stepper(int _type, double _stopval) : type(_type), stopval(_stopval) {}
         Stepper& operator=(int nsteps) { type = NUM_STEPS; maxsteps = nsteps; return *this; }
-        bool step(ExaDiSApp* exadis, bool& init);
+        bool iterate(ExaDiSApp* exadis);
     };
     static Stepper NUM_STEPS(int nsteps) { return Stepper(Stepper::NUM_STEPS, nsteps); }
     static Stepper MAX_STEPS(int maxsteps) { return Stepper(Stepper::MAX_STEPS, maxsteps); }
@@ -81,6 +82,7 @@ public:
     };
     
     ExaDiSApp(int argc, char* argv[]);
+    ExaDiSApp();
     ~ExaDiSApp();
     
     virtual void set_modules(
@@ -94,8 +96,9 @@ public:
     virtual void set_simulation(std::string restartfile="");
     virtual void set_directory();
     
-    virtual void check_init();
-    virtual void run(Control ctrl);
+    virtual void initialize(Control& ctrl);
+    virtual void step(Control& ctrl);
+    virtual void run(Control& ctrl);
     virtual void update_mechanics(Control& ctrl);
     virtual void output(Control& ctrl);
     

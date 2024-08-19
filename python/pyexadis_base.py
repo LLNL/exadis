@@ -130,7 +130,7 @@ def get_exadis_params(state):
         nu=state["nu"],
         a=state["a"],
         maxseg=state["maxseg"],
-        minseg=state["minseg"]
+        minseg=state["minseg"] if "minseg" in state else -1.0
     )
     if "crystal" in state: params.set_crystal(state["crystal"])
     if "Rorient" in state: params.Rorient = state["Rorient"]
@@ -174,9 +174,15 @@ class CalForce:
         
         if self.force_mode in ['LineTension', 'LINE_TENSION_MODEL']:
             self.force = pyexadis.make_force_lt(params=self.params, coreparams=coreparams)
-            
+        
+        elif self.force_mode == 'CUTOFF_MODEL':
+            cutoff = kwargs.get('cutoff')
+            cutoffparams = pyexadis.Force_CUTOFF_Params(coreparams=coreparams, cutoff=cutoff)
+            self.force = pyexadis.make_force_cutoff(params=self.params, cutoffparams=cutoffparams)
+        
         elif self.force_mode == 'DDD_FFT_MODEL':
             Ngrid = kwargs.get('Ngrid')
+            if isinstance(Ngrid, int): Ngrid = 3*[Ngrid]
             cell = kwargs.get('cell')
             if not isinstance(cell, pyexadis.Cell):
                 cell = pyexadis.Cell(h=cell.h, origin=cell.origin, is_periodic=cell.is_periodic)
@@ -185,6 +191,7 @@ class CalForce:
             
         elif self.force_mode == 'SUBCYCLING_MODEL':
             Ngrid = kwargs.get('Ngrid')
+            if isinstance(Ngrid, int): Ngrid = 3*[Ngrid]
             cell = kwargs.get('cell')
             if not isinstance(cell, pyexadis.Cell):
                 cell = pyexadis.Cell(h=cell.h, origin=cell.origin, is_periodic=cell.is_periodic)
@@ -550,6 +557,7 @@ class SimulateNetwork:
         self.write_dir = write_dir
         if self.write_dir and not os.path.exists(self.write_dir):
             os.makedirs(self.write_dir)
+        self.restart = kwargs.get("restart", None)
         
         self.exadis_plastic_strain = exadis_plastic_strain
         self.Etot = np.zeros(6)
@@ -607,9 +615,9 @@ class SimulateNetwork:
             r3 = np.array(cell.closest_image(Rref=r1, R=rold[segsnid[:,0]]))
             r4 = np.array(cell.closest_image(Rref=r3, R=rold[segsnid[:,1]]))
             n = 0.5*np.cross(r2-r3, r1-r4)
-            P = np.multiply(n[:,[0,0,0,1,1,1,2,2,2]], burgs[:,[0,1,2,0,1,2,0,1,2]])
-            dEp = 0.5/vol*np.sum(P[:,[0,4,8,1,2,5]] + P[:,[0,4,8,3,6,7]], axis=0)
-            dWp = 0.5/vol*np.sum(P[:,[1,2,5]] - P[:,[3,6,7]], axis=0)
+            P = np.multiply(n[:,[0,0,0,1,1,1,2,2,2]], burgs[:,[0,1,2,0,1,2,0,1,2]]) # xx,yy,zz,yz,xz,xy
+            dEp = 0.5/vol*np.sum(P[:,[0,4,8,5,2,1]] + P[:,[0,4,8,7,6,3]], axis=0) # yz,xz,xy
+            dWp = 0.5/vol*np.sum(P[:,[5,2,1]] - P[:,[7,6,3]], axis=0)
             density = np.linalg.norm(r2-r1, axis=1).sum()/vol/self.burgmag**2
             self.density = density
             
@@ -626,14 +634,14 @@ class SimulateNetwork:
             if self.exadis_plastic_strain:
                 # get values of plastic strain computed internally in exadis
                 dEp, dWp, self.density = N.get_disnet(ExaDisNet).net.get_plastic_strain()
-                dEp = np.array(dEp).ravel()[[0,4,8,1,2,5]]
-                dWp = np.array(dWp).ravel()[[1,2,5]]
+                dEp = np.array(dEp).ravel()[[0,4,8,5,2,1]] # xx,yy,zz,yz,xz,xy
+                dWp = np.array(dWp).ravel()[[5,2,1]] # yz,xz,xy
             else:
                 dEp, dWp = state["dEp"], state["dWp"]
             
             # TO DO: add rotation
             A = np.outer(self.edir, self.edir)
-            A = np.hstack([np.diag(A), 2.0*A.ravel()[[1,2,5]]])
+            A = np.hstack([np.diag(A), 2.0*A.ravel()[[5,2,1]]])
             dpstrain = np.dot(dEp, A)
             dstrain = self.erate * self.timeint.dt
             Eyoung = 2.0 * self.calforce.mu * (1.0 + self.calforce.nu)
@@ -671,6 +679,9 @@ class SimulateNetwork:
         self.update_mechanics(N, state)
         
     def run(self, N: DisNetManager, state: dict):
+        
+        if self.restart is not None:
+            raise ValueError('Restart option only supported with SimulateNetworkPerf driver')
         
         import time
         t0 = time.perf_counter()
@@ -721,66 +732,15 @@ class SimulateNetwork:
 
 class SimulateNetworkPerf(SimulateNetwork):
     """SimulateNetworkPerf: exadis simulation driver optimized for performance
+    Uses the driver implemented in driver.cpp
     """
     def __init__(self, *args, **kwargs) -> None:
         super(SimulateNetworkPerf, self).__init__(*args, **kwargs)
-        self.exadis_plastic_strain = True
         
-    def update_mechanics(self, system, state: dict):
-        """update_mechanics: update applied stress and rotation if needed
-        """
-        if self.loading_mode == 'strain_rate':
-            # get values of plastic strain computed internally in exadis
-            dEp, dWp, self.density = system.get_plastic_strain()
-            dEp = np.array(dEp).ravel()[[0,4,8,1,2,5]]
-            dWp = np.array(dWp).ravel()[[1,2,5]]
-            
-            # TO DO: add rotation
-            A = np.outer(self.edir, self.edir)
-            A = np.hstack([np.diag(A), 2.0*A.ravel()[[1,2,5]]])
-            dpstrain = np.dot(dEp, A)
-            dstrain = self.erate * self.timeint.dt
-            Eyoung = 2.0 * self.calforce.mu * (1.0 + self.calforce.nu)
-            dstress = Eyoung * (dstrain - dpstrain)
-            state["applied_stress"] += dstress * A
-            system.set_applied_stress(state["applied_stress"])
-            
-            self.Etot += dstrain * A
-            self.strain = np.dot(self.Etot, A)
-            self.stress = np.dot(state["applied_stress"], A)
-            
-            return state
-    
-    def step(self, system, state: dict):
-        """step: take a time step of DD simulation on system
-        See exadis/src/driver.cpp
-        """
-        # Do some force pre-computation for the step if needed
-        self.calforce.force.pre_compute(system)
-        
-        # Nodal force calculation
-        self.calforce.force.compute(system)
-        
-        # Mobility calculation
-        self.mobility.mobility.compute(system)
-        
-        # Time-integration (plastic_strain() and reset_glide_planes() are also called internally)
-        self.timeint.dt = self.timeint.integrator.integrate(system)
-        
-        # Collision
-        if self.collision is not None:
-            self.collision.collision.handle(system)
-        
-        # Topology
-        if self.topology is not None:
-            self.topology.topology.handle(system)
-        
-        # Remesh
-        if self.remesh is not None:
-            self.remesh.remesh.remesh(system)
-        
-        # Update stress
-        self.update_mechanics(system, state)
+        self.num_step = kwargs.get('num_step', None)
+        self.max_strain = kwargs.get('max_strain', None)
+        self.max_time = kwargs.get('max_time', None)
+        self.max_walltime = kwargs.get('max_walltime', None)
         
     def run(self, N: DisNetManager, state: dict):
         
@@ -790,40 +750,70 @@ class SimulateNetworkPerf(SimulateNetwork):
         # convert DisNet to a complete exadis system object
         system = pyexadis.System(N.get_disnet(ExaDisNet).net, self.calforce.params)
         system.set_neighbor_cutoff(self.calforce.force.neighbor_cutoff)
-        system.set_applied_stress(state["applied_stress"])
-            
-        if self.write_freq != None:
-            system.write_data(os.path.join(self.write_dir, 'config.0.data'))
+        
+        # set driver
+        driver = pyexadis.Driver(system)
+        driver.set_modules(
+            self.calforce.force,
+            self.mobility.mobility,
+            self.timeint.integrator,
+            self.collision.collision,
+            self.topology.topology,
+            self.remesh.remesh
+        )
+        driver.outputdir = self.write_dir
+        driver.set_simulation("" if self.restart is None else self.restart)
+        
+        # set simulation control
+        if self.max_walltime is not None:
+            stepper = pyexadis.Driver.MAX_WALLTIME(self.max_walltime)
+        elif self.max_time is not None:
+            stepper = pyexadis.Driver.MAX_TIME(self.max_time)
+        elif self.max_strain is not None:
+            stepper = pyexadis.Driver.MAX_STRAIN(self.max_strain)
+        elif self.num_step is not None:
+            stepper = pyexadis.Driver.NUM_STEPS(self.num_step)
+        else:
+            stepper = pyexadis.Driver.MAX_STEPS(self.max_step)
+        
+        ctrl = pyexadis.Driver.Control()
+        loading = {
+            "strain_rate": pyexadis.Driver.STRAIN_RATE_CONTROL,
+            "stress": pyexadis.Driver.STRESS_CONTROL
+        }
+        ctrl.loading = loading[self.loading_mode]
+        if self.loading_mode == 'strain_rate':
+            ctrl.erate = self.erate
+            ctrl.edir = self.edir
+        ctrl.appstress = np.array(state["applied_stress"][[0,5,4,5,1,3,4,3,2]]).reshape(3,3)
+        ctrl.printfreq = self.print_freq
+        ctrl.propfreq = self.print_freq
+        ctrl.outfreq = self.write_freq
+        
+        # initialize simulation
+        driver.initialize(ctrl)
         
         # time stepping
-        for tstep in range(self.max_step):
-            self.step(system, state)
-
-            if self.print_freq != None:
-                if (tstep+1) % self.print_freq == 0:
-                    dt = self.timeint.dt if self.timeint else 0.0
-                    Nnodes = system.number_of_nodes()
-                    if self.loading_mode == 'strain_rate':
-                        print("step = %d, nodes = %d, dt = %e, strain = %e, stress = %e"%(tstep+1, Nnodes, dt, self.strain, self.stress))
-                        self.results.append([tstep+1, self.strain, self.stress, self.density, time.perf_counter()-t0])
-                    else:
-                        print("step = %d, nodes = %d, dt = %e"%(tstep+1, Nnodes, dt))
-            
-            if self.write_freq != None:
-                if (tstep+1) % self.write_freq == 0:
-                    system.write_data(os.path.join(self.write_dir, 'config.%d.data'%(tstep+1)))
-                    # dump current results into file
-                    if self.print_freq != None: self.write_results()
-            
-        # write results
-        if self.print_freq != None:
-            self.write_results()
-            
+        while stepper.iterate(driver):
+            driver.step(ctrl)
+        
         t1 = time.perf_counter()
         system.print_timers()
         print('RUN TIME: %f sec' % (t1-t0))
         
         return state
+
+
+def read_restart(state: dict, restart_file: str):
+    """read_restart: helper function to read exadis restart files
+    """
+    G = ExaDisNet(pyexadis.Cell(), [], [])
+    system = pyexadis.System(G.net, get_exadis_params(state))
+    driver = pyexadis.Driver(system)
+    driver.read_restart(restart_file)
+    N = DisNetManager(G)
+    return N, restart_file
+
 
 
 try:
@@ -901,8 +891,8 @@ class VisualizeNetwork:
                                     h[0]+h[2], h[0]+h[1]+h[2], h[1]+h[2]])
         if plot_cell:
             boxedges = np.array([[0,1],[1,2],[2,3],[3,0],
-                                [4,5],[5,6],[6,7],[7,4],
-                                [0,4],[1,5],[2,6],[3,7]])
+                                 [4,5],[5,6],[6,7],[7,4],
+                                 [0,4],[1,5],[2,6],[3,7]])
             bc = Line3DCollection(c[boxedges], linewidths=0.5, colors='k', alpha=0.5)
             ax.add_collection(bc)
         

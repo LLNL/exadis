@@ -58,7 +58,7 @@ def test_collision():
     sim = SimulateNetwork(calforce=calforce, mobility=mobility, timeint=timeint, 
                           collision=collision, topology=topology, remesh=remesh, vis=vis,
                           state=state, max_step=200, loading_mode='stress',
-                          applied_stress=np.array([0.0, 0.0, 0.0, 5e8, 0.0, 0.0]),
+                          applied_stress=np.array([0.0, 0.0, 0.0, 0.0, 0.0, 5e8]),
                           print_freq=1, plot_freq=10, plot_pause_seconds=0.0001,
                           write_freq=10, write_dir='output')
     sim.run(N, state)

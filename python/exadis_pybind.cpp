@@ -9,6 +9,7 @@
 
 #include <iostream>
 #include <exadis.h>
+#include <driver.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -38,13 +39,13 @@ namespace pybind11 { namespace detail {
          */
         bool load(handle src, bool) {
             if (!isinstance<sequence>(src)) return false;
-        	sequence seq = reinterpret_borrow<sequence>(src);
-        	if (seq.size() != 3)
-        		throw value_error("Expected sequence of length 3.");
+            sequence seq = reinterpret_borrow<sequence>(src);
+            if (seq.size() != 3)
+                throw value_error("Expected sequence of length 3.");
             value[0] = seq[0].cast<double>();
             value[1] = seq[1].cast<double>();
             value[2] = seq[2].cast<double>();
-        	return true;
+            return true;
         }
 
         /*
@@ -64,7 +65,7 @@ namespace pybind11 { namespace detail {
         PYBIND11_TYPE_CASTER(Mat33, _("Mat33"));
         bool load(handle src, bool) {
             if (!isinstance<sequence>(src)) return false;
-        	sequence seq = reinterpret_borrow<sequence>(src);
+            sequence seq = reinterpret_borrow<sequence>(src);
             if (seq.size() == 3) {
                 value[0] = seq[0].cast<Vec3>();
                 value[1] = seq[1].cast<Vec3>();
@@ -76,7 +77,7 @@ namespace pybind11 { namespace detail {
             } else {
                 throw value_error("Expected sequence of length 9 or 3x3.");
             }
-        	return true;
+            return true;
         }
         static handle cast(Mat33 src, return_value_policy, handle) {
             return py::make_tuple(src.rowx, src.rowy, src.rowz).release();
@@ -88,12 +89,12 @@ namespace pybind11 { namespace detail {
         PYBIND11_TYPE_CASTER(NodeTag, _("NodeTag"));
         bool load(handle src, bool) {
             if (!isinstance<sequence>(src)) return false;
-        	sequence seq = reinterpret_borrow<sequence>(src);
-        	if (seq.size() != 2)
-        		throw value_error("Expected sequence of length 2.");
+            sequence seq = reinterpret_borrow<sequence>(src);
+            if (seq.size() != 2)
+                throw value_error("Expected sequence of length 2.");
             value.domain = seq[0].cast<int>();
             value.index  = seq[1].cast<int>();
-        	return true;
+            return true;
         }
         static handle cast(NodeTag src, return_value_policy, handle) {
             return py::make_tuple(src.domain, src.index).release();
@@ -110,7 +111,7 @@ namespace pybind11 { namespace detail {
  *-------------------------------------------------------------------------*/
 void SerialDisNet::set_nodes_array(std::vector<std::vector<double> >& nodes_array) {
     nodes.clear();
-    for (int i = 0; i < nodes_array.size(); i++) {
+    for (size_t i = 0; i < nodes_array.size(); i++) {
         if (nodes_array[i].size() == 3)
             add_node(Vec3(&nodes_array[i][0]));
         else if (nodes_array[i].size() == 4)
@@ -127,7 +128,7 @@ void SerialDisNet::set_nodes_array(std::vector<std::vector<double> >& nodes_arra
 
 void SerialDisNet::set_segs_array(std::vector<std::vector<double> >& segs_array) {
     segs.clear();
-    for (int i = 0; i < segs_array.size(); i++) {
+    for (size_t i = 0; i < segs_array.size(); i++) {
         if (segs_array[i].size() == 5)
             add_seg((int)segs_array[i][0], (int)segs_array[i][1], Vec3(&segs_array[i][2]));
         else if (segs_array[i].size() == 8)
@@ -172,21 +173,21 @@ std::vector<Vec3> Cell::pbc_position_array(std::vector<Vec3>& r0, std::vector<Ve
     if (r0.size() != r.size())
         ExaDiS_fatal("Error: reference and target position arrays must have the same size for closest_image()\n");
     std::vector<Vec3> rpbc = r;
-    for (int i = 0; i < r.size(); i++)
+    for (size_t i = 0; i < r.size(); i++)
         rpbc[i] = pbc_position(r0[i], r[i]);
     return rpbc;
 }
 
 std::vector<Vec3> Cell::pbc_position_array(Vec3& r0, std::vector<Vec3>& r) {
     std::vector<Vec3> rpbc = r;
-    for (int i = 0; i < r.size(); i++)
+    for (size_t i = 0; i < r.size(); i++)
         rpbc[i] = pbc_position(r0, r[i]);
     return rpbc;
 }
 
 std::vector<Vec3> Cell::pbc_fold_array(std::vector<Vec3>& r) {
     std::vector<Vec3> rpbc = r;
-    for (int i = 0; i < r.size(); i++)
+    for (size_t i = 0; i < r.size(); i++)
         rpbc[i] = pbc_fold(r[i]);
     return rpbc;
 }
@@ -233,7 +234,7 @@ std::vector<int> map_node_tags(DeviceDisNet* net, std::vector<NodeTag>& tags) {
             map.emplace(h_nodes(i).tag, i);
     #endif
     
-    for (int i = 0; i < tags.size(); i++) {
+    for (size_t i = 0; i < tags.size(); i++) {
         auto iter = map.find(tags[i]);
         if (iter == map.end())
             ExaDiS_fatal("Error: cannot find node tag (%d,%d)\n", tags[i].domain, tags[i].index);
@@ -375,8 +376,7 @@ struct ExaDisNet {
         SerialDisNet* net = new SerialDisNet(cell);
         net->set_nodes_array(nodes_array);
         net->set_segs_array(segs_array); 
-        system = exadis_new<System>();
-        system->initialize(Params(), Crystal(), net);
+        system = make_system(net, Crystal(), Params());
     }
     
     int number_of_nodes() { return system->Nnodes_total(); }
@@ -401,8 +401,7 @@ ExaDisNet generate_prismatic_config_system(Crystal crystal, double Lbox, int num
                                            double radius, double maxseg=-1, int seed=1234)
 {
     SerialDisNet* config = generate_prismatic_config(crystal, Lbox, numsources, radius, maxseg, seed);
-    System* system = exadis_new<System>();
-    system->initialize(Params(), Crystal(crystal), config);
+    System* system = make_system(config, Crystal(crystal), Params());
     return ExaDisNet(system);
 }
 
@@ -410,16 +409,14 @@ ExaDisNet generate_prismatic_config_system(Crystal crystal, Cell cell, int numso
                                            double radius, double maxseg=-1, int seed=1234)
 {
     SerialDisNet* config = generate_prismatic_config(crystal, cell, numsources, radius, maxseg, seed);
-    System* system = exadis_new<System>();
-    system->initialize(Params(), Crystal(crystal), config);
+    System* system = make_system(config, Crystal(crystal), Params());
     return ExaDisNet(system);
 }
 
 ExaDisNet read_paradis_system(const char *file)
 {
     SerialDisNet* config = read_paradis(file);
-    System* system = exadis_new<System>();
-    system->initialize(Params(), Crystal(), config);
+    System* system = make_system(config, Crystal(), Params());
     return ExaDisNet(system);
 }
 
@@ -427,17 +424,16 @@ struct SystemBind : ExaDisNet {
     SystemBind(ExaDisNet disnet, Params params) : ExaDisNet()
     {
         SerialDisNet* net = disnet.system->get_serial_network();
-        system = exadis_new<System>();
-        system->initialize(params, Crystal(params.crystal, params.Rorient), net);
+        system = make_system(net, Crystal(params.crystal, params.Rorient), params);
         system->params.check_params();
     }
     void set_neighbor_cutoff(double cutoff) {
         system->neighbor_cutoff = cutoff;
     }
     void set_applied_stress(std::vector<double> applied_stress) { 
-        system->extstress = Mat33().symmetric(applied_stress.data()); 
+        system->extstress = Mat33().voigt(applied_stress.data()); 
     }
-    void print_timers() { system->print_timers(); }
+    void print_timers(bool dev) { system->print_timers(dev); }
 };
 
 
@@ -484,7 +480,10 @@ void Params::set_crystal(std::string crystalname) {
  *
  *-------------------------------------------------------------------------*/
 struct ForceBind {
-    enum ForceModel {LINE_TENSION_MODEL, DDD_FFT_MODEL, SUBCYCLING_MODEL, PYTHON_MODEL};
+    enum ForceModel {
+        LINE_TENSION_MODEL, CUTOFF_MODEL, DDD_FFT_MODEL, 
+        SUBCYCLING_MODEL, PYTHON_MODEL
+    };
     Force* force = nullptr;
     int model = -1;
     Params params;
@@ -536,39 +535,41 @@ template<class F>
 ForceBind make_force(Params& params, typename F::Params fparams)
 {
     params.check_params();
-    System* system = exadis_new<System>();
-    system->initialize(params, Crystal(params.crystal, params.Rorient), new SerialDisNet());
+    System* system = make_system(new SerialDisNet(), Crystal(params.crystal, params.Rorient), params);
     
     Force* force = exadis_new<F>(system, fparams);
     
     int model = -1;
     if (std::is_same<F, ForceType::LINE_TENSION_MODEL>::value)
         model = ForceBind::LINE_TENSION_MODEL;
+    else if (std::is_same<F, ForceType::CUTOFF_MODEL>::value)
+        model = ForceBind::CUTOFF_MODEL;
     else
         ExaDiS_fatal("Error: invalid force type requested in the python binding\n");
     
+    double cutoff = system->neighbor_cutoff; // needed in topology force calculations
+    
     exadis_delete(system);
     
-    return ForceBind(force, model, params);
+    return ForceBind(force, model, params, cutoff);
 }
 
 template<bool subcycling>
 ForceBind make_force_ddd_fft(Params& params, ForceType::CORE_SELF_PKEXT::Params coreparams,
-                             int Ngrid, Cell& cell, bool drift)
+                             std::vector<int> Ngrid, Cell& cell, bool drift)
 {
     params.check_params();
-    System* system = exadis_new<System>();
-    system->initialize(params, Crystal(params.crystal, params.Rorient), new SerialDisNet(cell));
+    System* system = make_system(new SerialDisNet(cell), Crystal(params.crystal, params.Rorient), params);
     
     Force* force;
     if (subcycling) {
-        ForceType::SUBCYCLING_MODEL::Params subcycparams(Ngrid, drift);
+        ForceType::SUBCYCLING_MODEL::Params subcycparams(Ngrid[0], Ngrid[1], Ngrid[2], drift);
         subcycparams.FSegParams = coreparams;
         force = exadis_new<ForceType::SUBCYCLING_MODEL>(system, subcycparams);
     } else {
         force = exadis_new<ForceType::DDD_FFT_MODEL>(system, 
             coreparams,
-            ForceType::LONG_FFT_SHORT_ISO::Params(Ngrid)
+            ForceType::LONG_FFT_SHORT_ISO::Params(Ngrid[0], Ngrid[1], Ngrid[2])
         );
     }
     double cutoff = system->neighbor_cutoff; // needed in topology force calculations
@@ -588,7 +589,7 @@ std::vector<Vec3> compute_force(ExaDisNet& disnet, ForceBind& forcebind,
         system->crystal.R != forcebind.params.Rorient)
         system->crystal = Crystal(forcebind.params.crystal, forcebind.params.Rorient);
     
-    system->extstress = Mat33().symmetric(applied_stress.data());
+    system->extstress = Mat33().voigt(applied_stress.data());
     
     Force* force = forcebind.force;
     force->pre_compute(system);
@@ -613,7 +614,59 @@ std::vector<Vec3> compute_force_n2(ExaDisNet& disnet, double MU, double NU, doub
     Force* force = new ForceType::BRUTE_FORCE_N2(system);
     force->compute(system);
     std::vector<Vec3> forces = get_forces(system);
+    delete force;
     
+    return forces;
+}
+
+std::vector<Vec3> compute_force_cutoff(ExaDisNet& disnet, double MU, double NU, double a,
+                                       double cutoff, double maxseg)
+{
+    Params params;
+    params.MU = MU;
+    params.NU = NU;
+    params.a = a;
+    params.maxseg = maxseg;
+    
+    System* system = disnet.system;
+    system->params = params;
+    
+    Force* force = new ForceType::FORCE_SEGSEG_ISO(system, cutoff);
+    force->pre_compute(system);
+    force->compute(system);
+    std::vector<Vec3> forces = get_forces(system);
+    delete force;
+    
+    return forces;
+}
+
+std::vector<Vec3> compute_force_segseglist(ExaDisNet& disnet, double MU, double NU, double a,
+                                           std::vector<std::vector<int> >& segseglist)
+{
+    Params params;
+    params.MU = MU;
+    params.NU = NU;
+    params.a = a;
+    
+    System* system = disnet.system;
+    system->params = params;
+    
+    ForceType::FORCE_SEGSEG_ISO* force = new ForceType::FORCE_SEGSEG_ISO(system, 0.0);
+    
+    SegSegList* ssl = force->get_segseglist();
+    ssl->Nsegseg = (int)segseglist.size();
+    Kokkos::resize(ssl->segseglist, ssl->Nsegseg);
+    for (size_t i = 0; i < segseglist.size(); i++) {
+        int s1 = segseglist[i][0];
+        int s2 = segseglist[i][1];
+        if (s1 < 0 || s1 >= system->Nnodes_total() ||
+            s2 < 0 || s2 >= system->Nnodes_total())
+            ExaDiS_fatal("Error: invalid segment index in compute_force_segseglist\n");
+        ssl->segseglist.h_view(i) = SegSeg(s1, s2);
+    }
+    Kokkos::deep_copy(ssl->segseglist.d_view, ssl->segseglist.h_view);
+    force->compute(system);
+    std::vector<Vec3> forces = get_forces(system);
     delete force;
     
     return forces;
@@ -641,7 +694,7 @@ Vec3 compute_node_force(ExaDisNet& disnet, int i, ForceBind& forcebind,
         system->crystal.R != forcebind.params.Rorient)
         system->crystal = Crystal(forcebind.params.crystal, forcebind.params.Rorient);
     
-    system->extstress = Mat33().symmetric(applied_stress.data());
+    system->extstress = Mat33().voigt(applied_stress.data());
     
     Force* force = forcebind.force;
     // Warning: the user must ensure the pre_compute is up-to-date...
@@ -701,8 +754,7 @@ template<class M>
 MobilityBind make_mobility(Params& params, typename M::Params mobparams)
 {
     params.check_params();
-    System* system = exadis_new<System>();
-    system->initialize(params, Crystal(params.crystal, params.Rorient), new SerialDisNet());
+    System* system = make_system(new SerialDisNet(), Crystal(params.crystal, params.Rorient), params);
     
     Mobility* mobility = new M(system, mobparams);
     
@@ -769,8 +821,7 @@ IntegratorBind make_integrator(Params& params, typename I::Params itgrparams,
                                ForceBind& forcebind, MobilityBind& mobbind)
 {
     params.check_params();
-    System* system = exadis_new<System>();
-    system->initialize(params, Crystal(params.crystal, params.Rorient), new SerialDisNet());
+    System* system = make_system(new SerialDisNet(), Crystal(params.crystal, params.Rorient), params);
     
     Force* force = forcebind.force;
     Mobility* mobility = mobbind.mobility;
@@ -791,7 +842,7 @@ double integrate(ExaDisNet& disnet, IntegratorBind& itgrbind,
         system->crystal.R != itgrbind.params.Rorient)
         system->crystal = Crystal(itgrbind.params.crystal, itgrbind.params.Rorient);
     
-    system->extstress = Mat33().symmetric(applied_stress.data());
+    system->extstress = Mat33().voigt(applied_stress.data());
     
     // Set velocities
     set_velocities(system, vels, tags);
@@ -850,8 +901,7 @@ struct CollisionBind {
 
 CollisionBind make_collision(Params& params)
 {
-    System* system = exadis_new<System>();
-    system->initialize(params, Crystal(params.crystal, params.Rorient), new SerialDisNet());
+    System* system = make_system(new SerialDisNet(), Crystal(params.crystal, params.Rorient), params);
     
     Collision* collision = new CollisionRetroactive(system);
     
@@ -912,13 +962,29 @@ struct TopologyBind {
     void handle(SystemBind& sysbind) { topology->handle(sysbind.system); }
 };
 
+template<class F>
+Topology* make_topology_parallel(System* system, Force* force, Mobility* mobility,
+                                 MobilityBind& mobbind, typename Topology::Params& topolparams)
+{
+    Topology* topology;
+    if (strcmp(mobbind.mobility->name(), "MobilityBCC0b") == 0) {
+        topology = new TopologyParallel<F,MobilityType::BCC_0B>(system, force, mobility, topolparams);
+    } else if (strcmp(mobbind.mobility->name(), "MobilityFCC0") == 0) {
+        topology = new TopologyParallel<F,MobilityType::FCC_0>(system, force, mobility, topolparams);
+    } else if (strcmp(mobbind.mobility->name(), "MobilityGlide") == 0) {
+        topology = new TopologyParallel<F,MobilityType::GLIDE>(system, force, mobility, topolparams);
+    } else {
+        ExaDiS_fatal("Error: invalid mobility type = %s for TopologyParallel binding\n", mobbind.mobility->name());
+    }
+    return topology;
+}
+
 TopologyBind make_topology(std::string topology_mode, Params& params,
                            typename Topology::Params topolparams,
                            ForceBind& forcebind, MobilityBind& mobbind)
 {
     params.check_params();
-    System* system = exadis_new<System>();
-    system->initialize(params, Crystal(params.crystal, params.Rorient), new SerialDisNet());
+    System* system = make_system(new SerialDisNet(), Crystal(params.crystal, params.Rorient), params);
     
     Force* force = forcebind.force;
     Mobility* mobility = mobbind.mobility;
@@ -927,35 +993,13 @@ TopologyBind make_topology(std::string topology_mode, Params& params,
     Topology* topology;
     if (topology_mode == "TopologyParallel") {
         if (forcebind.model == ForceBind::LINE_TENSION_MODEL) {
-            if (strcmp(mobbind.mobility->name(), "MobilityBCC0b") == 0) {
-                topology = new TopologyParallel<ForceType::LINE_TENSION_MODEL,MobilityType::BCC_0B>(system, force, mobility, topolparams);
-            } else if (strcmp(mobbind.mobility->name(), "MobilityFCC0") == 0) {
-                topology = new TopologyParallel<ForceType::LINE_TENSION_MODEL,MobilityType::FCC_0>(system, force, mobility, topolparams);
-            } else if (strcmp(mobbind.mobility->name(), "MobilityGlide") == 0) {
-                topology = new TopologyParallel<ForceType::LINE_TENSION_MODEL,MobilityType::GLIDE>(system, force, mobility, topolparams);
-            } else {
-                ExaDiS_fatal("Error: invalid mobility type = %s for TopologyParallel binding\n", mobbind.mobility->name());
-            }
+            topology = make_topology_parallel<ForceType::LINE_TENSION_MODEL>(system, force, mobility, mobbind, topolparams);
+        } else if (forcebind.model == ForceBind::CUTOFF_MODEL) {
+            topology = make_topology_parallel<ForceType::CUTOFF_MODEL>(system, force, mobility, mobbind, topolparams);
         } else if (forcebind.model == ForceBind::DDD_FFT_MODEL) {
-            if (strcmp(mobbind.mobility->name(), "MobilityBCC0b") == 0) {
-                topology = new TopologyParallel<ForceType::DDD_FFT_MODEL,MobilityType::BCC_0B>(system, force, mobility, topolparams);
-            } else if (strcmp(mobbind.mobility->name(), "MobilityFCC0") == 0) {
-                topology = new TopologyParallel<ForceType::DDD_FFT_MODEL,MobilityType::FCC_0>(system, force, mobility, topolparams);
-            } else if (strcmp(mobbind.mobility->name(), "MobilityGlide") == 0) {
-                topology = new TopologyParallel<ForceType::DDD_FFT_MODEL,MobilityType::GLIDE>(system, force, mobility, topolparams);
-            } else {
-                ExaDiS_fatal("Error: invalid mobility type = %s for TopologyParallel binding\n", mobbind.mobility->name());
-            }
+            topology = make_topology_parallel<ForceType::DDD_FFT_MODEL>(system, force, mobility, mobbind, topolparams);
         } else if (forcebind.model == ForceBind::SUBCYCLING_MODEL) {
-            if (strcmp(mobbind.mobility->name(), "MobilityBCC0b") == 0) {
-                topology = new TopologyParallel<ForceType::SUBCYCLING_MODEL,MobilityType::BCC_0B>(system, force, mobility, topolparams);
-            } else if (strcmp(mobbind.mobility->name(), "MobilityFCC0") == 0) {
-                topology = new TopologyParallel<ForceType::SUBCYCLING_MODEL,MobilityType::FCC_0>(system, force, mobility, topolparams);
-            } else if (strcmp(mobbind.mobility->name(), "MobilityGlide") == 0) {
-                topology = new TopologyParallel<ForceType::SUBCYCLING_MODEL,MobilityType::GLIDE>(system, force, mobility, topolparams);
-            } else {
-                ExaDiS_fatal("Error: invalid mobility type = %s for TopologyParallel binding\n", mobbind.mobility->name());
-            }
+            topology = make_topology_parallel<ForceType::SUBCYCLING_MODEL>(system, force, mobility, mobbind, topolparams);
         } else {
             ExaDiS_fatal("Error: invalid force type for TopologyParallel binding\n");
         }
@@ -1001,8 +1045,7 @@ struct RemeshBind {
 
 RemeshBind make_remesh(Params& params)
 {
-    System* system = exadis_new<System>();
-    system->initialize(params, Crystal(params.crystal, params.Rorient), new SerialDisNet());
+    System* system = make_system(new SerialDisNet(), Crystal(params.crystal, params.Rorient), params);
     
     Remesh* remesh = new RemeshSerial(system);
     
@@ -1026,11 +1069,42 @@ void remesh(ExaDisNet& disnet, RemeshBind& remeshbind)
 
 /*---------------------------------------------------------------------------
  *
+ *    Driver binding
+ *
+ *-------------------------------------------------------------------------*/
+class Driver : public ExaDiSApp {
+public:
+    Driver(const SystemBind& sysbind) : ExaDiSApp() {
+        system = sysbind.system;
+    }
+    void set_modules_driver(ForceBind& forcebind, MobilityBind& mobbind,
+                            IntegratorBind& integratorbind, CollisionBind& collisionbind,
+                            TopologyBind& topolbind, RemeshBind& remeshbind) {
+        force = forcebind.force;
+        mobility = mobbind.mobility;
+        integrator = integratorbind.integrator;
+        collision = collisionbind.collision;
+        topology = topolbind.topology;
+        remesh = remeshbind.remesh_class;
+    }
+    void read_restart_driver(std::string restartfile) {
+        ExaDiSApp::read_restart(restartfile);
+        // replace with dummy system so that we don't delete 
+        // the original system object upon destruction
+        system = make_system(new SerialDisNet());
+    }
+};
+
+
+/*---------------------------------------------------------------------------
+ *
  *    Binding module
  *
  *-------------------------------------------------------------------------*/
 PYBIND11_MODULE(pyexadis, m) {
     m.doc() = "ExaDiS python module";
+    
+    m.attr("__version__") = EXADIS_VERSION;
     
     // Constants
     m.attr("BCC_CRYSTAL") = py::int_((int)BCC_CRYSTAL);
@@ -1038,6 +1112,7 @@ PYBIND11_MODULE(pyexadis, m) {
     
     // Classes
     py::class_<Params>(m, "Params")
+        .def(py::init<>())
         .def(py::init<std::string, double, double, double, double, double, double, double, double, double, double, int>(),
              py::arg("crystal")="", py::arg("burgmag"), py::arg("mu"), py::arg("nu"), py::arg("a"), 
              py::arg("maxseg"), py::arg("minseg"), py::arg("rann")=-1.0, py::arg("rtol")=-1.0, 
@@ -1106,11 +1181,15 @@ PYBIND11_MODULE(pyexadis, m) {
     py::class_<SystemBind, ExaDisNet>(m, "System")
         .def(py::init<ExaDisNet, Params>())
         .def("set_neighbor_cutoff", &SystemBind::set_neighbor_cutoff, "Set set_neighbor cutoff of the system")
-        .def("set_applied_stress", &SystemBind::set_applied_stress, "Set applied stress of the system")
-        .def("print_timers", &SystemBind::print_timers, "Print simulation timers");
+        .def("set_applied_stress", &SystemBind::set_applied_stress, "Set applied stress of the system (xx,yy,zz,yz,xz,xy)")
+        .def("print_timers", &SystemBind::print_timers, "Print simulation timers", py::arg("dev")=false);
     
     py::class_<ForceType::CORE_SELF_PKEXT::Params>(m, "Force_CORE_Params")
         .def(py::init<double, double>(), py::arg("Ecore")=-1.0, py::arg("Ecore_junc_fact")=1.0);
+    py::class_<ForceType::CUTOFF_MODEL::Params>(m, "Force_CUTOFF_Params")
+        .def(py::init([](ForceType::CORE_SELF_PKEXT::Params coreparams, double cutoff) {
+            return new ForceType::CUTOFF_MODEL::Params(coreparams, ForceType::FORCE_SEGSEG_ISO::Params(cutoff));
+        }), py::arg("coreparams"), py::arg("cutoff"));
     
     py::class_<MobilityType::GLIDE::Params>(m, "Mobility_GLIDE_Params")
         .def(py::init<double>(), py::arg("Mglide"))
@@ -1155,6 +1234,8 @@ PYBIND11_MODULE(pyexadis, m) {
         .def("compute", &ForceBind::compute, "Compute force of the system");
     m.def("make_force_lt", &make_force<ForceType::LINE_TENSION_MODEL>, "Instantiate a line-tension force model",
           py::arg("params"), py::arg("coreparams"));
+    m.def("make_force_cutoff", &make_force<ForceType::CUTOFF_MODEL>, "Instantiate a cutoff force model",
+          py::arg("params"), py::arg("cutoffparams"));
     m.def("make_force_ddd_fft", &make_force_ddd_fft<0>, "Instantiate a DDD-FFT force model",
           py::arg("params"), py::arg("coreparams"), py::arg("Ngrid"), py::arg("cell"), py::arg("drift")=0);
     m.def("make_force_subcycling", &make_force_ddd_fft<1>, "Instantiate a subcycling force model",
@@ -1169,8 +1250,12 @@ PYBIND11_MODULE(pyexadis, m) {
     m.def("compute_node_force", &compute_node_force, "Wrapper to compute the force on a single node",
           py::arg("net"), py::arg("i"), py::arg("force"), py::arg("applied_stress"));
     
-    m.def("compute_force_n2", &compute_force_n2, "Compute forces using the brute-force N^2 calculation",
+    m.def("compute_force_n2", &compute_force_n2, "Compute elastic forces using the brute-force N^2 calculation",
           py::arg("net"), py::arg("mu"), py::arg("nu"), py::arg("a"));
+    m.def("compute_force_cutoff", &compute_force_cutoff, "Compute elastic forces using a segment pair cutoff",
+          py::arg("net"), py::arg("mu"), py::arg("nu"), py::arg("a"), py::arg("cutoff"), py::arg("maxseg")=0.0);
+    m.def("compute_force_segseglist", &compute_force_segseglist, "Compute elastic forces given a list of segment pairs",
+          py::arg("net"), py::arg("mu"), py::arg("nu"), py::arg("a"), py::arg("segseglist"));
     
     // Mobility
     py::class_<MobilityBind>(m, "Mobility")
@@ -1232,4 +1317,43 @@ PYBIND11_MODULE(pyexadis, m) {
     m.def("make_remesh", &make_remesh, "Instantiate a remesh class", py::arg("params"));
     m.def("remesh", &remesh, "Wrapper to remesh the network",
           py::arg("net"), py::arg("remesh"));
+          
+    
+    // Driver
+    py::class_<ExaDiSApp>(m, "ExaDiSApp");
+    py::class_<Driver, ExaDiSApp> driver(m, "Driver");
+    driver.def(py::init<const SystemBind&>(), py::arg("system"))
+          .def_readwrite("outputdir", &Driver::outputdir, "Output directory path for the simulation")
+          .def("read_restart", &Driver::read_restart_driver, "Read restart file")
+          .def("set_modules", &Driver::set_modules_driver, "Set modules for the simulation")
+          .def("set_simulation", &Driver::set_simulation, "Set things up before running the simulation", py::arg("restart")="")
+          .def("initialize", &Driver::initialize, "Initialize simulation")
+          .def("step", &Driver::step, "Execute a simulation step")
+          .def("run", &Driver::run, "Run the simulation");
+    // Driver control
+    py::class_<Driver::Control>(driver, "Control")
+        .def(py::init<>())
+        .def_readwrite("nsteps", &Driver::Control::nsteps, "nsteps")
+        .def_readwrite("loading", &Driver::Control::loading, "Loading type")
+        .def_readwrite("erate", &Driver::Control::erate, "Loading rate")
+        .def_readwrite("edir", &Driver::Control::edir, "Loading direction")
+        .def_readwrite("appstress", &Driver::Control::appstress, "Applied stress")
+        .def_readwrite("rotation", &Driver::Control::rotation, "Enable crystal rotation")
+        .def_readwrite("printfreq", &Driver::Control::printfreq, "Print frequency")
+        .def_readwrite("propfreq", &Driver::Control::propfreq, "Properties output frequency")
+        .def_readwrite("outfreq", &Driver::Control::outfreq, "Configuration and restart output frequency");
+    py::enum_<Driver::Loadings>(driver, "Loadings")
+        .value("STRESS_CONTROL", Driver::Loadings::STRESS_CONTROL)
+        .value("STRAIN_RATE_CONTROL", Driver::Loadings::STRAIN_RATE_CONTROL)
+        .export_values();
+    // Driver stepper
+    py::class_<Driver::Stepper> stepper(driver, "Stepper");
+    stepper.def(py::init<int, int>())
+           .def(py::init<int, double>())
+           .def("iterate", &Driver::Stepper::iterate, "Iterate a simulation step");
+    driver.def("NUM_STEPS", &Driver::NUM_STEPS, "Iterate to a number of steps")
+          .def("MAX_STEPS", &Driver::MAX_STEPS, "Iterate to a maximum number of steps")
+          .def("MAX_STRAIN", &Driver::MAX_STRAIN, "Iterate to a maximum strain")
+          .def("MAX_TIME", &Driver::MAX_TIME, "Iterate to a maximum simulation time")
+          .def("MAX_WALLTIME", &Driver::MAX_WALLTIME, "Iterate to a maximum wall clock time");
 }

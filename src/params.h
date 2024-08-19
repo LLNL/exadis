@@ -58,8 +58,8 @@ struct Params {
             ExaDiS_fatal("Error: invalid parameter value of burgmag (%f)\n", burgmag);
         if (MU <= 0.0 || NU <= 0.0 || a <= 0.0)
             ExaDiS_fatal("Error: invalid parameter values of MU (%f) / NU (%f) / a (%f)\n", MU, NU, a);
-        if (maxseg <= 0.0 || minseg <= 0.0)
-            ExaDiS_fatal("Error: invalid parameter values of maxseg (%f) / minseg (%f)\n", maxseg, minseg);
+        if (maxseg <= 0.0)
+            ExaDiS_fatal("Error: invalid parameter values of maxseg (%f)\n", maxseg);
         if (nextdt <= 0.0)
             ExaDiS_fatal("Error: invalid parameter value of nextdt (%f)\n", nextdt);
         
@@ -70,6 +70,10 @@ struct Params {
         if (rann <= 0.0) {
             rann = 2.0 * rtol;
             ExaDiS_log("Setting rann to %f\n", rann);
+        }
+        if (minseg <= 0.0) {
+            minseg = sqrt(8 * rtol * maxseg / sqrt(3.0));
+            ExaDiS_log("Setting minseg to %f\n", minseg);
         }
     }
     

@@ -1,9 +1,15 @@
 /*---------------------------------------------------------------------------
  *
- *	ExaDiS
+ *  ExaDiS
  *
- *	Nicolas Bertin
- *	bertin1@llnl.gov
+ *  ForceFFT module
+ *  This module implements the calculation of long-range forces using the
+ *  DDD-FFT approach. Stresses are computed on a grid from the continuum
+ *  Nye's tensor reprensation of the dislocation network.
+ *  Ref: N. Bertin, International Journal of Plasticity 122, 268-284 (2019)
+ *
+ *  Nicolas Bertin
+ *  bertin1@llnl.gov
  *
  *-------------------------------------------------------------------------*/
 
@@ -53,11 +59,14 @@ namespace ExaDiS {
  *-------------------------------------------------------------------------*/
 enum fft_sign {FFT_FORWARD, FFT_BACKWARD};
 
+struct FFTPlanBase {
+    int Nx, Ny, Nz;
+};
+
 template <class ExecutionSpace = Kokkos::DefaultExecutionSpace>
-struct FFTPlan {
-    int nx, ny, nz;
-    void initialize(int _nx, int _ny, int _nz) {
-        nx = _nx; ny = _ny; nz = _nz;
+struct FFTPlan : FFTPlanBase {
+    void initialize(int _Nx, int _Ny, int _Nz) {
+        Nx = _Nx; Ny = _Ny; Nz = _Nz;
     }
     void finalize() {}
 };
@@ -66,14 +75,14 @@ template <class ExecutionSpace = Kokkos::DefaultExecutionSpace>
 struct FFT3DTransform
 {
     template <typename ViewType>
-    FFT3DTransform(FFTPlan<ExecutionSpace> &plan, 
-                   const ViewType &in, const ViewType &out,
+    FFT3DTransform(FFTPlan<ExecutionSpace>& plan, 
+                   const ViewType& in, const ViewType& out,
                    int sign)
     {
 #ifdef FFTW
         int FFT_DIR = (sign == FFT_FORWARD) ? FFTW_FORWARD : FFTW_BACKWARD;
         fftw_plan p = fftw_plan_dft_3d(
-            plan.nx, plan.ny, plan.nz, 
+            plan.Nx, plan.Ny, plan.Nz, 
             reinterpret_cast<fftw_complex*>(in.data()),
             reinterpret_cast<fftw_complex*>(out.data()),
             FFT_DIR, FFTW_ESTIMATE
@@ -94,15 +103,16 @@ struct FFT3DTransform
  *-------------------------------------------------------------------------*/
 #if defined(EXADIS_FFT) && defined(KOKKOS_ENABLE_CUDA)
 template<>
-struct FFTPlan<Kokkos::Cuda> {
+struct FFTPlan<Kokkos::Cuda> : FFTPlanBase {
     bool plan_created = 0;
     cufftHandle* plan = nullptr;
     KOKKOS_INLINE_FUNCTION FFTPlan() {}
     KOKKOS_INLINE_FUNCTION FFTPlan(const FFTPlan& p) : plan(p.plan) { plan_created = 0; }
-    void initialize(int nx, int ny, int nz) {
+    void initialize(int _Nx, int _Ny, int _Nz) {
+        Nx = _Nx; Ny = _Ny; Nz = _Nz;
         if (plan) delete plan;
         plan = new cufftHandle();
-        CUFFTWRAPPER(cufftPlan3d(plan, nx, ny, nz, CUFFT_Z2Z));
+        CUFFTWRAPPER(cufftPlan3d(plan, Nx, Ny, Nz, CUFFT_Z2Z));
         plan_created = 1;
     }
     void finalize() {
@@ -114,8 +124,8 @@ template<>
 struct FFT3DTransform<Kokkos::Cuda>
 {
     template <typename ViewType>
-    FFT3DTransform(FFTPlan<Kokkos::Cuda> &plan, 
-                   const ViewType &in, const ViewType &out, 
+    FFT3DTransform(FFTPlan<Kokkos::Cuda>& plan, 
+                   const ViewType& in, const ViewType& out, 
                    int sign)
     {
         int FFT_DIR = (sign == FFT_FORWARD) ? CUFFT_FORWARD : CUFFT_INVERSE;
@@ -137,15 +147,16 @@ struct FFT3DTransform<Kokkos::Cuda>
  *-------------------------------------------------------------------------*/
 #if defined(EXADIS_FFT) && defined(KOKKOS_ENABLE_HIP)
 template<>
-struct FFTPlan<Kokkos::HIP> {
+struct FFTPlan<Kokkos::HIP> : FFTPlanBase {
     bool plan_created = 0;
     hipfftHandle* plan = nullptr;
     KOKKOS_INLINE_FUNCTION FFTPlan() {}
     KOKKOS_INLINE_FUNCTION FFTPlan(const FFTPlan& p) : plan(p.plan) { plan_created = 0; }
-    void initialize(int nx, int ny, int nz) {
+    void initialize(int _Nx, int _Ny, int _Nz) {
+        Nx = _Nx; Ny = _Ny; Nz = _Nz;
         if (plan) delete plan;
         plan = new hipfftHandle();
-        hipfftPlan3d(plan, nx, ny, nz, HIPFFT_Z2Z);
+        hipfftPlan3d(plan, Nx, Ny, Nz, HIPFFT_Z2Z);
         plan_created = 1;
     }
     void finalize() {
@@ -157,8 +168,8 @@ template<>
 struct FFT3DTransform<Kokkos::HIP>
 {
     template <typename ViewType>
-    FFT3DTransform(FFTPlan<Kokkos::HIP> &plan, 
-                   const ViewType &in, const ViewType &out, 
+    FFT3DTransform(FFTPlan<Kokkos::HIP>& plan, 
+                   const ViewType& in, const ViewType& out, 
                    int sign)
     {
         int FFT_DIR = (sign == FFT_FORWARD) ? HIPFFT_FORWARD : HIPFFT_BACKWARD;
@@ -216,7 +227,7 @@ void InverseComplex33(complex M[3][3])
 class ForceFFT : public Force {
 private:
     FFTPlan<> plan;
-    int Ngrid, Ngrid3;
+    int Ngrid[3], Ngrid3;
     double rcgrid, rcnei;
     
     typedef Kokkos::View<complex***, Kokkos::LayoutRight, T_memory_space> T_grid;
@@ -247,13 +258,14 @@ private:
     Vec3 Lbox, H, bmin;
     double V;
     
-    int TIMER_FFTPRECOMP, TIMER_FFTALPHA, TIMER_FFTSTRESS;
+    int TIMER_FFTPRECOMP, TIMER_FFTALPHA, TIMER_FFTSTRESS, TIMER_FFTTRANSFORMS;
 
 public:
     struct Params {
-        int Ngrid;
-        Params() { Ngrid = -1; }
-        Params(int _Ngrid) { Ngrid = _Ngrid; }
+        int Ngrid[3];
+        Params() { Ngrid[0] = Ngrid[1] = Ngrid[2] = -1; }
+        Params(int _Ngrid) { Ngrid[0] = Ngrid[1] = Ngrid[2] = _Ngrid; }
+        Params(int Nx, int Ny, int Nz) { Ngrid[0] = Nx; Ngrid[1] = Ny; Ngrid[2] = Nz; }
     };
     
     ForceFFT(System *system, Params params)
@@ -266,18 +278,21 @@ public:
         TIMER_FFTPRECOMP = system->add_timer("ForceFFT precompute");
         TIMER_FFTALPHA = system->add_timer("ForceFFT precompute alpha");
         TIMER_FFTSTRESS = system->add_timer("ForceFFT precompute stress");
+        TIMER_FFTTRANSFORMS = system->add_timer("ForceFFT transforms");
     }
     
     void initialize(System *system, Params params) {
-        Ngrid = params.Ngrid;
-        if (Ngrid <= 0)
-            ExaDiS_fatal("Error: undefined grid size in ForceFFT\n");
         
-        Ngrid3 = Ngrid*Ngrid*Ngrid;
-        plan.initialize(Ngrid, Ngrid, Ngrid);
+        for (int i = 0; i < 3; i++) {
+            Ngrid[i] = params.Ngrid[i];
+            if (Ngrid[i] <= 0)
+                ExaDiS_fatal("Error: undefined grid size in ForceFFT\n");
+        }
+        Ngrid3 = Ngrid[0]*Ngrid[1]*Ngrid[2];
+        plan.initialize(Ngrid[0], Ngrid[1], Ngrid[2]);
         
         for (int i = 0; i < 9; i++)
-            Kokkos::resize(gridval[i], Ngrid, Ngrid, Ngrid);
+            Kokkos::resize(gridval[i], Ngrid[0], Ngrid[1], Ngrid[2]);
             
 #if !EXADIS_FULL_UNIFIED_MEMORY
         host_synced = false;
@@ -302,19 +317,17 @@ public:
     struct TagNormalizeW {};
     
     KOKKOS_INLINE_FUNCTION
-    void operator() (TagComputeW, const int &ind, double &psum) const {
-        int kx = ind / (Ngrid * Ngrid);
-        int ky = (ind - kx * Ngrid * Ngrid) / Ngrid;
-        int kz = ind - kx * Ngrid * Ngrid - ky * Ngrid;
+    void operator() (TagComputeW, const int& kx, const int& ky, const int& kz, double &psum) const {
+        int kxmax = Ngrid[0]/2 + Ngrid[0] % 2;
+        int kymax = Ngrid[1]/2 + Ngrid[1] % 2;
+        int kzmax = Ngrid[2]/2 + Ngrid[2] % 2;
+        int kxx = kx; if (kxx >= kxmax) kxx -= Ngrid[0];
+        int kyy = ky; if (kyy >= kymax) kyy -= Ngrid[1];
+        int kzz = kz; if (kzz >= kzmax) kzz -= Ngrid[2];
         
-        int kmax = Ngrid/2 + Ngrid % 2;
-        int kxx = kx; if (kxx >= kmax) kxx -= Ngrid;
-        int kyy = ky; if (kyy >= kmax) kyy -= Ngrid;
-        int kzz = kz; if (kzz >= kmax) kzz -= Ngrid;
-        
-        double x = kxx*Lbox.x/Ngrid;
-        double y = kyy*Lbox.y/Ngrid;
-        double z = kzz*Lbox.z/Ngrid;
+        double x = kxx*Lbox.x/Ngrid[0];
+        double y = kyy*Lbox.y/Ngrid[1];
+        double z = kzz*Lbox.z/Ngrid[2];
         double r2 = x*x + y*y + z*z;
         double aw2 = rcgrid*rcgrid;
         double wr = 15.0*aw2*aw2/8.0/M_PI/pow(r2+aw2, 3.5);
@@ -324,10 +337,7 @@ public:
     }
     
     KOKKOS_INLINE_FUNCTION
-    void operator() (TagNormalizeW, const int &ind) const {
-        int kx = ind / (Ngrid * Ngrid);
-        int ky = (ind - kx * Ngrid * Ngrid) / Ngrid;
-        int kz = ind - kx * Ngrid * Ngrid - ky * Ngrid;
+    void operator() (TagNormalizeW, const int& kx, const int& ky, const int& kz) const {
         w(kx, ky, kz) /= wsum;
     }
     
@@ -339,8 +349,17 @@ public:
         Lbox.y = network->cell.H.yy();
         Lbox.z = network->cell.H.zz();
         
-        H = 1.0/Ngrid * Lbox;
+        H.x = 1.0/Ngrid[0] * Lbox.x;
+        H.y = 1.0/Ngrid[1] * Lbox.y;
+        H.z = 1.0/Ngrid[2] * Lbox.z;
         double Hmax = fmax(fmax(H.x, H.y), H.z);
+        
+        // Check voxel aspect ratio...
+        if (H.y/H.x < 0.5 || H.y/H.x > 1.5 || 
+            H.z/H.y < 0.5 || H.z/H.y > 1.5 || 
+            H.x/H.z < 0.5 || H.x/H.z > 1.5)
+            ExaDiS_log("Warning: high aspect ratio voxels in ForceFFT\n"
+            " Consider adjusting the simulation parameters\n");
         
         // Grid core radius
         rcgrid = 2.0*Hmax;
@@ -353,17 +372,24 @@ public:
             rcnei = 4.0*rcgrid;
         }
         
-        Kokkos::resize(w, Ngrid, Ngrid, Ngrid);
+        // Register neighbor cutoff required for the grid
+        system->register_neighbor_cutoff(fmax(0.5*Hmax, system->params.maxseg));
+        
+        Kokkos::resize(w, Ngrid[0], Ngrid[1], Ngrid[2]);
         Kokkos::deep_copy(w, 0.0);
         wsum = 0.0;
         
         Kokkos::parallel_reduce("ForceFFT::ComputeW",
-            Kokkos::RangePolicy<TagComputeW>(0, Ngrid3), *this, wsum
+            Kokkos::MDRangePolicy<TagComputeW,Kokkos::Rank<3>>(
+                {0, 0, 0}, {Ngrid[0], Ngrid[1], Ngrid[2]}
+            ), *this, wsum
         );
         Kokkos::fence();
         
         Kokkos::parallel_for("ForceFFT::NormalizeW",
-            Kokkos::RangePolicy<TagNormalizeW>(0, Ngrid3), *this
+            Kokkos::MDRangePolicy<TagNormalizeW,Kokkos::Rank<3>>(
+                {0, 0, 0}, {Ngrid[0], Ngrid[1], Ngrid[2]}
+            ), *this
         );
         Kokkos::fence();
         
@@ -506,8 +532,6 @@ public:
             int kmin = floor(zmin/H.z);
             int kmax = floor(zmax/H.z) + 1;
             
-            double Wtot = 0.0;
-            
             for (int ib = imin; ib <= imax; ib++) {
                 for (int jb = jmin; jb <= jmax; jb++) {
                     for (int kb = kmin; kb <= kmax; kb++) {
@@ -518,12 +542,11 @@ public:
                         bc.z = (kb+0.5)*H.z + bmin.z;
 
                         double W = alpha_box_segment(r1, t, L, bc, H);
-                        Wtot += W;
                         
                         // Box index
-                        int kx = ib % Ngrid; if (kx < 0) kx += Ngrid;
-                        int ky = jb % Ngrid; if (ky < 0) ky += Ngrid;
-                        int kz = kb % Ngrid; if (kz < 0) kz += Ngrid;
+                        int kx = ib % Ngrid[0]; if (kx < 0) kx += Ngrid[0];
+                        int ky = jb % Ngrid[1]; if (ky < 0) ky += Ngrid[1];
+                        int kz = kb % Ngrid[2]; if (kz < 0) kz += Ngrid[2];
                         
                         Kokkos::atomic_add(&gridval[0](kx, ky, kz), W/V*b.x*t.x);
                         Kokkos::atomic_add(&gridval[1](kx, ky, kz), W/V*b.x*t.y);
@@ -541,19 +564,16 @@ public:
     }
     
     KOKKOS_INLINE_FUNCTION
-    void operator() (TagStressFromAlpha, const int &ind) const {
-        // Voxel id and coordinates
-        int kx = ind / (Ngrid * Ngrid);
-        int ky = (ind - kx * Ngrid * Ngrid) / Ngrid;
-        int kz = ind - kx * Ngrid * Ngrid - ky * Ngrid;
-        
-        int kmax = Ngrid/2 + Ngrid % 2;
-        int kxx = kx; if (kxx >= kmax) kxx -= Ngrid;
-        int kyy = ky; if (kyy >= kmax) kyy -= Ngrid;
-        int kzz = kz; if (kzz >= kmax) kzz -= Ngrid;
+    void operator() (TagStressFromAlpha, const int& kx, const int& ky, const int& kz) const {
+        // Voxel id and wave-vector coordinates
+        int kxmax = Ngrid[0]/2 + Ngrid[0] % 2;
+        int kymax = Ngrid[1]/2 + Ngrid[1] % 2;
+        int kzmax = Ngrid[2]/2 + Ngrid[2] % 2;
+        int kxx = kx; if (kxx >= kxmax) kxx -= Ngrid[0];
+        int kyy = ky; if (kyy >= kymax) kyy -= Ngrid[1];
+        int kzz = kz; if (kzz >= kzmax) kzz -= Ngrid[2];
         
         bool zero = false;
-        
         if (kxx == 0 && kyy == 0 && kzz == 0) {
             zero = true;
         }
@@ -572,9 +592,9 @@ public:
         T[2][2] = wk * gridval[GRID_ZZ](kx, ky, kz);
         
         double xk[3];
-        xk[0] = 2.0*M_PI*kxx/Ngrid;
-        xk[1] = 2.0*M_PI*kyy/Ngrid;
-        xk[2] = 2.0*M_PI*kzz/Ngrid;
+        xk[0] = 2.0*M_PI*kxx/Ngrid[0];
+        xk[1] = 2.0*M_PI*kyy/Ngrid[1];
+        xk[2] = 2.0*M_PI*kzz/Ngrid[2];
         
         complex cxk[3];
         // iGreenOp=0: k=i*q
@@ -594,7 +614,7 @@ public:
             cxk[2] = 1.0/H[2]*complex(cos(xk[2])-1.0, sin(xk[2]));
         // iGreenOp=3: k(R), rotated scheme
         } else if (GREEN_OP == 3) {
-            if (kxx == -Ngrid/2 || kyy == -Ngrid/2 || kzz == -Ngrid/2) {
+            if (kxx == -Ngrid[0]/2 || kyy == -Ngrid[1]/2 || kzz == -Ngrid[2]/2) {
                 zero = true;
             }
             complex fact0(1.0+cos(xk[0]), sin(xk[0]));
@@ -679,11 +699,7 @@ public:
     }
     
     KOKKOS_INLINE_FUNCTION
-    void operator() (TagNormalizeStress, const int &ind) const {
-        int kx = ind / (Ngrid * Ngrid);
-        int ky = (ind - kx * Ngrid * Ngrid) / Ngrid;
-        int kz = ind - kx * Ngrid * Ngrid - ky * Ngrid;
-        
+    void operator() (TagNormalizeStress, const int& kx, const int& ky, const int& kz) const {
         for (int i = 0; i < 6; i++)
             gridval[stress_comps[i]](kx, ky, kz) /= (stress_fact*Ngrid3);
     }
@@ -699,7 +715,9 @@ public:
         Lbox.x = d_net->cell.H.xx();
         Lbox.y = d_net->cell.H.yy();
         Lbox.z = d_net->cell.H.zz();
-        H = 1.0/Ngrid * Lbox;
+        H.x = 1.0/Ngrid[0] * Lbox.x;
+        H.y = 1.0/Ngrid[1] * Lbox.y;
+        H.z = 1.0/Ngrid[2] * Lbox.z;
         V = H.x * H.y * H.z;
         bmin = d_net->cell.origin;
         
@@ -725,21 +743,29 @@ public:
         Kokkos::fence();
         system->devtimer[TIMER_FFTSTRESS].start();
         
+        system->devtimer[TIMER_FFTTRANSFORMS].start();
         for (int i = 0; i < 9; i++)
             FFT3DTransform(plan, gridval[i], gridval[i], FFT_FORWARD);
         Kokkos::fence();
+        system->devtimer[TIMER_FFTTRANSFORMS].stop();
         
         Kokkos::parallel_for("ForceFFT::StressFromAlpha",
-            Kokkos::RangePolicy<TagStressFromAlpha>(0, Ngrid3), *this
+            Kokkos::MDRangePolicy<TagStressFromAlpha,Kokkos::Rank<3>>(
+                {0, 0, 0}, {Ngrid[0], Ngrid[1], Ngrid[2]}
+            ), *this
         );
         Kokkos::fence();
         
+        system->devtimer[TIMER_FFTTRANSFORMS].start();
         for (int i = 0; i < 6; i++)
             FFT3DTransform(plan, gridval[stress_comps[i]], gridval[stress_comps[i]], FFT_BACKWARD);
         Kokkos::fence();
+        system->devtimer[TIMER_FFTTRANSFORMS].stop();
         
         Kokkos::parallel_for("ForceFFT::NormalizeStress",
-            Kokkos::RangePolicy<TagNormalizeStress>(0, Ngrid3), *this
+            Kokkos::MDRangePolicy<TagNormalizeStress,Kokkos::Rank<3>>(
+                {0, 0, 0}, {Ngrid[0], Ngrid[1], Ngrid[2]}
+            ), *this
         );
         Kokkos::fence();
         system->devtimer[TIMER_FFTSTRESS].stop();
@@ -803,15 +829,14 @@ public:
         xi[2] = 2.0*(q[2]-g[2]) - 1.0;
 
         // Determine elements for interpolation and apply PBC
-        int skip = 0;
         int ind1d[3][2];
         for (int i = 0; i < 2; i++) {
-            ind1d[0][i] = (g[0]+i)%Ngrid;
-            if (ind1d[0][i] < 0) ind1d[0][i] += Ngrid;
-            ind1d[1][i] = (g[1]+i)%Ngrid;
-            if (ind1d[1][i] < 0) ind1d[1][i] += Ngrid;
-            ind1d[2][i] = (g[2]+i)%Ngrid;
-            if (ind1d[2][i] < 0) ind1d[2][i] += Ngrid;
+            ind1d[0][i] = (g[0]+i)%Ngrid[0];
+            if (ind1d[0][i] < 0) ind1d[0][i] += Ngrid[0];
+            ind1d[1][i] = (g[1]+i)%Ngrid[1];
+            if (ind1d[1][i] < 0) ind1d[1][i] += Ngrid[1];
+            ind1d[2][i] = (g[2]+i)%Ngrid[2];
+            if (ind1d[2][i] < 0) ind1d[2][i] += Ngrid[2];
         }
 
         // 1d shape functions
@@ -825,7 +850,6 @@ public:
         double S[6];
         for (int l = 0; l < 6; l++) {
             S[l] = 0.0;
-            if (skip) continue;
             for (int k = 0; k < 2; k++) {
                 for (int j = 0; j < 2; j++) {
                     for (int i = 0; i < 2; i++) {

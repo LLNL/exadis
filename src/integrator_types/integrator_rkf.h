@@ -153,10 +153,8 @@ public:
         s = system;
         network = system->get_device_network();
         
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < 6; i++)
             Kokkos::resize(rkf[i], network->Nnodes_local);
-            Kokkos::deep_copy(rkf[i], 0.0);
-        }
         
         // Save nodal data
         Kokkos::resize(system->xold, network->Nnodes_local);
@@ -169,13 +167,11 @@ public:
         int convergent = 0;
         int incrDelta = 1;
         int iTry = -1;
-        double errormax = 0.0;
-        double relerrormax = 0.0;
+        errmax = Kokkos::View<double*>("IntegratorRKF:errmax", 2);
+        auto h_errmax = Kokkos::create_mirror_view(errmax);
         
         while (!convergent) {
             iTry++;
-            errormax = 0.0;
-            relerrormax = 0.0;
             
             // Apply the Runge-Kutta-Fehlberg integrator one step at a time
             for (int i = 0; i < 5; i++) {
@@ -185,20 +181,17 @@ public:
             }
             
             // Calculate the error
-            errmax = Kokkos::View<double*>("IntegratorRKF:errmax", 2);
+            Kokkos::deep_copy(errmax, 0.0);
             Kokkos::parallel_for("IntegratorRKF::ErrorNodes",
                 Kokkos::RangePolicy<TagErrorNodes>(0, network->Nnodes_local), *this
             );
             Kokkos::fence();
-            auto h_errmax = Kokkos::create_mirror_view(errmax);
             Kokkos::deep_copy(h_errmax, errmax);
-            errormax = h_errmax(0);
-            relerrormax = h_errmax(1);
             
             // If the error is within the tolerance, we've reached
             // convergence so we can accept this dt. Otherwise
             // reposition the nodes and try again.
-            if (errormax < rtol && relerrormax < rtolrel) {
+            if (h_errmax(0) < rtol && h_errmax(1) < rtolrel) {
                 // Calculate final positions
                 rkf_step(5);
                 convergent = 1;
@@ -228,7 +221,7 @@ public:
             if (dtVariableAdjustment) {
                 double tmp1, tmp2, tmp3, tmp4, factor;
                 tmp1 = pow(dtIncrementFact, dtExponent);
-                tmp2 = errormax/rtol;
+                tmp2 = h_errmax(0)/rtol;
                 tmp3 = 1.0 / dtExponent;
                 tmp4 = pow(1.0/(1.0+(tmp1-1.0)*tmp2), tmp3);
                 factor = dtIncrementFact * tmp4;

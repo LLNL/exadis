@@ -323,6 +323,9 @@ public:
      *                instance. It also has the option to build the
      *                neighbor list by only considering a subset of the
      *                input nodes/segs provided with the ind array.
+     *                When option strict=false, all nodes/segs in neighbor
+     *                boxes are included in the neighbor list without checking
+     *                their actual distance against the cutoff (faster).
      *---------------------------------------------------------------------*/
     template<class N>
     struct BuildNeighborList 
@@ -335,13 +338,14 @@ public:
         bool use_subset = false;
         NeiType input_type;
         Kokkos::View<int*, T_memory_space> ind;
+        bool strict = true;
         
         int Nbox = 27;
         double cutoff2;
         
         BuildNeighborList(System* _system, N* _net, NeighborBox* _neighbox, 
-                          NeighborList* _neilist, NeiType _type) :
-        system(_system), net(_net), neighbox(_neighbox), neilist(_neilist), input_type(_type) {
+                          NeighborList* _neilist, NeiType _type, bool _strict) :
+        system(_system), net(_net), neighbox(_neighbox), neilist(_neilist), input_type(_type), strict(_strict) {
             use_subset = false;
             build();
         }
@@ -375,13 +379,17 @@ public:
                 int nei_box_id = neighbox->neighbor_box_index(id, ib);
                 if (nei_box_id >= 0) {
                     int Nnei = neighbox->countBox(nei_box_id);
-                    int n = neighbox->boxes(nei_box_id);
-                    for (int l = 0; l < Nnei; l++) {
-                        neighbox->get_neighbor(net, p, ib, n, dist2);
-                        if (dist2 <= cutoff2) nloc++;
-                        n = neighbox->nextInBox(n);
+                    if (!strict) {
+                        nsum += Nnei;
+                    } else {
+                        int n = neighbox->boxes(nei_box_id);
+                        for (int l = 0; l < Nnei; l++) {
+                            neighbox->get_neighbor(net, p, ib, n, dist2);
+                            if (dist2 <= cutoff2) nloc++;
+                            n = neighbox->nextInBox(n);
+                        }
+                        nsum += nloc;
                     }
-                    nsum += nloc;
                 }
             }, Nneitot);
             team.team_barrier();
@@ -418,8 +426,12 @@ public:
                 int Nnei = neighbox->countBox(nei_box_id);
                 int n = neighbox->boxes(nei_box_id);
                 for (int l = 0; l < Nnei; l++) {
-                    neighbox->get_neighbor(net, p, ib, n, dist2);
-                    if (dist2 <= cutoff2) {
+                    bool add_nei = true;
+                    if (strict) {
+                        neighbox->get_neighbor(net, p, ib, n, dist2);
+                        add_nei = (dist2 <= cutoff2);
+                    }
+                    if (add_nei) {
                         int idx = Kokkos::atomic_fetch_add(&neilist->count(i), 1);
                         neilist->list(beg+idx) = n;
                     }
@@ -441,7 +453,7 @@ public:
             Kokkos::resize(neilist->count, Ntype_local);
             Kokkos::deep_copy(neilist->count, 0);
             
-        #if defined(KOKKOS_ENABLE_CUDA)
+        #if defined(KOKKOS_ENABLE_CUDA) || defined(KOKKOS_ENABLE_HIP)
             int TEAM_SIZE = 32;
         #else
             const Kokkos::AUTO_t TEAM_SIZE = Kokkos::AUTO;
@@ -464,10 +476,10 @@ public:
     };
     
     template<class N>
-    NeighborList* build_neighbor_list(System* system, N* net, NeiType idtype)
+    NeighborList* build_neighbor_list(System* system, N* net, NeiType idtype, bool strict)
     {
         NeighborList* neilist = exadis_new<NeighborList>();
-        BuildNeighborList(system, net, this, neilist, idtype);
+        BuildNeighborList(system, net, this, neilist, idtype, strict);
         return neilist;
     }
     
@@ -489,9 +501,9 @@ public:
  *
  *-------------------------------------------------------------------------*/
 template<class N>
-inline NeighborList* generate_neighbor_list(System* system, N* net, double cutoff, Neighbor::NeiType type) {
+inline NeighborList* generate_neighbor_list(System* system, N* net, double cutoff, Neighbor::NeiType type, bool strict=true) {
     NeighborBox* neighbox = exadis_new<NeighborBox>(system, net, cutoff, type);
-    NeighborList* neilist = neighbox->build_neighbor_list(system, net, type);
+    NeighborList* neilist = neighbox->build_neighbor_list(system, net, type, strict);
     exadis_delete(neighbox);
     return neilist;
 }

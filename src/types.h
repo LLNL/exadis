@@ -268,17 +268,6 @@ private:
     DeviceDisNet *d_network;
 };
 
-/*---------------------------------------------------------------------------
- *
- *    Function:     make_network_manager
- *                  Helper function to create a network manager object
- *
- *-------------------------------------------------------------------------*/
-inline DisNetManager* make_network_manager(SerialDisNet* net) {
-    net->generate_connectivity();
-    return exadis_new<DisNetManager>(net);
-}
-
 } // namespace ExaDiS
 
 
@@ -353,7 +342,7 @@ template <class ExecutionSpace = Kokkos::DefaultExecutionSpace>
 struct SortView
 {
     template <typename ViewType>
-    SortView(const ViewType &val, int beg, int end) {
+    SortView(ViewType& val, int beg, int end) {
         std::sort(val.data() + beg, val.data() + end);
     }
 };
@@ -362,7 +351,7 @@ template <class ExecutionSpace = Kokkos::DefaultExecutionSpace>
 struct SortViewByKey
 {
     template <typename ViewTypeKey, typename ViewTypeVal>
-    SortViewByKey(const ViewTypeKey &key, const ViewTypeVal &val, int beg, int end) {
+    SortViewByKey(ViewTypeKey& key, ViewTypeVal& val, int beg, int end) {
         std::vector<size_t> idx(end-beg);
         std::iota(idx.begin(), idx.end(), 0);
         std::stable_sort(idx.begin(), idx.end(), [&key,beg](size_t i1, size_t i2) {
@@ -388,7 +377,7 @@ template<>
 struct SortView<Kokkos::Cuda>
 {
     template <typename ViewType>
-    SortView(const ViewType &val, int beg, int end) {
+    SortView(const ViewType& val, int beg, int end) {
         typedef typename ViewType::value_type val_type;
         thrust::sort(thrust::device_ptr<val_type>(val.data() + beg),
                      thrust::device_ptr<val_type>(val.data() + end));
@@ -399,7 +388,7 @@ template<>
 struct SortViewByKey<Kokkos::Cuda>
 {
     template <typename ViewTypeKey, typename ViewTypeVal>
-    SortViewByKey(const ViewTypeKey &key, const ViewTypeVal &val, int beg, int end) {
+    SortViewByKey(const ViewTypeKey& key, const ViewTypeVal& val, int beg, int end) {
         typedef typename ViewTypeKey::value_type key_type;
         typedef typename ViewTypeVal::value_type val_type;
         thrust::sort_by_key(thrust::device_ptr<key_type>(key.data() + beg),

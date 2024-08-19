@@ -24,8 +24,8 @@ public:
     DisNetManager* net_mngr;
     double neighbor_cutoff;
     
-    inline SerialDisNet *get_serial_network() { return net_mngr->get_serial_network(); }
-    inline DeviceDisNet *get_device_network() { return net_mngr->get_device_network(); }
+    inline SerialDisNet* get_serial_network() { return net_mngr->get_serial_network(); }
+    inline DeviceDisNet* get_device_network() { return net_mngr->get_device_network(); }
     
     inline int Nnodes_local() { return net_mngr->Nnodes_local(); }
     inline int Nsegs_local() { return net_mngr->Nsegs_local(); }
@@ -46,6 +46,7 @@ public:
     System();
     ~System();
     void initialize(Params _params, Crystal _crystal, SerialDisNet *network);
+    void register_neighbor_cutoff(double cutoff);
     void plastic_strain();
     void reset_glide_planes();
     void write_config(std::string filename);
@@ -75,10 +76,11 @@ public:
         devtimer[numdevtimer++].label = label;
         return numdevtimer-1;
     }
-    void print_timers();
+    void print_timers(bool dev=false);
 };
 
 System* make_system(SerialDisNet* net, Crystal crystal=Crystal(), Params params=Params());
+DisNetManager* make_network_manager(SerialDisNet* net);
 
 } // namespace ExaDiS
 

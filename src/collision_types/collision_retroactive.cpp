@@ -1465,7 +1465,7 @@ void CollisionRetroactive::retroactive_collision(System* system)
         auto neilist = neighbor->query(pseg);
     
         for (int j = 0; j < neilist.size(); j++) {
-            int k = neilist[j]->index;
+            int k = neilist[j];
             if (i <= k) continue; // collision with segments k>i
             if (skipseg[k]) continue;
             

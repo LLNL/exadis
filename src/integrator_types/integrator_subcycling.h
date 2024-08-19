@@ -59,8 +59,10 @@ public:
         FSeg::Params FSegParams;
         FLong::Params FLongParams;
         bool drift = true;
-        Params(int Ngrid) { FLongParams.Ngrid = Ngrid; }
-        Params(int Ngrid, bool _drift) { FLongParams.Ngrid = Ngrid; drift = _drift; }
+        Params(int Ngrid) { FLongParams = FLong::Params(Ngrid); }
+        Params(int Nx, int Ny, int Nz) { FLongParams = FLong::Params(Nx, Ny, Nz); }
+        Params(int Ngrid, bool _drift) { FLongParams = FLong::Params(Ngrid); drift = _drift; }
+        Params(int Nx, int Ny, int Nz, bool _drift) { FLongParams = FLong::Params(Nx, Ny, Nz); drift = _drift; }
         Params(FSeg::Params _FSegParams, FLong::Params _FLongParams) :
         FSegParams(_FSegParams), FLongParams(_FLongParams) {}
     };
@@ -80,7 +82,7 @@ public:
     
     void init_subforce(System* system, int _Ngroups) {
         if (_Ngroups != Ngroups)
-            ExaDiS_fatal("Error: inconsistent number of groups in ForceSubcyclingDrift\n");
+            ExaDiS_fatal("Error: inconsistent number of groups in ForceSubcycling\n");
         for (int i = 0; i < Ngroups-1; i++)
             Kokkos::resize(fgroup[i], system->Nnodes_local());
     }
@@ -202,8 +204,8 @@ struct SegSegGroups
             
         if (rgroups.size() == 0) {
             // No group radii were provided, let's try to select some appropriate values
-            double rmin = fmax(0.3*system->params.minseg, 3.0*system->params.rann);
             double rmax = fmin(system->params.maxseg, cutoff);
+            double rmin = fmin(fmax(0.3*system->params.minseg, 3.0*system->params.rann), rmax);
             rgroups.resize(Ngroups-1);
             rgroups[0] = 0.0;
             for (int i = 1; i < Ngroups-1; i++) {
@@ -219,8 +221,11 @@ struct SegSegGroups
         for (int i = 0; i < Ngroups-1; i++) {
             r2groups[i] = rgroups[i] * rgroups[i];
             if (i > 0) {
-                if (rgroups[i-1] > rgroups[i])
+                if (rgroups[i-1] > rgroups[i]) {
+                    for (int j = 0; j < rgroups.size(); j++)
+                        printf("Group %d: r = %e\n", j, rgroups[j]);
                     ExaDiS_fatal("Error: subcycling group radii must be of increasing size\n");
+                }
             }
         }
         Kokkos::resize(gcount, Ngroups);
@@ -245,7 +250,7 @@ struct SegSegGroups
         Kokkos::resize(gdist2, Nsegseg[Ngroups-1]);
         Kokkos::deep_copy(countmove, 0);
         for (int i = 0; i < Ngroups; i++)
-            gfrac[i] = 1.0*Nsegseg[i]/Nsegseg_tot;
+            gfrac[i] = (Nsegseg_tot > 0) ? 1.0*Nsegseg[i]/Nsegseg_tot : 0;
     }
     
     KOKKOS_INLINE_FUNCTION
@@ -347,7 +352,7 @@ struct BuildSegSegGroups {
             if (i < j) { // avoid double-counting
                 // Compute distance
                 double dist2 = get_min_dist2_segseg(net, i, j, 1);
-                if (dist2 < cutoff2) {
+                if (dist2 >= 0.0 && dist2 < cutoff2) {
                     int groupid = groups->find_group(dist2);
                     if (count_only) {
                         Kokkos::atomic_increment(&groups->gcount(groupid));
@@ -462,10 +467,8 @@ public:
         s = system;
         network = system->get_device_network();
         
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < 6; i++)
             Kokkos::resize(rkf[i], network->Nnodes_local);
-            Kokkos::deep_copy(rkf[i], 0.0);
-        }
         
         // Save nodal data
         Kokkos::resize(system->xold, network->Nnodes_local);
@@ -478,16 +481,14 @@ public:
         int convergent = 0;
         int incrDelta = 1;
         int iTry = -1;
-        double errormax = 0.0;
-        double relerrormax = 0.0;
+        errmax = Kokkos::View<double*>("IntegratorRKFSubcycling:errmax", 2);
+        auto h_errmax = Kokkos::create_mirror_view(errmax);
         
         if (group > 0 && subgroups->Nsegseg[group] == 0)
             convergent = 1;
         
         while (!convergent) {
             iTry++;
-            errormax = 0.0;
-            relerrormax = 0.0;
             
             // Apply the Runge-Kutta-Fehlberg integrator one step at a time
             for (int i = 0; i < 5; i++) {
@@ -508,20 +509,17 @@ public:
             }
             
             // Calculate the error
-            errmax = Kokkos::View<double*>("IntegratorRKFSubcycling:errmax", 2);
+            Kokkos::deep_copy(errmax, 0.0);
             Kokkos::parallel_for("IntegratorRKFSubcycling::ErrorFlagNodes", network->Nnodes_local,
                 ErrorFlagNodes(system, network, this, (group == Ngroups-1 && iTry < nTry))
             );
             Kokkos::fence();
-            auto h_errmax = Kokkos::create_mirror_view(errmax);
             Kokkos::deep_copy(h_errmax, errmax);
-            errormax = h_errmax(0);
-            relerrormax = h_errmax(1);
             
             // If the error is within the tolerance, we've reached
             // convergence so we can accept this dt. Otherwise
             // reposition the nodes and try again.
-            if (errormax < rtol && relerrormax < rtolrel) {
+            if (h_errmax(0) < rtol && h_errmax(1) < rtolrel) {
                 // Calculate final positions
                 rkf_step(5);
                 convergent = 1;
@@ -557,7 +555,7 @@ public:
             if (dtVariableAdjustment) {
                 double tmp1, tmp2, tmp3, tmp4, factor;
                 tmp1 = pow(dtIncrementFact, dtExponent);
-                tmp2 = errormax/rtol;
+                tmp2 = h_errmax(0)/rtol;
                 tmp3 = 1.0 / dtExponent;
                 tmp4 = pow(1.0/(1.0+(tmp1-1.0)*tmp2), tmp3);
                 factor = dtIncrementFact * tmp4;
@@ -780,7 +778,7 @@ public:
         subgroups->update_interactions();
         
         
-        // Time integrate group 1, 2, 3 and 4 interactions (subcycle)
+        // Time integrate group 0, 1, 2 and 3 interactions (subcycle)
         // Initialize the time for each group based on whether it has any forces in it
         double subtime[Ngroups-1];
         int numsubcyc[Ngroups-1];
