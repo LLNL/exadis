@@ -35,12 +35,16 @@ private:
     double maxdt;
     
     T_x xold;
+    
+    typedef typename I::Params IParams;
 
 public:
     struct Params {
         int maxsubcyle;
+        IParams Iparams = IParams();
         Params() { maxsubcyle = 10; }
         Params(int _maxsubcyle) : maxsubcyle(_maxsubcyle) {}
+        Params(IParams _Iparams, int _maxsubcyle) : Iparams(_Iparams), maxsubcyle(_maxsubcyle) {}
     };
     
     IntegratorMulti(System* system, Force* _force, Mobility* _mobility, int _maxsubcyle=10) :
@@ -54,7 +58,7 @@ public:
     force(_force), mobility(_mobility) {
         maxdt = system->params.maxdt;
         maxsubcyle = params.maxsubcyle;
-        integrator = exadis_new<I>(system, force, mobility);
+        integrator = exadis_new<I>(system, force, mobility, params.Iparams);
     }
     
     // Use a functor so that we can safely call the destructor

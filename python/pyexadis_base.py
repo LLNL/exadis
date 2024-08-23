@@ -381,6 +381,7 @@ class TimeIntegration:
         self.Update_Functions = {
             'EulerForward': self.Update_EulerForward,
             'Trapezoid': self.Integrate,
+            'RKF': self.Integrate,
             'Subcycling': self.Integrate,
         }
         
@@ -399,13 +400,35 @@ class TimeIntegration:
             mobility, self.mobility_python = get_exadis_mobility(mobility_module, state, params)
             
             if multi > 1:
-                intparams = pyexadis.Integrator_Multi_Params(multi)
+                intparams = pyexadis.Integrator_Trapezoid_Multi_Params(multi)
                 self.integrator = pyexadis.make_integrator_trapezoid_multi(params=params, intparams=intparams, 
                                                                            force=force, mobility=mobility)
             else:
                 intparams = pyexadis.Integrator_Trapezoid_Params()
                 self.integrator = pyexadis.make_integrator_trapezoid(params=params, intparams=intparams, 
                                                                      force=force, mobility=mobility)
+        elif self.integrator_type == 'RKF':
+            multi = kwargs.get('multi', 0)
+            rtolth = kwargs.get('rtolth', 1.0)
+            rtolrel = kwargs.get('rtolrel', 0.1)
+            
+            force_module = kwargs.get('force')
+            if isinstance(force_module, CalForce):
+                if force_module.force_mode == 'SUBCYCLING_MODEL':
+                    raise ValueError('Force SUBCYCLING_MODEL can only be used with Subcycling integrator')
+            force, self.force_python = get_exadis_force(force_module, state, params)
+            
+            mobility_module = kwargs.get('mobility')
+            mobility, self.mobility_python = get_exadis_mobility(mobility_module, state, params)
+            
+            intparams = pyexadis.Integrator_RKF_Params(rtolth=rtolth, rtolrel=rtolrel)
+            if multi > 1:
+                mintparams = pyexadis.Integrator_RKF_Multi_Params(intparams, multi)
+                self.integrator = pyexadis.make_integrator_rkf_multi(params=params, intparams=mintparams, 
+                                                                     force=force, mobility=mobility)
+            else:
+                self.integrator = pyexadis.make_integrator_rkf(params=params, intparams=intparams, 
+                                                               force=force, mobility=mobility)
         elif self.integrator_type == 'Subcycling':
             rgroups = kwargs.get('rgroups')
             rtolth = kwargs.get('rtolth', 1.0)

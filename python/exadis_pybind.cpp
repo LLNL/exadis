@@ -1203,8 +1203,14 @@ PYBIND11_MODULE(pyexadis, m) {
         
     py::class_<IntegratorTrapezoid::Params>(m, "Integrator_Trapezoid_Params")
         .def(py::init<>());
-    py::class_<IntegratorMulti<IntegratorTrapezoid>::Params>(m, "Integrator_Multi_Params")
+    py::class_<IntegratorMulti<IntegratorTrapezoid>::Params>(m, "Integrator_Trapezoid_Multi_Params")
         .def(py::init<int>(), py::arg("multi"));
+    py::class_<IntegratorRKF::Params>(m, "Integrator_RKF_Params")
+        .def(py::init<>())
+        .def(py::init<double, double>(), py::arg("rtolth"), py::arg("rtolrel"));
+    py::class_<IntegratorMulti<IntegratorRKF>::Params>(m, "Integrator_RKF_Multi_Params")
+        .def(py::init<int>(), py::arg("multi"))
+        .def(py::init<IntegratorRKF::Params, int>(), py::arg("intparams"), py::arg("multi"));
     py::class_<IntegratorSubcycling::Params>(m, "Integrator_Subcycling_Params")
         .def(py::init<std::vector<double>, double, double>(), py::arg("rgroups"), py::arg("rtolth")=1.0, py::arg("rtolrel")=0.1);
         
@@ -1284,6 +1290,10 @@ PYBIND11_MODULE(pyexadis, m) {
     m.def("make_integrator_trapezoid", &make_integrator<IntegratorTrapezoid>, "Instantiate a trapezoid integrator",
           py::arg("params"), py::arg("intparams"), py::arg("force"), py::arg("mobility"));
     m.def("make_integrator_trapezoid_multi", &make_integrator<IntegratorMulti<IntegratorTrapezoid> >, "Instantiate a multi-step trapezoid integrator",
+          py::arg("params"), py::arg("intparams"), py::arg("force"), py::arg("mobility"));
+    m.def("make_integrator_rkf", &make_integrator<IntegratorRKF>, "Instantiate a RKF integrator",
+          py::arg("params"), py::arg("intparams"), py::arg("force"), py::arg("mobility"));
+    m.def("make_integrator_rkf_multi", &make_integrator<IntegratorMulti<IntegratorRKF> >, "Instantiate a multi-step RKF integrator",
           py::arg("params"), py::arg("intparams"), py::arg("force"), py::arg("mobility"));
     m.def("make_integrator_subclycing", &make_integrator<IntegratorSubcycling>, "Instantiate a subcycling integrator",
           py::arg("params"), py::arg("intparams"), py::arg("force"), py::arg("mobility"));
