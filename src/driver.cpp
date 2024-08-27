@@ -48,6 +48,7 @@ ExaDiSApp::ExaDiSApp()
     Etot = Mat33().zero();
     stress = strain = pstrain = 0.0;
     tottime = 0.0;
+    dealloc = false;
 }
 
 /*---------------------------------------------------------------------------
@@ -58,6 +59,7 @@ ExaDiSApp::ExaDiSApp()
  *-------------------------------------------------------------------------*/
 ExaDiSApp::~ExaDiSApp()
 {
+    if (!dealloc) return;
     exadis_delete(system);
     if (force) delete force;
     if (mobility) delete mobility;

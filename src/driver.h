@@ -33,6 +33,7 @@ public:
     Remesh* remesh = nullptr;
     std::string outputdir = "";
     
+    bool dealloc = true;
     bool setup = false;
     bool init = false;
     bool log = true;
