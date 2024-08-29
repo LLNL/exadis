@@ -659,8 +659,8 @@ std::vector<Vec3> compute_force_segseglist(ExaDisNet& disnet, double MU, double 
     for (size_t i = 0; i < segseglist.size(); i++) {
         int s1 = segseglist[i][0];
         int s2 = segseglist[i][1];
-        if (s1 < 0 || s1 >= system->Nnodes_total() ||
-            s2 < 0 || s2 >= system->Nnodes_total())
+        if (s1 < 0 || s1 >= system->Nsegs_total() ||
+            s2 < 0 || s2 >= system->Nsegs_total())
             ExaDiS_fatal("Error: invalid segment index in compute_force_segseglist\n");
         ssl->segseglist.h_view(i) = SegSeg(s1, s2);
     }
