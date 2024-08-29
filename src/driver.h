@@ -66,6 +66,21 @@ public:
     
     struct Prop {
         enum fields {STEP, STRAIN, STRESS, DENSITY, NNODES, NSEGS, DT, TIME, WALLTIME, EDIR, ALLSTRESS};
+        static fields get_field(std::string& name) {
+            if (name == "Step" || name == "step") return STEP;
+            else if (name == "Strain" || name == "strain") return STRAIN;
+            else if (name == "Stress" || name == "stress") return STRESS;
+            else if (name == "Density" || name == "density") return DENSITY;
+            else if (name == "Nnodes") return NNODES;
+            else if (name == "Nsegs") return NSEGS;
+            else if (name == "DT" || name == "dt") return DT;
+            else if (name == "Time" || name == "time") return TIME;
+            else if (name == "Walltime" || name == "walltime") return WALLTIME;
+            else if (name == "edir") return EDIR;
+            else if (name == "Allstress" || name == "allstress") return ALLSTRESS;
+            else ExaDiS_fatal("Unknown control property name = %s\n", name.c_str());
+            return STEP;
+        }
     };
     
     enum Loadings {STRESS_CONTROL, STRAIN_RATE_CONTROL};
@@ -80,6 +95,11 @@ public:
         int propfreq = 10;
         int outfreq = 100;
         std::vector<Prop::fields> props = {Prop::STEP, Prop::STRAIN, Prop::STRESS, Prop::DENSITY};
+        void set_props(std::vector<std::string> fields) {
+            props.clear();
+            for (auto f : fields)
+                props.push_back(Prop::get_field(f));
+        }
     };
     
     ExaDiSApp(int argc, char* argv[]);

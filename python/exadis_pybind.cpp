@@ -1351,7 +1351,8 @@ PYBIND11_MODULE(pyexadis, m) {
         .def_readwrite("rotation", &Driver::Control::rotation, "Enable crystal rotation")
         .def_readwrite("printfreq", &Driver::Control::printfreq, "Print frequency")
         .def_readwrite("propfreq", &Driver::Control::propfreq, "Properties output frequency")
-        .def_readwrite("outfreq", &Driver::Control::outfreq, "Configuration and restart output frequency");
+        .def_readwrite("outfreq", &Driver::Control::outfreq, "Configuration and restart output frequency")
+        .def("set_props", &Driver::Control::set_props, "Set property fields for the output");
     py::enum_<Driver::Loadings>(driver, "Loadings")
         .value("STRESS_CONTROL", Driver::Loadings::STRESS_CONTROL)
         .value("STRAIN_RATE_CONTROL", Driver::Loadings::STRAIN_RATE_CONTROL)

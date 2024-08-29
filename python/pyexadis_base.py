@@ -764,6 +764,7 @@ class SimulateNetworkPerf(SimulateNetwork):
         self.max_strain = kwargs.get('max_strain', None)
         self.max_time = kwargs.get('max_time', None)
         self.max_walltime = kwargs.get('max_walltime', None)
+        self.out_props = kwargs.get('out_props', None)
         
     def run(self, N: DisNetManager, state: dict):
         
@@ -812,6 +813,8 @@ class SimulateNetworkPerf(SimulateNetwork):
         ctrl.printfreq = self.print_freq
         ctrl.propfreq = self.print_freq
         ctrl.outfreq = self.write_freq
+        if self.out_props is not None:
+            ctrl.set_props(self.out_props)
         
         # initialize simulation
         driver.initialize(ctrl)

@@ -554,6 +554,9 @@ void ExaDiSApp::initialize(Control& ctrl)
     }
     
     init = true;
+    
+    // Initial output at step 0
+    output(ctrl);
 }
 
 /*---------------------------------------------------------------------------
@@ -610,9 +613,6 @@ void ExaDiSApp::run(Control& ctrl)
 {
     // Iniatialize and check that everything is setup properly
     initialize(ctrl);
-    
-    // Initial output at step 0
-    output(ctrl);
     
     // Main loop
     timer.reset();
