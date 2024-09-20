@@ -22,6 +22,7 @@ namespace ExaDiS {
  *-------------------------------------------------------------------------*/
 class Mobility {
 public:
+    bool non_linear = false;
     Mobility() {}
     Mobility(System *system) {}
     virtual void compute(System *system) = 0;
@@ -47,6 +48,7 @@ public:
     
     MobilityLocal(System *system, Params params) {
         mob = exadis_new<M>(system, params);
+        non_linear = mob->non_linear;
     }
     
     template<class N>

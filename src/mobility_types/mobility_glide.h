@@ -22,6 +22,7 @@ namespace ExaDiS {
  *-------------------------------------------------------------------------*/
 struct MobilityGlide
 {
+    const bool non_linear = false;
     double Medge, Mscrew;
     
     struct Params {

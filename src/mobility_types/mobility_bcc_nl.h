@@ -34,6 +34,7 @@ namespace ExaDiS {
  *-------------------------------------------------------------------------*/
 struct MobilityBCC_nl
 {
+    const bool non_linear = true;
     struct Params {
         double ALPHA_SCREW      = 3.3;
         double BETA_SCREW       = 2.0e-4;

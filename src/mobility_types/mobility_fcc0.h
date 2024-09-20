@@ -22,6 +22,7 @@ namespace ExaDiS {
  *-------------------------------------------------------------------------*/
 struct MobilityFCC0
 {
+    bool non_linear = false;
     double Medge, Mscrew;
     double vmax, vscale;
     

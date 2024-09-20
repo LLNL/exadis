@@ -22,6 +22,7 @@ namespace ExaDiS {
  *-------------------------------------------------------------------------*/
 struct MobilityBCC0b
 {
+    const bool non_linear = false;
     double Beclimbj;
     double Bscrew2, Beclimb2;
     double Bline, BlmBsc, BlmBecl;
