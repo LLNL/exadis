@@ -4,14 +4,19 @@ ExaDiS version 0.1
 
 ExaDiS (Exascale Dislocation Simulator) is a set of software modules written to enable numerical simulations of large groups of moving and interacting dislocations, line defects in crystals responsible for crystal plasticity. By tracking time evolution of sufficiently large dislocation ensembles, ExaDiS predicts plasticity response and plastic strength of crystalline materials.
 
-ExaDiS is built around a portable library of core functions for Discrete Dislocation Dynamics (DDD) method specifically written to perform efficient computations on new HPC architectures (e.g. GPUs). Simulations can be driven through the C++ or python interfaces. The python binding module can also be interfaced with the upcoming [OpenDiS](https://gitlab.com/opendis/) framework.
+ExaDiS is built around a portable library of core functions for Discrete Dislocation Dynamics (DDD) method specifically written to perform efficient computations on new HPC architectures (e.g. GPUs). Simulations can be driven through the C++ or python interfaces. The python binding module is designed to be interfaced with the [OpenDiS](https://github.com/OpenDiS/OpenDiS) framework.
 
 Note: Although ExaDiS is a fully functional code, it is currently under active development and is subject to frequent updates and bug fixes. There is no guarantee of stability and one should expect occasional breaking changes to the code.
 
 
 ## Quick start
 
-ExaDiS is implemented using the [Kokkos](https://kokkos.org) framework and built using the CMake build system. A typical installation of the code follows the steps below:
+ExaDiS is part of the [OpenDiS](https://github.com/OpenDiS/OpenDiS) framework, for which it is the HPC core engine. To obtain the code as part of OpenDiS (preferred way), follow the instructions at the [OpenDiS documentation](https://opendis.github.io/OpenDiS/installation/index.html).
+
+
+## ExaDiS as a standalone
+
+Alternatively, the code can be obtained as a standalone. ExaDiS is implemented using the [Kokkos](https://kokkos.org) framework and built using the CMake build system. A typical standalone installation of the code follows the steps below:
 
 * Step 1: Clone this repository and submodules
 ```
