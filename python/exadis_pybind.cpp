@@ -1212,7 +1212,8 @@ PYBIND11_MODULE(pyexadis, m) {
         .def(py::init<int>(), py::arg("multi"))
         .def(py::init<IntegratorRKF::Params, int>(), py::arg("intparams"), py::arg("multi"));
     py::class_<IntegratorSubcycling::Params>(m, "Integrator_Subcycling_Params")
-        .def(py::init<std::vector<double>, double, double>(), py::arg("rgroups"), py::arg("rtolth")=1.0, py::arg("rtolrel")=0.1);
+        .def(py::init<std::vector<double>, double, double, std::string>(),
+        py::arg("rgroups"), py::arg("rtolth")=1.0, py::arg("rtolrel")=0.1, py::arg("fstats")="");
         
     py::class_<Topology::Params>(m, "Topology_Params")
         .def(py::init<double>(), py::arg("splitMultiNodeAlpha"));
@@ -1245,7 +1246,7 @@ PYBIND11_MODULE(pyexadis, m) {
     m.def("make_force_ddd_fft", &make_force_ddd_fft<0>, "Instantiate a DDD-FFT force model",
           py::arg("params"), py::arg("coreparams"), py::arg("Ngrid"), py::arg("cell"), py::arg("drift")=0);
     m.def("make_force_subcycling", &make_force_ddd_fft<1>, "Instantiate a subcycling force model",
-          py::arg("params"), py::arg("coreparams"), py::arg("Ngrid"), py::arg("cell"), py::arg("drift")=1);
+          py::arg("params"), py::arg("coreparams"), py::arg("Ngrid"), py::arg("cell"), py::arg("drift")=0);
     m.def("make_force_python", &make_force_python, "Instantiate a python-based force model",
           py::arg("params"), py::arg("force"));
     

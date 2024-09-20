@@ -195,7 +195,7 @@ class CalForce:
             cell = kwargs.get('cell')
             if not isinstance(cell, pyexadis.Cell):
                 cell = pyexadis.Cell(h=cell.h, origin=cell.origin, is_periodic=cell.is_periodic)
-            drift = kwargs.get('drift', 1)
+            drift = kwargs.get('drift', 0)
             self.force = pyexadis.make_force_subcycling(params=self.params, coreparams=coreparams,
                                                         Ngrid=Ngrid, cell=cell, drift=drift)
             
@@ -433,6 +433,7 @@ class TimeIntegration:
             rgroups = kwargs.get('rgroups')
             rtolth = kwargs.get('rtolth', 1.0)
             rtolrel = kwargs.get('rtolrel', 0.1)
+            fstats = kwargs.get('fstats', "")
             
             force_module = kwargs.get('force')
             if force_module.force_mode != 'SUBCYCLING_MODEL':
@@ -442,7 +443,7 @@ class TimeIntegration:
             mobility_module = kwargs.get('mobility')
             mobility, self.mobility_python = get_exadis_mobility(mobility_module, state, params)
             
-            intparams = pyexadis.Integrator_Subcycling_Params(rgroups, rtolth, rtolrel)
+            intparams = pyexadis.Integrator_Subcycling_Params(rgroups, rtolth, rtolrel, fstats)
             self.integrator = pyexadis.make_integrator_subclycing(params=params, intparams=intparams, 
                                                                  force=force, mobility=mobility)
         else:

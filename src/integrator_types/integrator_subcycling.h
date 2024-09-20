@@ -25,13 +25,13 @@ namespace ExaDiS {
  *                  It contains member properties specific to the subcycling
  *                  scheme.
  *                  
- *                  WARNING: by default (drift=1), this is a modified version
+ *                  NOTE: when option drift=1, this is a modified version
  *                  of the original subcycling scheme in which nodal forces 
  *                  are stored for groups > 0 and summed up when group 0 is
  *                  selected. This allows to integrate nodes under the total
  *                  force during each subcycle, and makes it compatible with
  *                  arbitrary mobility laws. The original subcycling scheme
- *                  is used when drift=0.
+ *                  is used when drift=0 (default).
  *                  
  *                  Eventually this class could be templated to be
  *                  more generic and offer more flexibility on the type of
@@ -58,7 +58,7 @@ public:
     struct Params {
         FSeg::Params FSegParams;
         FLong::Params FLongParams;
-        bool drift = true;
+        bool drift = false;
         Params(int Ngrid) { FLongParams = FLong::Params(Ngrid); }
         Params(int Nx, int Ny, int Nz) { FLongParams = FLong::Params(Nx, Ny, Nz); }
         Params(int Ngrid, bool _drift) { FLongParams = FLong::Params(Ngrid); drift = _drift; }
@@ -331,11 +331,12 @@ struct BuildSegSegGroups {
     G* groups;
     NeighborList* neilist;
     double cutoff2;
+    bool hinge;
     bool count_only;
     
     BuildSegSegGroups(N* _net, G* _groups, NeighborList* _neilist, 
-                      double _cutoff, bool _count_only) : 
-    net(_net), groups(_groups), neilist(_neilist), count_only(_count_only) {
+                      double _cutoff, bool _hinge, bool _count_only) : 
+    net(_net), groups(_groups), neilist(_neilist), hinge(_hinge), count_only(_count_only) {
         cutoff2 = _cutoff * _cutoff;
         Kokkos::deep_copy(groups->gcount, 0); 
     }
@@ -351,7 +352,7 @@ struct BuildSegSegGroups {
             int j = nei(i,l); // neighbor seg
             if (i < j) { // avoid double-counting
                 // Compute distance
-                double dist2 = get_min_dist2_segseg(net, i, j, 1);
+                double dist2 = get_min_dist2_segseg(net, i, j, hinge);
                 if (dist2 >= 0.0 && dist2 < cutoff2) {
                     int groupid = groups->find_group(dist2);
                     if (count_only) {
@@ -626,19 +627,27 @@ private:
     G* subgroups;
     IntegratorRKFSubcycling<Ngroups>* integrator;
     SegSegList* segseglist;
+    int numsubcyc[Ngroups];
+    int totsubcyc;
     
     int TIMER_BUILDGROUPS, TIMER_GROUPN, TIMER_SUBCYCLING;
+    
+    bool stats = false;
+    std::string fstats;
     
 public:
     struct Params {
         std::vector<double> rgroups;
         double rtolth, rtolrel;
+        std::string fstats = "";
         Params() { rtolth = 1.0; rtolrel = 0.1; }
         Params(std::vector<double> _rgroups) : rgroups(_rgroups) { 
             rtolth = 1.0; rtolrel = 0.1;
         }
         Params(std::vector<double> _rgroups, double _rtolth, double _rtolrel) : 
         rgroups(_rgroups), rtolth(_rtolth), rtolrel(_rtolrel) {}
+        Params(std::vector<double> _rgroups, double _rtolth, double _rtolrel, std::string _fstats) : 
+        rgroups(_rgroups), rtolth(_rtolth), rtolrel(_rtolrel), fstats(_fstats) {}
     };
     
     IntegratorSubcycling(System* system, Force* _force, Mobility* _mobility, Params params=Params()) : 
@@ -648,8 +657,17 @@ public:
         if (force == nullptr)
             ExaDiS_fatal("Error: must use ForceSubcycling with IntegratorSubcycling\n");
         
+        // Need to use subcycling mode drift=1 for non-linear mobility laws
+        if (mobility->non_linear && !force->drift)
+            ExaDiS_log("WARNING: using non-linear mobility law with subcycling integrator\n"
+            " Use force option drift=1 to ensure correct time-integration\n");
+        
         double cutoff = force->fsegseg->get_cutoff();
         subgroups = exadis_new<G>(system, params.rgroups, cutoff);
+        
+        // Make sure we have hinges in group 0 for subcycling drift model
+        if (force->drift)
+            subgroups->r2groups[0] = fmax(subgroups->r2groups[0], 1.0);
         
         IntegratorRKFSubcycling<Ngroups>::Params IParams(params.rtolth, params.rtolrel, subgroups);
         integrator = exadis_new<IntegratorRKFSubcycling<Ngroups> >(system, force, mobility, IParams);
@@ -657,6 +675,29 @@ public:
         TIMER_BUILDGROUPS = system->add_timer("IntegratorSubcycling build groups");
         TIMER_GROUPN = system->add_timer("IntegratorSubcycling integrate group N");
         TIMER_SUBCYCLING = system->add_timer("IntegratorSubcycling integrate subcycles");
+        
+        if (!params.fstats.empty()) {
+            stats = true;
+            fstats = params.fstats;
+        }
+    }
+    
+    void write_stats() {
+        if (0) {
+            printf("Subcycling\n");
+            for (int i = 0; i < Ngroups; i++)
+                printf("  Group %d: cutoff = %e, Nsegseg = %d, fraction = %f, numsubcyc = %d\n", i, 
+                (i == Ngroups-1) ? force->fsegseg->get_cutoff() : sqrt(subgroups->r2groups[i]), 
+                subgroups->Nsegseg[i], subgroups->gfrac[i], numsubcyc[i]);
+        }
+        if (stats) {
+            FILE* fp = fopen(fstats.c_str(), "a");
+            fprintf(fp, "%d ", totsubcyc);
+            for (int i = 0; i < Ngroups; i++) fprintf(fp, "%d ", numsubcyc[i]);
+            for (int i = 0; i < Ngroups; i++) fprintf(fp, "%d ", subgroups->Nsegseg[i]);
+            fprintf(fp, "\n");
+            fclose(fp);
+        }
     }
     
     // Use a functor so that we can safely call the destructor
@@ -685,7 +726,7 @@ public:
         }
     };
     
-    void build_groups_lists(System* system)
+    void build_groups_lists(System* system, bool hinge=true)
     {
         system->devtimer[TIMER_BUILDGROUPS].start();
         
@@ -694,7 +735,7 @@ public:
         NeighborList* neilist = generate_neighbor_list(system, net, cutoff, Neighbor::NeiSeg);
         
         Kokkos::parallel_for("IntegratorSubcycling::BuildSegSegGroups", net->Nsegs_local, 
-            BuildSegSegGroups(net, subgroups, neilist, cutoff, true)
+            BuildSegSegGroups(net, subgroups, neilist, cutoff, hinge, true)
         );
         Kokkos::fence();
         
@@ -707,7 +748,7 @@ public:
         */
         
         Kokkos::parallel_for("IntegratorSubcycling::BuildSegSegGroups", net->Nsegs_local, 
-            BuildSegSegGroups(net, subgroups, neilist, cutoff, false)
+            BuildSegSegGroups(net, subgroups, neilist, cutoff, hinge, false)
         );
         Kokkos::fence();
         
@@ -743,7 +784,8 @@ public:
         // Build subcycling groups. These groups contain segment
         // and segment pair lists used for force calculations.
         segseglist = force->fsegseg->get_segseglist();
-        build_groups_lists(system);
+        bool hinge = !(force->drift);
+        build_groups_lists(system, hinge);
         if (force->drift) {
             // Resize subforce arrays
             force->init_subforce(system, Ngroups);
@@ -758,11 +800,11 @@ public:
         int group = Ngroups-1;
         set_group(group);
         force->compute(system);
-        mobility->compute(system);
         if (force->drift) {
             // Save group forces
             force->save_subforce(network, group);
         }
+        mobility->compute(system);
         // Integrate
         integrator->integrate(system);
         if (force->drift) {
@@ -778,18 +820,18 @@ public:
         subgroups->update_interactions();
         
         
-        // Time integrate group 0, 1, 2 and 3 interactions (subcycle)
+        // Time integrate groups 0,...,N-1 interactions (subcycle)
         // Initialize the time for each group based on whether it has any forces in it
         double subtime[Ngroups-1];
-        int numsubcyc[Ngroups-1];
         for (int i = 0; i < Ngroups-1; i++) {
             subtime[i] = (i == 0 || subgroups->Nsegseg[i] > 0) ? 0.0 : system->realdt;
             numsubcyc[i] = 0;
         }
+        numsubcyc[Ngroups-1] = 1;
         // Initialize some other stuff
         int oldgroup = -1;
         int nsubcyc;
-        int totsubcyc = 0;
+        totsubcyc = 0;
 
         // Subcycle until the subcycle group times (subtime[i]) catch up
         // with the highest group time (realdt). Note that nodal forces
@@ -811,10 +853,10 @@ public:
                 nsubcyc = 0;
                 reset_nodes_flag();
                 set_group(group);
-                force->compute(system);
-                mobility->compute(system);
-                if (force->drift && group > 0)
+                if (force->drift && group > 0) {
+                    force->compute(system);
                     force->save_subforce(network, group);
+                }
             }
             oldgroup = group;
 
@@ -829,6 +871,9 @@ public:
             }
 
             // Time integrate the chosen group for one subcycle
+            if (!force->drift || group == 0)
+                force->compute(system);
+            mobility->compute(system);
             integrator->integrate(system);
             if (force->drift && group > 0) {
                 // Restore nodal positions if group > 0
@@ -845,6 +890,11 @@ public:
                 integrator->nextdtsub[group] = olddtsub;
             subtime[group] += integrator->realdtsub[group];
             
+            if (subtime[group] >= system->realdt ||
+                (system->realdt - subtime[group]) < 1e-20) {
+                subtime[group] = system->realdt;
+            }
+            
             numsubcyc[group]++;
             totsubcyc++;
             
@@ -852,16 +902,11 @@ public:
             subcycle = false;
             for (int i = 0; i < Ngroups-1; i++)
                 subcycle |= (subtime[i] < system->realdt);
+            if (subtime[0] >= system->realdt) subcycle = false;
         }
         system->devtimer[TIMER_SUBCYCLING].stop();
         
-        /*
-        printf("Subcycling\n");
-        for (int i = 0; i < Ngroups; i++)
-            printf("  Group %d: cutoff = %e, Nsegseg = %d, fraction = %f, numsubcyc = %d\n", i, 
-            (i == Ngroups-1) ? force->fsegseg->get_cutoff() : sqrt(subgroups->r2groups[i]), 
-            subgroups->Nsegseg[i], subgroups->gfrac[i], (i == Ngroups-1) ? 1 : numsubcyc[i]);
-        */
+        write_stats();
         
         // Set the force group to -1 to skip unnecessary computations
         force->group = -1;
