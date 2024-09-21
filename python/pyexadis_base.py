@@ -118,7 +118,10 @@ class ExaDisNet(DisNet_Base):
             "burgers": segs_array[:,2:5],
             "planes": segs_array[:,5:8]
         }
-        return segs_dict 
+        return segs_dict
+        
+    def set_positions(self, pos):
+        self.net.set_positions(pos)
     
 
 def get_exadis_params(state):
@@ -140,6 +143,15 @@ def get_exadis_params(state):
     if "nextdt" in state: params.nextdt = state["nextdt"]
     if "split3node" in state: params.split3node = state["split3node"]
     return params
+
+def get_module_arg(module, kwargs, name, default=None):
+    if default is None:
+        val = kwargs.get(name)
+        if val is None:
+            raise KeyError('Argument %s is required for module %s' % (name, module))
+    else:
+        val = kwargs.get(name, default)
+    return val
 
 def get_exadis_force(force_module, state, params):
     if not isinstance(force_module, CalForce):
@@ -176,23 +188,23 @@ class CalForce:
             self.force = pyexadis.make_force_lt(params=self.params, coreparams=coreparams)
         
         elif self.force_mode == 'CUTOFF_MODEL':
-            cutoff = kwargs.get('cutoff')
+            cutoff = get_module_arg(self.force_mode, kwargs, 'cutoff')
             cutoffparams = pyexadis.Force_CUTOFF_Params(coreparams=coreparams, cutoff=cutoff)
             self.force = pyexadis.make_force_cutoff(params=self.params, cutoffparams=cutoffparams)
         
         elif self.force_mode == 'DDD_FFT_MODEL':
-            Ngrid = kwargs.get('Ngrid')
+            Ngrid = get_module_arg(self.force_mode, kwargs, 'Ngrid')
             if isinstance(Ngrid, int): Ngrid = 3*[Ngrid]
-            cell = kwargs.get('cell')
+            cell = get_module_arg(self.force_mode, kwargs, 'cell')
             if not isinstance(cell, pyexadis.Cell):
                 cell = pyexadis.Cell(h=cell.h, origin=cell.origin, is_periodic=cell.is_periodic)
             self.force = pyexadis.make_force_ddd_fft(params=self.params, coreparams=coreparams, 
                                                      Ngrid=Ngrid, cell=cell)
             
         elif self.force_mode == 'SUBCYCLING_MODEL':
-            Ngrid = kwargs.get('Ngrid')
+            Ngrid = get_module_arg(self.force_mode, kwargs, 'Ngrid')
             if isinstance(Ngrid, int): Ngrid = 3*[Ngrid]
-            cell = kwargs.get('cell')
+            cell = get_module_arg(self.force_mode, kwargs, 'cell')
             if not isinstance(cell, pyexadis.Cell):
                 cell = pyexadis.Cell(h=cell.h, origin=cell.origin, is_periodic=cell.is_periodic)
             drift = kwargs.get('drift', 0)
@@ -284,9 +296,9 @@ class MobilityLaw:
             self.mobility = pyexadis.make_mobility_glide(params=params, mobparams=mobparams)
             
         elif self.mobility_law == 'BCC_0B':
-            Medge = kwargs.get('Medge')
-            Mscrew = kwargs.get('Mscrew')
-            Mclimb = kwargs.get('Mclimb')
+            Medge = get_module_arg(self.mobility_law, kwargs, 'Medge')
+            Mscrew = get_module_arg(self.mobility_law, kwargs, 'Mscrew')
+            Mclimb = get_module_arg(self.mobility_law, kwargs, 'Mclimb')
             vmax = kwargs.get('vmax', -1.0)
             mobparams = pyexadis.Mobility_BCC_0B_Params(Medge, Mscrew, Mclimb, vmax)
             self.mobility = pyexadis.make_mobility_bcc_0b(params=params, mobparams=mobparams)
@@ -298,8 +310,8 @@ class MobilityLaw:
             self.mobility = pyexadis.make_mobility_bcc_nl(params=params, mobparams=mobparams)
             
         elif self.mobility_law == 'FCC_0':
-            Medge = kwargs.get('Medge')
-            Mscrew = kwargs.get('Mscrew')
+            Medge = get_module_arg(self.mobility_law, kwargs, 'Medge')
+            Mscrew = get_module_arg(self.mobility_law, kwargs, 'Mscrew')
             vmax = kwargs.get('vmax', -1.0)
             mobparams = pyexadis.Mobility_FCC_0_Params(Medge, Mscrew, vmax)
             self.mobility = pyexadis.make_mobility_fcc_0(params=params, mobparams=mobparams)
@@ -385,18 +397,19 @@ class TimeIntegration:
             'Subcycling': self.Integrate,
         }
         
+        if self.integrator_type != 'EulerForward':
+            force_module = get_module_arg(self.integrator_type, kwargs, 'force')
+            mobility_module = get_module_arg(self.integrator_type, kwargs, 'mobility')
+        
         if self.integrator_type == 'EulerForward':
             self.params = params
         elif self.integrator_type == 'Trapezoid':
             multi = kwargs.get('multi', 0)
             
-            force_module = kwargs.get('force')
             if isinstance(force_module, CalForce):
                 if force_module.force_mode == 'SUBCYCLING_MODEL':
                     raise ValueError('Force SUBCYCLING_MODEL can only be used with Subcycling integrator')
             force, self.force_python = get_exadis_force(force_module, state, params)
-            
-            mobility_module = kwargs.get('mobility')
             mobility, self.mobility_python = get_exadis_mobility(mobility_module, state, params)
             
             if multi > 1:
@@ -412,13 +425,10 @@ class TimeIntegration:
             rtolth = kwargs.get('rtolth', 1.0)
             rtolrel = kwargs.get('rtolrel', 0.1)
             
-            force_module = kwargs.get('force')
             if isinstance(force_module, CalForce):
                 if force_module.force_mode == 'SUBCYCLING_MODEL':
                     raise ValueError('Force SUBCYCLING_MODEL can only be used with Subcycling integrator')
             force, self.force_python = get_exadis_force(force_module, state, params)
-            
-            mobility_module = kwargs.get('mobility')
             mobility, self.mobility_python = get_exadis_mobility(mobility_module, state, params)
             
             intparams = pyexadis.Integrator_RKF_Params(rtolth=rtolth, rtolrel=rtolrel)
@@ -430,17 +440,14 @@ class TimeIntegration:
                 self.integrator = pyexadis.make_integrator_rkf(params=params, intparams=intparams, 
                                                                force=force, mobility=mobility)
         elif self.integrator_type == 'Subcycling':
-            rgroups = kwargs.get('rgroups')
+            rgroups = get_module_arg(self.integrator_type, kwargs, 'rgroups')
             rtolth = kwargs.get('rtolth', 1.0)
             rtolrel = kwargs.get('rtolrel', 0.1)
             fstats = kwargs.get('fstats', "")
             
-            force_module = kwargs.get('force')
             if force_module.force_mode != 'SUBCYCLING_MODEL':
                 raise ValueError('Force SUBCYCLING_MODEL must be used with Subcycling integrator')
             force = force_module.force
-            
-            mobility_module = kwargs.get('mobility')
             mobility, self.mobility_python = get_exadis_mobility(mobility_module, state, params)
             
             intparams = pyexadis.Integrator_Subcycling_Params(rgroups, rtolth, rtolrel, fstats)
@@ -453,6 +460,8 @@ class TimeIntegration:
         G = N.get_disnet(ExaDisNet)
         self.Update_Functions[self.integrator_type](G, state)
         state["dt"] = self.dt
+        t = state.get('time', 0.0)
+        state["time"] = t + state["dt"]
         return state
 
     def Update_EulerForward(self, G: ExaDisNet, state: dict) -> None:
@@ -503,12 +512,12 @@ class Topology:
         params = get_exadis_params(state)
         splitMultiNodeAlpha = kwargs.get('splitMultiNodeAlpha', 1e-3)
         
-        force_module = kwargs.get('force')
+        force_module = get_module_arg(self.topology_mode, kwargs, 'force')
         force, self.force_python = get_exadis_force(force_module, state, params)
         if self.topology_mode == 'TopologyParallel' and self.force_python is not None:
             raise TypeError('TopologyParallel requires pyexadis force module')
         
-        mobility_module = kwargs.get('mobility')
+        mobility_module = get_module_arg(self.topology_mode, kwargs, 'mobility')
         mobility, self.mobility_python = get_exadis_mobility(mobility_module, state, params)
         if self.topology_mode == 'TopologyParallel' and self.mobility_python is not None:
             raise TypeError('TopologyParallel requires pyexadis mobility module')
@@ -668,7 +677,7 @@ class SimulateNetwork:
             A = np.hstack([np.diag(A), 2.0*A.ravel()[[5,2,1]]])
             dpstrain = np.dot(dEp, A)
             dstrain = self.erate * self.timeint.dt
-            Eyoung = 2.0 * self.calforce.mu * (1.0 + self.calforce.nu)
+            Eyoung = 2.0 * state["mu"] * (1.0 + state["nu"])
             dstress = Eyoung * (dstrain - dpstrain)
             state["applied_stress"] += dstress * A
             
@@ -724,11 +733,12 @@ class SimulateNetwork:
                 if (tstep+1) % self.print_freq == 0:
                     dt = self.timeint.dt if self.timeint else 0.0
                     Nnodes = N.get_disnet(ExaDisNet).net.number_of_nodes()
+                    elapsed = time.perf_counter()-t0
                     if self.loading_mode == 'strain_rate':
-                        print("step = %d, nodes = %d, dt = %e, strain = %e, stress = %e"%(tstep+1, Nnodes, dt, self.strain, self.stress))
-                        self.results.append([tstep+1, self.strain, self.stress, self.density, time.perf_counter()-t0])
+                        print("step = %d, nodes = %d, dt = %e, strain = %e, elapsed = %.1f sec"%(tstep+1, Nnodes, dt, self.strain, elapsed))
+                        self.results.append([tstep+1, self.strain, self.stress, self.density, elapsed])
                     else:
-                        print("step = %d, nodes = %d, dt = %e"%(tstep+1, Nnodes, dt))
+                        print("step = %d, nodes = %d, dt = %e, time = %e, elapsed = %.1f sec"%(tstep+1, Nnodes, dt, state["time"], elapsed))
 
             if self.vis != None and self.plot_freq != None:
                 if (tstep+1) % self.plot_freq == 0:
@@ -772,8 +782,21 @@ class SimulateNetworkPerf(SimulateNetwork):
         import time
         t0 = time.perf_counter()
         
+        # check modules are from exadis
+        if any([
+            not isinstance(self.calforce, CalForce),
+            not isinstance(self.mobility, MobilityLaw),
+            not isinstance(self.timeint, TimeIntegration),
+            not isinstance(self.collision, Collision),
+            not isinstance(self.topology, Topology),
+            not isinstance(self.remesh, Remesh)
+        ]):
+            raise ValueError("SimulateNetworkPerf can only accept exadis modules.\n"
+                             "Adjust modules or use SimulateNetwork driver.")
+        
         # convert DisNet to a complete exadis system object
-        system = pyexadis.System(N.get_disnet(ExaDisNet).net, self.calforce.params)
+        params = get_exadis_params(state)
+        system = pyexadis.System(N.get_disnet(ExaDisNet).net, params)
         system.set_neighbor_cutoff(self.calforce.force.neighbor_cutoff)
         
         # set driver

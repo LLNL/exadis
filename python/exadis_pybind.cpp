@@ -367,7 +367,9 @@ std::vector<Vec3> get_positions(System* system) {
 struct ExaDisNet {
     System* system = nullptr;
     ExaDisNet() {}
-    ExaDisNet(System* _system) : system(_system) {}
+    ExaDisNet(System* _system) : system(_system) {
+        system->pyexadis = true;
+    }
     
     ExaDisNet(Cell& cell,
               std::vector<std::vector<double> >& nodes_array, 
@@ -377,6 +379,7 @@ struct ExaDisNet {
         net->set_nodes_array(nodes_array);
         net->set_segs_array(segs_array); 
         system = make_system(net, Crystal(), Params());
+        system->pyexadis = true;
     }
     
     int number_of_nodes() { return system->Nnodes_total(); }
@@ -921,7 +924,7 @@ void handle_collision(ExaDisNet& disnet, CollisionBind& collisionbind,
     
     // Make sure we have a value set for rann
     if (system->params.rann < 0.0)
-        ExaDiS_fatal("Error: value of rann undefined in collision_retroactive()\n");
+        ExaDiS_fatal("Error: undefined value of rann in CollisionRetroactive\n");
     
     // We need to allocate xold positions
     SerialDisNet* net = system->get_serial_network();
@@ -973,6 +976,8 @@ Topology* make_topology_parallel(System* system, Force* force, Mobility* mobilit
         topology = new TopologyParallel<F,MobilityType::FCC_0>(system, force, mobility, topolparams);
     } else if (strcmp(mobbind.mobility->name(), "MobilityGlide") == 0) {
         topology = new TopologyParallel<F,MobilityType::GLIDE>(system, force, mobility, topolparams);
+    } else if (strcmp(mobbind.mobility->name(), "MobilityBCC_nl") == 0) {
+        topology = new TopologyParallel<F,MobilityType::BCC_NL>(system, force, mobility, topolparams);
     } else {
         ExaDiS_fatal("Error: invalid mobility type = %s for TopologyParallel binding\n", mobbind.mobility->name());
     }

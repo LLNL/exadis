@@ -67,10 +67,12 @@ public:
                  TIMER_TOPOLOGY, TIMER_REMESH, TIMER_OUTPUT, TIMER_END};
     SystemTimer timer[TIMER_END];
     
+    bool pyexadis = false;
     static const int MAX_DEV_TIMERS = 20;
     int numdevtimer = 0;
     SystemTimer devtimer[MAX_DEV_TIMERS];
     int add_timer(std::string label) {
+        if (pyexadis) return 0;
         if (numdevtimer == MAX_DEV_TIMERS)
             ExaDiS_fatal("Error: MAX_DEV_TIMERS = %d limit reached\n", MAX_DEV_TIMERS);
         devtimer[numdevtimer++].label = label;
