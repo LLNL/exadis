@@ -4,14 +4,14 @@ ExaDiS version 0.1
 
 ExaDiS (Exascale Dislocation Simulator) is a set of software modules written to enable numerical simulations of large groups of moving and interacting dislocations, line defects in crystals responsible for crystal plasticity. By tracking time evolution of sufficiently large dislocation ensembles, ExaDiS predicts plasticity response and plastic strength of crystalline materials.
 
-ExaDiS is built around a portable library of core functions for Discrete Dislocation Dynamics (DDD) method specifically written to perform efficient computations on new HPC architectures (e.g. GPUs). Simulations can be driven through the C++ or python interfaces. The python binding module is designed to be interfaced with the [OpenDiS](https://github.com/OpenDiS/OpenDiS) framework.
+ExaDiS is built around a portable library of core functions for Discrete Dislocation Dynamics (DDD) method specifically written to perform efficient computations on new HPC architectures (e.g. GPUs). Simulations can be driven through the C++ or python interfaces. The python binding module is designed to be interfaced with the [OpenDiS](https://github.com/OpenDiS/OpenDiS) framework, for which ExaDiS is the HPC core engine.
 
 Note: Although ExaDiS is a fully functional code, it is currently under active development and is subject to frequent updates and bug fixes. There is no guarantee of stability and one should expect occasional breaking changes to the code.
 
 
 ## Quick start
 
-ExaDiS is part of the [OpenDiS](https://github.com/OpenDiS/OpenDiS) framework, for which it is the HPC core engine. To obtain the code as part of OpenDiS (preferred way), follow the instructions at the [OpenDiS documentation](https://opendis.github.io/OpenDiS/installation/index.html).
+ExaDiS is part of the [OpenDiS](https://github.com/OpenDiS/OpenDiS) framework, where this repository is included as a submodule. To obtain the code as part of OpenDiS (preferred way), follow the instructions at the [OpenDiS documentation](https://opendis.github.io/OpenDiS/installation/index.html).
 
 
 ## ExaDiS as a standalone
@@ -20,7 +20,7 @@ Alternatively, the code can be obtained as a standalone. ExaDiS is implemented u
 
 * Step 1: Clone this repository and submodules
 ```
-git clone --recurse-submodule https://github.com/LLNL/exadis.git
+git clone --recursive https://github.com/LLNL/exadis.git
 cd exadis
 ```
 Alternatively, you can use the following commands to achieve the same
@@ -66,7 +66,7 @@ python test_frank_read_src.py
 ### Dependencies
 
 * Kokkos:
-    * ExaDiS is implemented using the Kokkos framework. Kokkos is included as a submodule to the repository and will be automatically cloned to the `kokkos/` folder when using the git submodule commands or cloning with the `--recurse-submodule` option (see Step 1 of Quick Start section). By default, Kokkos will be built in-tree while building ExaDiS. ExaDiS will be compiled for the backend(s) selected to build Kokkos. For instance, if Kokkos is built to run on GPUs (e.g. with build option `-DKokkos_ENABLE_CUDA=ON`), then ExaDiS will be compiled to run on GPUs. If a prior Kokkos installation exists on the machine, its installation path can be provided with ExaDiS build option `-DKokkos_ROOT`, in which case Kokkos will not be built in-tree. Instructions on how to configure/install Kokkos are found at https://github.com/kokkos/kokkos.
+    * ExaDiS is implemented using the Kokkos framework. Kokkos is included as a submodule to the repository and will be automatically cloned to the `kokkos/` folder when using the git submodule commands or cloning with the `--recursive` option (see Step 1 of Quick Start section). By default, Kokkos will be built in-tree while building ExaDiS. ExaDiS will be compiled for the backend(s) selected to build Kokkos. For instance, if Kokkos is built to run on GPUs (e.g. with build option `-DKokkos_ENABLE_CUDA=ON`), then ExaDiS will be compiled to run on GPUs. If a prior Kokkos installation exists on the machine, its installation path can be provided with ExaDiS build option `-DKokkos_ROOT`, in which case Kokkos will not be built in-tree. Instructions on how to configure/install Kokkos are found at https://github.com/kokkos/kokkos.
     
 * FFT libraries
     * ExaDiS uses FFT libraries to compute long-range elastic interactions. To compile ExaDiS without this module (e.g. if no FFT library is available) use build option `-DEXADIS_FFT=Off`. Otherwise (default), different FFT libraries are invoked depending on the target backend:
@@ -75,7 +75,7 @@ python test_frank_read_src.py
         * HIP backend: uses hipFFT
         
 * pybind11
-    * ExaDiS uses [pybind11](https://github.com/pybind/pybind11) for the python binding module. pybind11 is included as a submodule to the repository and will be automatically cloned to the `python/pybind11` folder when using the git submodule commands or cloning with the `--recurse-submodule` option (see Step 1 of Quick Start section).
+    * ExaDiS uses [pybind11](https://github.com/pybind/pybind11) for the python binding module. pybind11 is included as a submodule to the repository and will be automatically cloned to the `python/pybind11` folder when using the git submodule commands or cloning with the `--recursive` option (see Step 1 of Quick Start section).
     To use a specific python version/executable, use build option `PYTHON_EXECUTABLE`. If needed, the include path to the `python-dev` package (containing file `Python.h`) can be provided with build option `PYTHON_DEV_INC_DIR`.
     To compile ExaDiS without this module, use build option `-DEXADIS_PYTHON_BINDING=Off`.
 
@@ -111,6 +111,7 @@ Brief description of the directories within this repository:
 * `src/` : C++ source and header files (`*.cpp`, `*.h`)
 * `tests/` : files for testing and debugging
 
+
 ## Simulation examples
 
 There are several examples of simulation files located in the `examples/` folder. These examples show the different ways that ExaDiS simulations can be setup and run.
@@ -120,6 +121,11 @@ For instance, folder `examples/02_frank_read_src` provides an example of a simpl
 Folders `examples/21_bcc_Ta_100nm_2e8` and `examples/22_fcc_Cu_15um_1e3` provide examples of typical large-scale DDD production runs (a BCC and a FCC simulation) driven through the C++ or the python interfaces.
 
 The python simulations requires the code to be compiled with the python binding module using build option `-DEXADIS_PYTHON_BINDING=On`. The C++ simulations can be compiled by using build option `-DEXADIS_BUILD_EXAMPLES=On`.
+
+
+## Documentation
+
+The full documentation of ExaDiS is available at the [OpenDiS documentation](https://opendis.github.io/OpenDiS/core_libraries/exadis_documentation/index.html).
 
 
 ## License
