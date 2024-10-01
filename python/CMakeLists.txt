@@ -31,8 +31,39 @@ set(SOURCES
     ${EXADIS_SRC_PATH}/neighbor_types/neighbor_bin.cpp
 )
 
+# Generate instantiations of topology parallel class
+# in individual cpp files to reduce compilation times
+set(TOPOLOGY_FORCE_TYPES
+    "LINE_TENSION_MODEL"
+    "CUTOFF_MODEL"
+    "DDD_FFT_MODEL"
+    "SUBCYCLING_MODEL"
+)
+set(TOPOLOGY_TYPES_SOURCES "")
+foreach(TYPE ${TOPOLOGY_FORCE_TYPES})
+    set(TOPOLOGY_TYPE_FILE "topology_${TYPE}.cpp")
+    add_custom_command(
+        OUTPUT ${TOPOLOGY_TYPE_FILE}
+        COMMAND ${CMAKE_COMMAND} -E env python ${CMAKE_CURRENT_SOURCE_DIR}/make_topology_parallel.py ${TYPE}
+        DEPENDS exadis_pybind.h make_topology_parallel.py
+    )
+    list(APPEND TOPOLOGY_TYPES_SOURCES ${TOPOLOGY_TYPE_FILE})
+endforeach()
+add_custom_command(
+    OUTPUT topology_parallel_types.h
+    COMMAND ${CMAKE_COMMAND} -E env python ${CMAKE_CURRENT_SOURCE_DIR}/make_topology_parallel.py ${TOPOLOGY_FORCE_TYPES}
+    DEPENDS exadis_pybind.h
+)
+add_custom_target(make_topology_parallel DEPENDS topology_parallel_types.h ${TOPOLOGY_TYPES_SOURCES})
+
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
-pybind11_add_module(pyexadis exadis_pybind.cpp ${SOURCES})
-target_include_directories(pyexadis PRIVATE ${EXADIS_INCLUDE_DIRS} ${PYTHON_DEV_INC_DIR})
+pybind11_add_module(pyexadis exadis_pybind.cpp ${TOPOLOGY_TYPES_SOURCES} ${SOURCES})
+add_dependencies(pyexadis make_topology_parallel)
+target_include_directories(pyexadis PRIVATE
+    ${EXADIS_INCLUDE_DIRS}
+    ${PYTHON_DEV_INC_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}
+)
 target_link_libraries(pyexadis PRIVATE ${EXADIS_EXTERN_LIBS})
