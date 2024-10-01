@@ -207,8 +207,8 @@ private:
             Kokkos::resize(fsegseglist, Nsegseg);
     };
     
-    KOKKOS_INLINE_FUNCTION void reset_gcount(DeviceDisNet *n) { Kokkos::deep_copy(gcount.d_view, 0); }
-    KOKKOS_INLINE_FUNCTION void reset_gcount(SerialDisNet *n) { Kokkos::deep_copy(gcount.h_view, 0); }
+    inline void reset_gcount(DeviceDisNet *n) { Kokkos::deep_copy(gcount.d_view, 0); }
+    inline void reset_gcount(SerialDisNet *n) { Kokkos::deep_copy(gcount.h_view, 0); }
     
     KOKKOS_INLINE_FUNCTION
     Kokkos::DualView<int*>::t_dev::pointer_type get_gcount(DeviceDisNet *n) { 
