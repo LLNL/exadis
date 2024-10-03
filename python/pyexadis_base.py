@@ -285,7 +285,7 @@ class MobilityLaw:
         self.mobility_law = mobility_law
         params = get_exadis_params(state)
         
-        if self.mobility_law == 'SimpleGlide':
+        if self.mobility_law in ['SimpleGlide', 'GLIDE']:
             Medge = kwargs.get('Medge', -1.0)
             Mscrew = kwargs.get('Mscrew', -1.0)
             if Medge > 0.0 and Mscrew > 0.0:
@@ -315,6 +315,18 @@ class MobilityLaw:
             vmax = kwargs.get('vmax', -1.0)
             mobparams = pyexadis.Mobility_FCC_0_Params(Medge, Mscrew, vmax)
             self.mobility = pyexadis.make_mobility_fcc_0(params=params, mobparams=mobparams)
+            
+        elif self.mobility_law == 'FCC_0_FRIC':
+            Medge = get_module_arg(self.mobility_law, kwargs, 'Medge')
+            Mscrew = get_module_arg(self.mobility_law, kwargs, 'Mscrew')
+            Fedge = kwargs.get('Fedge', 0.0)
+            Fscrew = kwargs.get('Fscrew', 0.0)
+            vmax = kwargs.get('vmax', -1.0)
+            mobility_field = kwargs.get('mobility_field', "")
+            friction_field = kwargs.get('friction_field', "")
+            mobparams = pyexadis.Mobility_FCC_0_FRIC_Params(Medge, Mscrew, Fedge, Fscrew, vmax,
+                                                            mobility_field, friction_field)
+            self.mobility = pyexadis.make_mobility_fcc_0_fric(params=params, mobparams=mobparams)
             
         else:
             raise ValueError('Unknown mobility law %s' % mobility_law)
