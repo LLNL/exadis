@@ -365,4 +365,19 @@ struct RemeshBind {
 };
 
 
+/*---------------------------------------------------------------------------
+ *
+ *    Cross-slip binding
+ *
+ *-------------------------------------------------------------------------*/
+struct CrossSlipBind {
+    CrossSlip* crossslip = nullptr;
+    Params params;
+    CrossSlipBind() {}
+    CrossSlipBind(CrossSlip* _crossslip, Params _params) : 
+    crossslip(_crossslip), params(_params) {}
+    void handle(SystemBind& sysbind) { crossslip->handle(sysbind.system); }
+};
+
+
 #endif

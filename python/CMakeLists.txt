@@ -29,6 +29,7 @@ set(SOURCES
     ${EXADIS_SRC_PATH}/utils.cpp
     ${EXADIS_SRC_PATH}/collision_types/collision_retroactive.cpp
     ${EXADIS_SRC_PATH}/neighbor_types/neighbor_bin.cpp
+    ${EXADIS_SRC_PATH}/cross_slip_types/cross_slip_serial.cpp
 )
 
 # Generate instantiations of topology parallel class

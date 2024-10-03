@@ -785,6 +785,34 @@ void remesh(ExaDisNet& disnet, RemeshBind& remeshbind)
     remesh->remesh(system);
 }
 
+/*---------------------------------------------------------------------------
+ *
+ *    Cross-slip binding
+ *
+ *-------------------------------------------------------------------------*/
+CrossSlipBind make_cross_slip(Params& params, ForceBind& forcebind)
+{
+    System* system = make_system(new SerialDisNet(), Crystal(params.crystal, params.Rorient), params);
+    
+    CrossSlip* crossslip = new CrossSlipSerial(system, forcebind.force);
+    
+    exadis_delete(system);
+    
+    return CrossSlipBind(crossslip, params);
+}
+
+void handle_cross_slip(ExaDisNet& disnet, CrossSlipBind& crossslipbind)
+{
+    System* system = disnet.system;
+    system->params = crossslipbind.params;
+    if (system->crystal.type != crossslipbind.params.crystal ||
+        system->crystal.R != crossslipbind.params.Rorient)
+        system->crystal = Crystal(crossslipbind.params.crystal, crossslipbind.params.Rorient);
+    
+    CrossSlip* crossslip = crossslipbind.crossslip;
+    crossslip->handle(system);
+}
+
 
 /*---------------------------------------------------------------------------
  *
@@ -798,13 +826,15 @@ public:
     }
     void set_modules_driver(ForceBind& forcebind, MobilityBind& mobbind,
                             IntegratorBind& integratorbind, CollisionBind& collisionbind,
-                            TopologyBind& topolbind, RemeshBind& remeshbind) {
+                            TopologyBind& topolbind, RemeshBind& remeshbind,
+                            CrossSlipBind& crossslipbind) {
         force = forcebind.force;
         mobility = mobbind.mobility;
         integrator = integratorbind.integrator;
         collision = collisionbind.collision;
         topology = topolbind.topology;
         remesh = remeshbind.remesh_class;
+        crossslip = crossslipbind.crossslip;
     }
     void read_restart_driver(std::string restartfile) {
         ExaDiSApp::read_restart(restartfile);
@@ -1053,7 +1083,15 @@ PYBIND11_MODULE(pyexadis, m) {
     m.def("make_remesh", &make_remesh, "Instantiate a remesh class", py::arg("params"));
     m.def("remesh", &remesh, "Wrapper to remesh the network",
           py::arg("net"), py::arg("remesh"));
-          
+    
+    // Cross-slip
+    py::class_<CrossSlipBind>(m, "CrossSlip")
+        .def(py::init<>())
+        .def("handle", &CrossSlipBind::handle, "Handle cross-slip operations of the system");
+    m.def("make_cross_slip", &make_cross_slip, "Instantiate a cross-slip class", py::arg("params"), py::arg("force"));
+    m.def("handle_cross_slip", &handle_cross_slip, "Wrapper to handle cross-slip operations",
+          py::arg("net"), py::arg("cross_slip"));
+
     
     // Driver
     py::class_<ExaDiSApp>(m, "ExaDiSApp");
@@ -1061,7 +1099,9 @@ PYBIND11_MODULE(pyexadis, m) {
     driver.def(py::init<const SystemBind&>(), py::arg("system"))
           .def_readwrite("outputdir", &Driver::outputdir, "Output directory path for the simulation")
           .def("read_restart", &Driver::read_restart_driver, "Read restart file")
-          .def("set_modules", &Driver::set_modules_driver, "Set modules for the simulation")
+          .def("set_modules", &Driver::set_modules_driver, "Set modules for the simulation",
+               py::arg("force"), py::arg("mobility"), py::arg("integrator"), py::arg("collision"),
+               py::arg("topology"), py::arg("remesh"), py::arg("cross_slip")=CrossSlipBind())
           .def("set_simulation", &Driver::set_simulation, "Set things up before running the simulation", py::arg("restart")="")
           .def("initialize", &Driver::initialize, "Initialize simulation")
           .def("step", &Driver::step, "Execute a simulation step")

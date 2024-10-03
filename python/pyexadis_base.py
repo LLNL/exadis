@@ -563,13 +563,31 @@ class Remesh:
         G = N.get_disnet(ExaDisNet)
         pyexadis.remesh(G.net, remesh=self.remesh)
         return state
+
+
+class CrossSlip:
+    """CrossSlip: wrapper class for cross-slip operations
+    """
+    def __init__(self, state: dict, cross_slip_mode: str='ForceBasedSerial', **kwargs) -> None:
+        self.cross_slip_mode = cross_slip_mode
+        params = get_exadis_params(state)
+        
+        force_module = get_module_arg(self.cross_slip_mode, kwargs, 'force')
+        force, self.force_python = get_exadis_force(force_module, state, params)
+        
+        self.cross_slip = pyexadis.make_cross_slip(params=params, force=force)
+        
+    def Handle(self, N: DisNetManager, state: dict) -> None:
+        G = N.get_disnet(ExaDisNet)
+        pyexadis.handle_cross_slip(G.net, cross_slip=self.cross_slip)
+        return state
         
 
 class SimulateNetwork:
     """SimulateNetwork: simulation driver
     """
     def __init__(self, state: dict, calforce=None, mobility=None, timeint=None, 
-                 collision=None, topology=None, remesh=None, vis=None,
+                 collision=None, topology=None, remesh=None, cross_slip=None, vis=None,
                  burgmag: float=1.0,
                  loading_mode: str='stress',
                  applied_stress: np.ndarray=np.zeros(6),
@@ -589,6 +607,7 @@ class SimulateNetwork:
         self.collision = collision
         self.topology = topology
         self.remesh = remesh
+        self.cross_slip = cross_slip
         self.vis = vis
         self.burgmag = burgmag
         self.loading_mode = loading_mode
@@ -711,6 +730,9 @@ class SimulateNetwork:
         self.timeint.Update(N, state)
         
         self.plastic_strain(N, state)
+        
+        if self.cross_slip is not None:
+            self.cross_slip.Handle(N, state)
 
         if self.collision is not None:
             self.collision.HandleCol(N, state)
@@ -801,7 +823,8 @@ class SimulateNetworkPerf(SimulateNetwork):
             not isinstance(self.timeint, TimeIntegration),
             not isinstance(self.collision, Collision),
             not isinstance(self.topology, Topology),
-            not isinstance(self.remesh, Remesh)
+            not isinstance(self.remesh, Remesh),
+            (self.cross_slip != None and not isinstance(self.cross_slip, CrossSlip))
         ]):
             raise ValueError("SimulateNetworkPerf can only accept exadis modules.\n"
                              "Adjust modules or use SimulateNetwork driver.")
@@ -813,14 +836,18 @@ class SimulateNetworkPerf(SimulateNetwork):
         
         # set driver
         driver = pyexadis.Driver(system)
-        driver.set_modules(
+        modules = [
             self.calforce.force,
             self.mobility.mobility,
             self.timeint.integrator,
             self.collision.collision,
             self.topology.topology,
             self.remesh.remesh
-        )
+        ]
+        if self.cross_slip != None:
+            modules += [self.cross_slip.cross_slip]
+        driver.set_modules(*modules)
+        
         driver.outputdir = self.write_dir
         driver.set_simulation("" if self.restart is None else self.restart)
         
