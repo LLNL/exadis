@@ -22,11 +22,11 @@ def plot_friction_field():
     # Load the file
     field_file = 'friction_field.dat'
     Nfield = np.loadtxt(field_file, max_rows=3).astype(int)
-    field = np.loadtxt(field_file, skiprows=3).reshape(Nfield[:2], order='F')
+    field = np.loadtxt(field_file, skiprows=3).reshape(Nfield[:2])
     # Plot the field
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots()
-    cntr = ax.contourf(field, levels=100, cmap='jet')
+    cntr = ax.contourf(field.T, levels=100, cmap='jet')
     cbar = fig.colorbar(cntr, ax=ax)
     ax.set_aspect('equal')
     ax.set_title(field_file)
