@@ -33,6 +33,7 @@
 #include "collision.h"
 #include "topology.h"
 #include "remesh.h"
+#include "cross_slip.h"
 
 #include "functions.h"
 

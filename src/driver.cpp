@@ -64,6 +64,7 @@ ExaDiSApp::~ExaDiSApp()
     if (force) delete force;
     if (mobility) delete mobility;
     if (integrator) delete integrator;
+    if (crossslip) delete crossslip;
     if (collision) delete collision;
     if (topology) delete topology;
     if (remesh) delete remesh;
@@ -82,7 +83,8 @@ void ExaDiSApp::set_modules(
     Integrator* _integrator,
     Collision* _collision,
     Topology* _topology,
-    Remesh* _remesh)
+    Remesh* _remesh,
+    CrossSlip* _crossslip)
 {
     force = _force;
     mobility = _mobility;
@@ -90,6 +92,7 @@ void ExaDiSApp::set_modules(
     collision = _collision;
     topology = _topology;
     remesh = _remesh;
+    crossslip = _crossslip;
 }
 
 /*---------------------------------------------------------------------------
@@ -480,6 +483,7 @@ void ExaDiSApp::output(Control& ctrl)
             fprintf(fp, "Force time:        %12.3f sec\n", system->timer[system->TIMER_FORCE].accumtime);
             fprintf(fp, "Mobility time:     %12.3f sec\n", system->timer[system->TIMER_MOBILITY].accumtime);
             fprintf(fp, "Integration time:  %12.3f sec\n", system->timer[system->TIMER_INTEGRATION].accumtime);
+            fprintf(fp, "Cross-slip time:   %12.3f sec\n", system->timer[system->TIMER_CROSSSLIP].accumtime);
             fprintf(fp, "Collision time:    %12.3f sec\n", system->timer[system->TIMER_COLLISION].accumtime);
             fprintf(fp, "Topology time:     %12.3f sec\n", system->timer[system->TIMER_TOPOLOGY].accumtime);
             fprintf(fp, "Remesh time:       %12.3f sec\n", system->timer[system->TIMER_REMESH].accumtime);
@@ -537,6 +541,7 @@ bool ExaDiSApp::Stepper::iterate(ExaDiSApp* exadis)
  *-------------------------------------------------------------------------*/
 void ExaDiSApp::initialize(Control& ctrl)
 {
+    // Required modules
     if (system == nullptr) ExaDiS_fatal("Error: undefined system\n");
     if (force == nullptr) ExaDiS_fatal("Error: undefined force\n");
     if (mobility == nullptr) ExaDiS_fatal("Error: undefined mobility\n");
@@ -584,6 +589,10 @@ void ExaDiSApp::step(Control& ctrl)
     
     // Reset glide planes
     system->reset_glide_planes();
+    
+    // Cross-slip
+    if (crossslip)
+        crossslip->handle(system);
     
     // Collision
     collision->handle(system);

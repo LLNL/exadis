@@ -94,6 +94,7 @@ set(EXADIS_SUBDIRECTORIES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/collision_types
     ${CMAKE_CURRENT_SOURCE_DIR}/src/integrator_types
     ${CMAKE_CURRENT_SOURCE_DIR}/src/topology_types
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/cross_slip_types
 )
 
 set(EXADIS_INCLUDE_DIRS

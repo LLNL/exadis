@@ -63,8 +63,8 @@ public:
         void start() { timer.reset(); }
         void stop() { accumtime += timer.seconds(); }
     };
-    enum timers {TIMER_FORCE, TIMER_MOBILITY, TIMER_INTEGRATION, TIMER_COLLISION, 
-                 TIMER_TOPOLOGY, TIMER_REMESH, TIMER_OUTPUT, TIMER_END};
+    enum timers {TIMER_FORCE, TIMER_MOBILITY, TIMER_INTEGRATION, TIMER_CROSSSLIP,
+                 TIMER_COLLISION, TIMER_TOPOLOGY, TIMER_REMESH, TIMER_OUTPUT, TIMER_END};
     SystemTimer timer[TIMER_END];
     
     bool pyexadis = false;

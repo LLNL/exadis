@@ -31,6 +31,7 @@ public:
     Collision* collision = nullptr;
     Topology* topology = nullptr;
     Remesh* remesh = nullptr;
+    CrossSlip* crossslip = nullptr;
     std::string outputdir = "";
     
     bool dealloc = true;
@@ -112,7 +113,8 @@ public:
         Integrator* _integrator,
         Collision* _collision,
         Topology* _topology,
-        Remesh* _remesh
+        Remesh* _remesh,
+        CrossSlip* _crossslip = nullptr
     );
     virtual void set_simulation(std::string restartfile="");
     virtual void set_directory();
