@@ -579,6 +579,10 @@ class CrossSlip:
         
     def Handle(self, N: DisNetManager, state: dict) -> None:
         G = N.get_disnet(ExaDisNet)
+        # update state dictionary if force/mobility are python-based
+        # so that ExaDiS can internally call the wrappers with up-to-date state
+        if self.force_python is not None:
+            self.force_python.state = state
         pyexadis.handle_cross_slip(G.net, cross_slip=self.cross_slip)
         return state
         
