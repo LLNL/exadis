@@ -926,6 +926,9 @@ class VisualizeNetwork:
         if self.ax == None:
             try: self.ax = plt.axes(projection='3d')
             except NameError: print('plt not defined'); return
+        view_init = kwargs.get("view_init")
+        if view_init:
+            self.ax.view_init(**view_init)
         
     def plot_disnet(self, N: DisNetManager,
                     plot_nodes=True, plot_segs=True, plot_cell=True, trim=False,
