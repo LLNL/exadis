@@ -68,6 +68,11 @@ class ExaDisNet(DisNet_Base):
         elif crystal == 'FCC' or crystal == 'fcc':
             crystal = pyexadis.Crystal(pyexadis.FCC_CRYSTAL)
         self.net = pyexadis.generate_prismatic_config(crystal, Lbox, numsources, radius, maxseg, seed)
+        
+    def generate_line_config(self, crystal, Lbox, num_lines, theta=None, maxseg=-1, seed=-1, verbose=True):
+        from pyexadis_utils import generate_line_config
+        G = generate_line_config(crystal, Lbox, num_lines, theta=theta, maxseg=maxseg, verbose=verbose)
+        self.net = G.net
     
     def import_data(self, data):
         cell = data.get("cell")
