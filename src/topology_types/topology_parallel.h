@@ -12,9 +12,220 @@
 #define EXADIS_TOPOLOGY_PARALLEL_H
 
 #include "topology.h"
+#include "force.h"
+#include "mobility.h"
 #include "neighbor.h"
 
 namespace ExaDiS {
+
+typedef Kokkos::View<bool**, T_memory_shared> T_armset;
+
+/*---------------------------------------------------------------------------
+ *
+ *    Class:        SplitDisNet
+ *                  Data structure to hold a temporary, local network
+ *                  instance associated with a given trial configuration.
+ *                  It provides methods to peform trial splitting operations
+ *                  and accessors that override the original network 
+ *                  topology locally while making it accessible in parallel.
+ *
+ *-------------------------------------------------------------------------*/
+class SplitDisNet {
+public:
+    typedef typename DeviceDisNet::ExecutionSpace ExecutionSpace;
+    
+    static const int MAX_SPLITTABLE_DEGREE = MAX_CONN;
+    
+    DeviceDisNet* net;
+    Cell cell;
+    
+    int nid[MAX_SPLITTABLE_DEGREE+2];
+    DisNode nodes[2];
+    int nconn = 0;
+    Conn conn[MAX_SPLITTABLE_DEGREE+2];
+    
+    int nsegs = 0;
+    int sid[MAX_SPLITTABLE_DEGREE+1];
+    DisSeg segs[MAX_SPLITTABLE_DEGREE+1];
+    
+    int Nnodes_local;
+    int Nsegs_local;
+    
+    KOKKOS_INLINE_FUNCTION SplitDisNet(DeviceDisNet* _net, NeighborList* _neilist) : 
+    net(_net), neilist(_neilist) {
+        cell = net->cell;
+        Nnodes_local = net->Nnodes_local;
+        Nsegs_local = net->Nsegs_local;
+        
+        a_nodes.s = this;
+        a_segs.s = this;
+        a_conn.s = this;
+        
+        a_count.s = this;
+        a_nei.s = this;
+    }
+    
+    KOKKOS_INLINE_FUNCTION
+    int split_node(int i, const T_armset& armset, int splitid)
+    {
+        int inew = Nnodes_local++;
+        
+        // Override node i and create new node inew
+        nid[0] = i;
+        nodes[0] = net->nodes(i);
+        conn[0] = net->conn(i);
+        nid[1] = inew;
+        nodes[1] = net->nodes(i);
+        conn[1] = Conn();
+        nconn = 2;
+        
+        // Setup segments and connectivity
+        Vec3 bnew(0.0); // Burgers vector of new arm
+        
+        for (int j = 0; j < net->conn(i).num; j++) {
+            if (armset(splitid,j)) {
+                // We need to move arm j to the second node
+                int k = net->conn(i).node[j]; // neighbor node
+                int s = net->conn(i).seg[j]; // seg i-k
+                int order = net->conn(i).order[j];
+                Vec3 b = net->segs(s).burg;
+                
+                // Override and change segment
+                int p = nsegs++;
+                sid[p] = s;
+                segs[p].n1 = (order == 1) ? inew : k;
+                segs[p].n2 = (order == 1) ? k : inew;
+                segs[p].burg = b;
+                segs[p].plane = net->segs(s).plane;
+                
+                // Override and change connection of node k
+                int c = nconn++;
+                nid[c] = k;
+                conn[c] = net->conn(k);
+                for (int l = 0; l < conn[c].num; l++) {
+                    if (conn[c].seg[l] == s) {
+                        conn[c].node[l] = inew;
+                        //conn[c].seg[l] = s;
+                        //conn[c].order[l] = -1;
+                        break;
+                    }
+                }
+                
+                // Add connection at node inew
+                conn[1].add_connection(k, s, order);
+                
+                // Remove connection at node i
+                for (int l = 0; l < conn[0].num; l++) {
+                    if (conn[0].seg[l] == s) {
+                        conn[0].remove_connection(l);
+                        break;
+                    }
+                }
+                
+                // increment Burgers vector of the new arm
+                bnew += (order * b);
+            }
+        }
+        
+        // Add the new arm if it exists
+        // The new arm is going from r0 to r1 with Burgers bnew
+        if (bnew.norm2() > 1e-5) {
+            int s = nsegs++;
+            int snew = Nsegs_local++;
+            
+            // Add segment
+            sid[s] = snew;
+            segs[s].n1 = i;
+            segs[s].n2 = inew;
+            segs[s].burg = bnew;
+            
+            // Add connection to node i
+            conn[0].add_connection(inew, snew, 1);
+            
+            // Add connection to node inew
+            conn[1].add_connection(i, snew, -1);
+            
+            // Add snew to neilist of nodes i and inew
+            newseg = snew;
+        }
+        
+        return inew;
+    }
+    
+    // Network accessors
+    struct NodeAccessor {
+        SplitDisNet* s;
+        KOKKOS_FORCEINLINE_FUNCTION
+        DisNode& operator[](const int& i) {
+            if (s->nconn > 0 && i == s->nid[0]) return s->nodes[0];
+            if (s->nconn > 1 && i == s->nid[1]) return s->nodes[1];
+            return s->net->nodes(i);
+        }
+    };
+    
+    struct SegAccessor {
+        SplitDisNet* s;
+        KOKKOS_FORCEINLINE_FUNCTION
+        DisSeg& operator[](const int& i) {
+            for (int j = 0; j < s->nsegs; j++)
+                if (i == s->sid[j]) return s->segs[j];
+            return s->net->segs(i);
+        }
+    };
+    
+    struct ConnAccessor {
+        SplitDisNet* s;
+        KOKKOS_FORCEINLINE_FUNCTION
+        Conn& operator[](const int& i) {
+            for (int j = 0; j < s->nconn; j++)
+                if (i == s->nid[j]) return s->conn[j];
+            return s->net->conn(i);
+        }
+    };
+    
+    NodeAccessor a_nodes;
+    SegAccessor a_segs;
+    ConnAccessor a_conn;
+    
+    KOKKOS_INLINE_FUNCTION NodeAccessor get_nodes() { return a_nodes; }
+    KOKKOS_INLINE_FUNCTION SegAccessor get_segs() { return a_segs; }
+    KOKKOS_INLINE_FUNCTION ConnAccessor get_conn() { return a_conn; }
+    
+    // Neighbor list accessors
+    NeighborList* neilist;
+    int newseg = -1;
+    
+    struct NeiCountAccessor {
+        SplitDisNet* s;
+        KOKKOS_FORCEINLINE_FUNCTION
+        int operator[](int i) {
+            if (s->nconn > 1 && i == s->nid[1]) i = s->nid[0];
+            if (s->newseg >= 0 && s->nconn > 0 && i == s->nid[0]) return s->neilist->count(i)+1;
+            return s->neilist->count(i);
+        }
+    };
+    
+    struct NeiListAccessor {
+        SplitDisNet* s;
+        KOKKOS_FORCEINLINE_FUNCTION
+        int operator()(int i, const int& n) {
+            if (s->nconn > 1 && i == s->nid[1]) i = s->nid[0];
+            if (s->newseg >= 0 && s->nconn > 0 && i == s->nid[0]) {
+                if (n == s->neilist->count(i)) return s->newseg;
+            }
+            int beg = s->neilist->beg(i);
+            return s->neilist->list(beg+n);
+        }
+    };
+    
+    NeiCountAccessor a_count;
+    NeiListAccessor a_nei;
+    
+    KOKKOS_INLINE_FUNCTION NeiCountAccessor get_count() { return a_count; }
+    KOKKOS_INLINE_FUNCTION NeiListAccessor get_nei() { return a_nei; }
+    
+    static const char* name() { return "SplitDisNet"; }
+};
 
 /*---------------------------------------------------------------------------
  *
@@ -38,7 +249,7 @@ private:
     double splitMultiNodeAlpha;
 
     static const int MAX_SPLITTABLE_DEGREE = MAX_CONN;
-    Kokkos::View<bool**, T_memory_shared> armsets[MAX_SPLITTABLE_DEGREE+1];
+    T_armset armsets[MAX_SPLITTABLE_DEGREE+1];
 
 public:
     TopologyParallel(System* system, Force* _force, Mobility* _mobility, Params params=Params()) 
@@ -75,120 +286,6 @@ public:
     }
     
     /*-----------------------------------------------------------------------
-     *    Struct:     SplitDisNet
-     *                Data structure to hold a temporary, local network
-     *                instance associated with a given trial configuration.
-     *                It provides accessors that override the original network 
-     *                topology locally while making it accessible in parallel.
-     *---------------------------------------------------------------------*/
-    struct SplitDisNet {
-        typedef typename DeviceDisNet::ExecutionSpace ExecutionSpace;
-        static const char* name() { return "SplitDisNet"; }
-        
-        DeviceDisNet* net;
-        Cell cell;
-        
-        int nid[MAX_SPLITTABLE_DEGREE+2];
-        DisNode nodes[2];
-        int nconn = 0;
-        Conn conn[MAX_SPLITTABLE_DEGREE+2];
-        
-        int nsegs = 0;
-        int sid[MAX_SPLITTABLE_DEGREE+1];
-        DisSeg segs[MAX_SPLITTABLE_DEGREE+1];
-        
-        int Nnodes_local;
-        int Nsegs_local;
-        
-        KOKKOS_INLINE_FUNCTION SplitDisNet(DeviceDisNet* _net, NeighborList* _neilist) : 
-        net(_net), neilist(_neilist) {
-            cell = net->cell;
-            Nnodes_local = net->Nnodes_local;
-            Nsegs_local = net->Nsegs_local;
-            
-            a_nodes.s = this;
-            a_segs.s = this;
-            a_conn.s = this;
-            
-            a_count.s = this;
-            a_nei.s = this;
-        }
-        
-        // Network accessors
-        struct NodeAccessor {
-            SplitDisNet* s;
-            KOKKOS_FORCEINLINE_FUNCTION
-            DisNode& operator[](const int& i) {
-                if (s->nconn > 0 && i == s->nid[0]) return s->nodes[0];
-                if (s->nconn > 1 && i == s->nid[1]) return s->nodes[1];
-                return s->net->nodes(i);
-            }
-        };
-        
-        struct SegAccessor {
-            SplitDisNet* s;
-            KOKKOS_FORCEINLINE_FUNCTION
-            DisSeg& operator[](const int& i) {
-                for (int j = 0; j < s->nsegs; j++)
-                    if (i == s->sid[j]) return s->segs[j];
-                return s->net->segs(i);
-            }
-        };
-        
-        struct ConnAccessor {
-            SplitDisNet* s;
-            KOKKOS_FORCEINLINE_FUNCTION
-            Conn& operator[](const int& i) {
-                for (int j = 0; j < s->nconn; j++)
-                    if (i == s->nid[j]) return s->conn[j];
-                return s->net->conn(i);
-            }
-        };
-        
-        NodeAccessor a_nodes;
-        SegAccessor a_segs;
-        ConnAccessor a_conn;
-        
-        KOKKOS_INLINE_FUNCTION NodeAccessor get_nodes() { return a_nodes; }
-        KOKKOS_INLINE_FUNCTION SegAccessor get_segs() { return a_segs; }
-        KOKKOS_INLINE_FUNCTION ConnAccessor get_conn() { return a_conn; }
-        
-        
-        // Neighbor list accessors
-        NeighborList* neilist;
-        int newnei = -1;
-        
-        struct NeiCountAccessor {
-            SplitDisNet* s;
-            KOKKOS_FORCEINLINE_FUNCTION
-            int operator[](int i) {
-                if (s->nconn > 1 && i == s->nid[1]) i = s->nid[0];
-                if (s->newnei >= 0 && s->nconn > 0 && i == s->nid[0]) return s->neilist->count(i)+1;
-                return s->neilist->count(i);
-            }
-        };
-        
-        struct NeiListAccessor {
-            SplitDisNet* s;
-            KOKKOS_FORCEINLINE_FUNCTION
-            int operator()(int i, const int& n) {
-                if (s->nconn > 1 && i == s->nid[1]) i = s->nid[0];
-                if (s->newnei >= 0 && s->nconn > 0 && i == s->nid[0]) {
-                    if (n == s->neilist->count(i)) return s->newnei;
-                }
-                int beg = s->neilist->beg(i);
-                return s->neilist->list(beg+n);
-            }
-        };
-        
-        NeiCountAccessor a_count;
-        NeiListAccessor a_nei;
-        
-        KOKKOS_INLINE_FUNCTION NeiCountAccessor get_count() { return a_count; }
-        KOKKOS_INLINE_FUNCTION NeiListAccessor get_nei() { return a_nei; }
-    };
-    
-    /*-----------------------------------------------------------------------
      *    Struct:     SplitMultiNode
      *                Structure that implements the kernel to evaluate the
      *                power dissipation for each trial configuration for all
@@ -200,7 +297,7 @@ public:
      *---------------------------------------------------------------------*/
     struct SplitMultiNode
     {
-        Kokkos::View<bool**, T_memory_shared> armsets[MAX_SPLITTABLE_DEGREE+1];
+        T_armset armsets[MAX_SPLITTABLE_DEGREE+1];
         double splitDist, vNoise;
         double eps = 1e-12;
         
@@ -209,7 +306,6 @@ public:
         F* force;
         Mob* mob;
         NeighborList* neilist;
-        bool update_neighbors = false;
 
         Kokkos::View<int**, T_memory_shared> splits;
         Kokkos::View<double**, T_memory_shared> power;
@@ -223,8 +319,6 @@ public:
             splitDist = 2.0*rann + eps;
             vNoise = (system->realdt > 0.0) ? system->params.rtol / system->realdt : 0.0;
             vNoise = topology->splitMultiNodeAlpha * vNoise;
-            
-            if (system->neighbor_cutoff > 0.0) update_neighbors = true;
             
             // Copy precomputed armsets for each split
             for (int nconn = 3; nconn <= MAX_SPLITTABLE_DEGREE; nconn++)
@@ -295,90 +389,11 @@ public:
             
             // Create the new configuration with splitted node
             // within the temporary, local splitnet instance
-            int inew = splitnet.Nnodes_local++;
-            
-            // Override node i and create new node inew
-            splitnet.nid[0] = i;
-            splitnet.nodes[0] = nodes[i];
-            splitnet.conn[0] = conn[i];
-            splitnet.nid[1] = inew;
-            splitnet.nodes[1] = nodes[i];
-            splitnet.conn[1] = Conn();
-            splitnet.nconn = 2;
-            
-            // Setup segments and connectivity
-            Vec3 bnew(0.0); // Burgers vector of new arm
-            
-            for (int j = 0; j < nconn; j++) {
-                if (armsets[nconn](splitid,j)) {
-                    // We need to move arm j to the second node
-                    int k = conn[i].node[j]; // neighbor node
-                    int s = conn[i].seg[j]; // seg i-k
-                    int order = conn[i].order[j];
-                    Vec3 b = segs[s].burg;
-                    
-                    // Override and change segment
-                    int p = splitnet.nsegs++;
-                    splitnet.sid[p] = s;
-                    splitnet.segs[p].n1 = (order == 1) ? inew : k;
-                    splitnet.segs[p].n2 = (order == 1) ? k : inew;
-                    splitnet.segs[p].burg = b;
-                    splitnet.segs[p].plane = segs[s].plane;
-                    
-                    // Override and change connection of node k
-                    int c = splitnet.nconn++;
-                    splitnet.nid[c] = k;
-                    splitnet.conn[c] = conn[k];
-                    for (int l = 0; l < splitnet.conn[c].num; l++) {
-                        if (splitnet.conn[c].seg[l] == s) {
-                            splitnet.conn[c].node[l] = inew;
-                            //splitnet.conn[c].seg[l] = s;
-                            //splitnet.conn[c].order[l] = -1;
-                            break;
-                        }
-                    }
-                    
-                    // Add connection at node inew
-                    splitnet.conn[1].add_connection(k, s, order);
-                    
-                    // Remove connection at node i
-                    for (int l = 0; l < splitnet.conn[0].num; l++) {
-                        if (splitnet.conn[0].seg[l] == s) {
-                            splitnet.conn[0].remove_connection(l);
-                            break;
-                        }
-                    }
-                    
-                    // increment Burgers vector of the new arm
-                    bnew += (order * b);
-                }
-            }
-            
-            // Add the new arm if it exists
-            // The new arm is going from r0 to r1 with Burgers bnew
-            int s = -1;
-            if (bnew.norm2() > 1e-5) {
-                s = splitnet.nsegs++;
-                int snew = splitnet.Nsegs_local++;
-                
-                // Add segment
-                splitnet.sid[s] = snew;
-                splitnet.segs[s].n1 = i;
-                splitnet.segs[s].n2 = inew;
-                splitnet.segs[s].burg = bnew;
-                
-                // Add connection to node i
-                splitnet.conn[0].add_connection(inew, snew, 1);
-                
-                // Add connection to node inew
-                splitnet.conn[1].add_connection(i, snew, -1);
-                
-                // We may also need to update the neighbor list
-                if (update_neighbors) {
-                    // Add snew to neilist of nodes i and inew
-                    splitnet.newnei = snew;
-                }
-            }
+            int inew = splitnet.split_node(i, armsets[nconn], splitid);
+            int s = splitnet.nsegs-1;
+            Vec3 bnew(0.0);
+            if (splitnet.newseg >= 0)
+                bnew = splitnet.segs[s].burg;
             
             // Recomputed forces with new set of arms
             Vec3 f0 = force->node_force(system, &splitnet, i, team);
@@ -457,7 +472,7 @@ public:
                 splitnet.nodes[1].pos += reposition1 * minSplitDist * vdir;
                 
                 // Set glide plane of new segment if needed
-                if (s >= 0 && system->crystal.use_glide_planes) {
+                if (splitnet.newseg >= 0 && system->crystal.use_glide_planes) {
                     Vec3 pnew = system->crystal.find_precise_glide_plane(bnew, vdir);
                     if (pnew.norm2() < 1e-3)
                         pnew = system->crystal.pick_screw_glide_plane(&splitnet, bnew);

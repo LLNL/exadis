@@ -12,6 +12,8 @@
 #define EXADIS_TOPOLOGY_SERIAL_H
 
 #include "topology.h"
+#include "force.h"
+#include "mobility.h"
 
 namespace ExaDiS {
 
