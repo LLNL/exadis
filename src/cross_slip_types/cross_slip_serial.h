@@ -16,7 +16,6 @@
 #define EXADIS_CROSS_SLIP_SERIAL_H
 
 #include "force.h"
-#include "mobility.h"
 #include "cross_slip.h"
 
 namespace ExaDiS {
@@ -33,8 +32,6 @@ private:
 public:
     CrossSlipSerial(System* system, Force* _force) : force(_force) {}
     
-    bool node_pinned(System* system, SerialDisNet* network, int i,
-                     int planeIndex, const Mat33& glidedir);
     void handle(System* system);
     
     const char* name() { return "CrossSlipSerial"; }

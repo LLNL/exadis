@@ -39,6 +39,8 @@ public:
     DeviceDisNet* net;
     Cell cell;
     
+    bool splitted = 0;
+    
     int nid[MAX_SPLITTABLE_DEGREE+2];
     DisNode nodes[2];
     int nconn = 0;
@@ -68,6 +70,9 @@ public:
     KOKKOS_INLINE_FUNCTION
     int split_node(int i, const T_armset& armset, int splitid)
     {
+        if (splitted) return -1;
+        splitted = 1;
+        
         int inew = Nnodes_local++;
         
         // Override node i and create new node inew
@@ -150,6 +155,67 @@ public:
         }
         
         return inew;
+    }
+    
+    KOKKOS_INLINE_FUNCTION
+    int split_seg(int i, const Vec3& pos)
+    {
+        if (splitted) return -1;
+        splitted = 1;
+        
+        int n1 = net->segs(i).n1;
+        int n2 = net->segs(i).n2;
+        int nnew = Nnodes_local++;
+        
+        // Override node n1 and create new node nnew
+        nid[0] = n1;
+        nodes[0] = net->nodes(n1);
+        conn[0] = net->conn(n1);
+        nid[1] = nnew;
+        nodes[1] = nodes[0];
+        nodes[1].pos = pos;
+        conn[1] = Conn();
+        nconn = 2;
+        
+        // Override original segment n1-n2 with n1-nnew
+        nsegs++;
+        sid[0] = i;
+        segs[0] = net->segs(i);
+        segs[0].n2 = nnew;
+        
+        // Update connection of node n1
+        for (int l = 0; l < conn[0].num; l++) {
+            if (conn[0].node[l] == n2) {
+                conn[0].node[l] = nnew;
+                break;
+            }
+        }
+        
+        // Add new segment nnew-n2
+        nsegs++;
+        int snew = Nsegs_local++;
+        sid[1] = snew;
+        segs[1] = net->segs(i);
+        segs[1].n1 = nnew;
+        newseg = snew; // for neighbor list
+        
+        // Override connection of node n2
+        nconn++;
+        nid[2] = n2;
+        conn[2] = net->conn(n2);
+        for (int l = 0; l < conn[2].num; l++) {
+            if (conn[2].node[l] == n1) {
+                conn[2].node[l] = nnew;
+                conn[2].seg[l] = snew;
+                break;
+            }
+        }
+        
+        // Add connection of new node
+        conn[1].add_connection(n2, snew, 1);
+        conn[1].add_connection(n1, i, -1);
+        
+        return nnew;
     }
     
     // Network accessors
