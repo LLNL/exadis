@@ -348,7 +348,7 @@ SerialDisNet* read_paradis(const char *file)
         auto iter = nodeMap.find(ntag);
         if (iter == nodeMap.end()) {
             nodeMap.emplace(ntag, network->number_of_nodes());
-            network->add_node(pos);
+            network->add_node(pos, flag);
         }
         
         for (int i = 0; i < narms; i++) {
