@@ -573,14 +573,14 @@ class Remesh:
 class CrossSlip:
     """CrossSlip: wrapper class for cross-slip operations
     """
-    def __init__(self, state: dict, cross_slip_mode: str='ForceBasedSerial', **kwargs) -> None:
+    def __init__(self, state: dict, cross_slip_mode: str='ForceBasedParallel', **kwargs) -> None:
         self.cross_slip_mode = cross_slip_mode
         params = get_exadis_params(state)
         
         force_module = get_module_arg(self.cross_slip_mode, kwargs, 'force')
         force, self.force_python = get_exadis_force(force_module, state, params)
         
-        self.cross_slip = pyexadis.make_cross_slip(params=params, force=force)
+        self.cross_slip = pyexadis.make_cross_slip(cross_slip_mode, params=params, force=force)
         
     def Handle(self, N: DisNetManager, state: dict) -> None:
         G = N.get_disnet(ExaDisNet)

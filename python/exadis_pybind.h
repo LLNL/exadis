@@ -373,9 +373,10 @@ struct RemeshBind {
 struct CrossSlipBind {
     CrossSlip* crossslip = nullptr;
     Params params;
+    double neighbor_cutoff = 0.0;
     CrossSlipBind() {}
-    CrossSlipBind(CrossSlip* _crossslip, Params _params) : 
-    crossslip(_crossslip), params(_params) {}
+    CrossSlipBind(CrossSlip* _crossslip, Params _params, double cutoff) : 
+    crossslip(_crossslip), params(_params), neighbor_cutoff(cutoff) {}
     void handle(SystemBind& sysbind) { crossslip->handle(sysbind.system); }
 };
 

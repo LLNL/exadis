@@ -790,15 +790,35 @@ void remesh(ExaDisNet& disnet, RemeshBind& remeshbind)
  *    Cross-slip binding
  *
  *-------------------------------------------------------------------------*/
-CrossSlipBind make_cross_slip(Params& params, ForceBind& forcebind)
+CrossSlipBind make_cross_slip(std::string cross_slip_mode, Params& params, ForceBind& forcebind)
 {
     System* system = make_system(new SerialDisNet(), Crystal(params.crystal, params.Rorient), params);
     
-    CrossSlip* crossslip = new CrossSlipSerial(system, forcebind.force);
+    Force* force = forcebind.force;
+    double cutoff = forcebind.neighbor_cutoff; // required for force calculation
+    
+    CrossSlip* crossslip;
+    if (cross_slip_mode == "ForceBasedParallel") {
+        if (forcebind.model == ForceBind::LINE_TENSION_MODEL) {
+            crossslip = new CrossSlipParallel<ForceType::LINE_TENSION_MODEL>(system, force);
+        } else if (forcebind.model == ForceBind::CUTOFF_MODEL) {
+            crossslip = new CrossSlipParallel<ForceType::CUTOFF_MODEL>(system, force);
+        } else if (forcebind.model == ForceBind::DDD_FFT_MODEL) {
+            crossslip = new CrossSlipParallel<ForceType::DDD_FFT_MODEL>(system, force);
+        } else if (forcebind.model == ForceBind::SUBCYCLING_MODEL) {
+            crossslip = new CrossSlipParallel<ForceType::SUBCYCLING_MODEL>(system, force);
+        } else {
+            ExaDiS_fatal("Error: invalid force type for TopologyParallel binding\n");
+        }
+    } else if (cross_slip_mode == "ForceBasedSerial") {  
+        crossslip = new CrossSlipSerial(system, force);
+    } else {
+        ExaDiS_fatal("Error: invalid cross-slip mode %s\n", cross_slip_mode.c_str());
+    }
     
     exadis_delete(system);
     
-    return CrossSlipBind(crossslip, params);
+    return CrossSlipBind(crossslip, params, cutoff);
 }
 
 void handle_cross_slip(ExaDisNet& disnet, CrossSlipBind& crossslipbind)
@@ -808,6 +828,8 @@ void handle_cross_slip(ExaDisNet& disnet, CrossSlipBind& crossslipbind)
     if (system->crystal.type != crossslipbind.params.crystal ||
         system->crystal.R != crossslipbind.params.Rorient)
         system->crystal = Crystal(crossslipbind.params.crystal, crossslipbind.params.Rorient);
+    
+    system->neighbor_cutoff = crossslipbind.neighbor_cutoff; // required for force calculation
     
     CrossSlip* crossslip = crossslipbind.crossslip;
     crossslip->handle(system);
@@ -1088,7 +1110,8 @@ PYBIND11_MODULE(pyexadis, m) {
     py::class_<CrossSlipBind>(m, "CrossSlip")
         .def(py::init<>())
         .def("handle", &CrossSlipBind::handle, "Handle cross-slip operations of the system");
-    m.def("make_cross_slip", &make_cross_slip, "Instantiate a cross-slip class", py::arg("params"), py::arg("force"));
+    m.def("make_cross_slip", &make_cross_slip, "Instantiate a cross-slip class",
+          py::arg("cross_slip_mode"), py::arg("params"), py::arg("force"));
     m.def("handle_cross_slip", &handle_cross_slip, "Wrapper to handle cross-slip operations",
           py::arg("net"), py::arg("cross_slip"));
 

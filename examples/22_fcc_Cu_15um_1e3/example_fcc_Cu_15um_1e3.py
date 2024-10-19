@@ -7,7 +7,7 @@ if not pyexadis_path in sys.path: sys.path.append(pyexadis_path)
 try:
     import pyexadis
     from pyexadis_base import ExaDisNet, DisNetManager, SimulateNetworkPerf, read_restart
-    from pyexadis_base import CalForce, MobilityLaw, TimeIntegration, Collision, Topology, Remesh
+    from pyexadis_base import CalForce, MobilityLaw, TimeIntegration, Collision, Topology, Remesh, CrossSlip
 except ImportError:
     raise ImportError('Cannot import pyexadis')
 
@@ -56,8 +56,11 @@ def example_fcc_Cu_15um_1e3():
     topology  = Topology(topology_mode='TopologyParallel', state=state, force=calforce, mobility=mobility)
     remesh    = Remesh(remesh_rule='LengthBased', state=state)
     
-    sim = SimulateNetworkPerf(calforce=calforce, mobility=mobility, timeint=timeint, 
-                              collision=collision, topology=topology, remesh=remesh, vis=vis,
+    cross_slip = None
+    #cross_slip = CrossSlip(cross_slip_mode='ForceBasedParallel', state=state, force=calforce)
+    
+    sim = SimulateNetworkPerf(calforce=calforce, mobility=mobility, timeint=timeint, collision=collision, 
+                              topology=topology, remesh=remesh, cross_slip=cross_slip, vis=vis,
                               loading_mode='strain_rate', erate=1e3, edir=np.array([0.,0.,1.]),
                               max_strain=0.01, burgmag=state["burgmag"], state=state,
                               print_freq=1, plot_freq=10, plot_pause_seconds=0.0001,
