@@ -45,14 +45,14 @@ foreach(TYPE ${TOPOLOGY_FORCE_TYPES})
     set(TOPOLOGY_TYPE_FILE "topology_${TYPE}.cpp")
     add_custom_command(
         OUTPUT ${TOPOLOGY_TYPE_FILE}
-        COMMAND ${CMAKE_COMMAND} -E env python ${CMAKE_CURRENT_SOURCE_DIR}/make_topology_parallel.py ${TYPE}
+        COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/make_topology_parallel.py ${TYPE}
         DEPENDS exadis_pybind.h make_topology_parallel.py
     )
     list(APPEND TOPOLOGY_TYPES_SOURCES ${TOPOLOGY_TYPE_FILE})
 endforeach()
 add_custom_command(
     OUTPUT topology_parallel_types.h
-    COMMAND ${CMAKE_COMMAND} -E env python ${CMAKE_CURRENT_SOURCE_DIR}/make_topology_parallel.py ${TOPOLOGY_FORCE_TYPES}
+    COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/make_topology_parallel.py ${TOPOLOGY_FORCE_TYPES}
     DEPENDS exadis_pybind.h
 )
 add_custom_target(make_topology_parallel DEPENDS topology_parallel_types.h ${TOPOLOGY_TYPES_SOURCES})
