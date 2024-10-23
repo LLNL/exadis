@@ -71,7 +71,7 @@ class ExaDisNet(DisNet_Base):
         
     def generate_line_config(self, crystal, Lbox, num_lines, theta=None, maxseg=-1, seed=-1, verbose=True):
         from pyexadis_utils import generate_line_config
-        G = generate_line_config(crystal, Lbox, num_lines, theta=theta, maxseg=maxseg, verbose=verbose)
+        G = generate_line_config(crystal, Lbox, num_lines, theta=theta, maxseg=maxseg, seed=seed, verbose=verbose)
         self.net = G.net
     
     def import_data(self, data):
@@ -96,7 +96,7 @@ class ExaDisNet(DisNet_Base):
         return self.net.get_cell()
         
     def get_nodes_data(self):
-        nodes_array = np.array(self.net.get_nodes_array())
+        nodes_array = np.atleast_2d(self.net.get_nodes_array())
         nodes_dict = {
             "tags": nodes_array[:,0:2].astype(int),
             "positions": nodes_array[:,2:5],
@@ -117,7 +117,7 @@ class ExaDisNet(DisNet_Base):
         return np.array(self.net.get_velocities())
         
     def get_segs_data(self):
-        segs_array = np.array(self.net.get_segs_array())
+        segs_array = np.atleast_2d(self.net.get_segs_array())
         segs_dict = {
             "nodeids": segs_array[:,0:2].astype(int),
             "burgers": segs_array[:,2:5],
