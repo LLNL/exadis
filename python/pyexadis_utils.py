@@ -12,6 +12,10 @@ Implements utility functions for the ExaDiS python binding
 * dislocation_density()
 * dislocation_charge()
 
+* read_paradis()
+* write_data()
+* write_vtk()
+
 Nicolas Bertin
 bertin1@llnl.gov
 """
@@ -298,3 +302,134 @@ def dislocation_charge(N: DisNetManager) -> np.ndarray:
     b = segs.get("burgers")
     alpha = np.einsum('ij,ik->jk', b, t)
     return alpha
+
+
+def read_paradis(datafile: str) -> DisNetManager:
+    """ Read dislocation network in ParaDiS format
+    """
+    G = ExaDisNet()
+    G.read_paradis(datafile)
+    return DisNetManager(G)
+
+
+def write_data(N: DisNetManager, datafile: str):
+    """ Write dislocation network in ParaDiS format
+    """
+    N.get_disnet(ExaDisNet).write_data(datafile)
+
+
+def write_vtk(N: DisNetManager, vtkfile: str, segprops={}, pbc_wrap=True):
+    """ Write dislocation network in vtk format
+    """
+    data = N.export_data()
+    # cell
+    cell = data.get("cell")
+    cell = pyexadis.Cell(h=cell.get("h"), origin=cell.get("origin"), is_periodic=cell.get("is_periodic"))
+    cell_origin, cell_center, h = np.array(cell.origin), np.array(cell.center()), np.array(cell.h)
+    c = cell_origin + np.array([np.zeros(3), h[0], h[1], h[2], h[0]+h[1],
+                                h[0]+h[2], h[1]+h[2], h[0]+h[1]+h[2]])
+    # nodes
+    nodes = data.get("nodes")
+    rn = nodes.get("positions")
+    # segments
+    segs = data.get("segs")
+    segsnid = segs.get("nodeids")
+    r1 = np.array(cell.closest_image(Rref=np.array(cell.center()), R=rn[segsnid[:,0]]))
+    r2 = np.array(cell.closest_image(Rref=r1, R=rn[segsnid[:,1]]))
+    b = segs.get("burgers")
+    p = segs.get("planes")
+    
+    # PBC wrapping
+    if pbc_wrap:
+        
+        eps = 1e-10
+        hinv = np.linalg.inv(h)
+        def outside_box(p):
+            s = np.matmul(hinv, p - cell_origin)
+            return np.any(s < -eps) or np.any(s > 1.0+eps)
+        
+        def facet_intersection_position(r1, r2, i):
+            s1 = np.matmul(hinv, r1 - cell_origin)
+            s2 = np.matmul(hinv, r2 - cell_origin)
+            t = s2 - s1
+            t0 = -(s1 - 0.0) / (t + eps)
+            t1 = -(s1 - 1.0) / (t + eps)
+            s = np.hstack((t0, t1))
+            s[s < eps] = 1.0
+            facet = np.argmin(s)
+            if s[facet] < 1.0:
+                pos = np.matmul(h, s1 + s[facet]*t) + cell_origin
+                sfacet = s[facet]
+            else:
+                facet = -1
+                pos = r2
+                sfacet = 1.0
+            return pos, facet, sfacet
+            
+        segsid = []
+        rsegs = []
+        for i in range(segsnid.shape[0]):
+            n1, n2 = segsnid[i]
+            r1 = np.array(cell.closest_image(Rref=cell_center, R=rn[n1]))
+            r2 = np.array(cell.closest_image(Rref=r1, R=rn[n2]))
+            out = outside_box(r2)
+            while out:
+                pos, facet, sfacet = facet_intersection_position(r1, r2, i)
+                if facet < 0: break
+                segsid.append(i)
+                rsegs.append([r1, pos])
+                r1 = pos + (1-2*np.floor(facet/3)) * (1.0-2*eps)*h[:,facet%3]
+                r2 = np.array(cell.closest_image(Rref=r1, R=rn[n2]))
+                out = outside_box(r2)
+            segsid.append(i)
+            rsegs.append([r1, r2])
+        
+        segsid = np.array(segsid).astype(int)
+        nsegs = segsid.shape[0]
+        rsegs = np.array(rsegs).reshape(-1,3)
+        b = b[segsid]
+        p = p[segsid]
+        for k, v in segprops.items():
+            segprops[k] = v[segsid]
+    else:
+        nsegs = segsnid.shape[0]
+        rsegs = np.hstack((r1, r2)).reshape(-1,3)
+    
+    f = open(vtkfile, 'w')
+    f.write("# vtk DataFile Version 3.0\n")
+    f.write("Configuration exported from OpenDiS\n")
+    f.write("ASCII\n")
+    f.write("DATASET UNSTRUCTURED_GRID\n")
+    
+    f.write("POINTS %d FLOAT\n" % (c.shape[0]+2*nsegs))
+    np.savetxt(f, c, fmt='%f')
+    np.savetxt(f, rsegs, fmt='%f')
+    
+    f.write("CELLS %d %d\n" % (1+nsegs, 9+3*nsegs))
+    f.write("8 0 1 4 2 3 5 7 6\n")
+    nid = np.hstack((2*np.ones((nsegs,1)), np.arange(2*nsegs).reshape(-1,2)+8))
+    np.savetxt(f, nid, fmt='%d')
+    
+    f.write("CELL_TYPES %d\n" % (1+nsegs))
+    f.write("12\n")
+    np.savetxt(f, 4*np.ones(nsegs), fmt='%d')
+    
+    f.write("CELL_DATA %d\n" % (1+nsegs))
+    
+    f.write("VECTORS Burgers FLOAT\n")
+    f.write("%f %f %f\n" % tuple(np.zeros(3)))
+    np.savetxt(f, b, fmt='%f')
+    
+    f.write("VECTORS Planes FLOAT\n")
+    f.write("%f %f %f\n" % tuple(np.zeros(3)))
+    np.savetxt(f, p, fmt='%f')
+    
+    for k, v in segprops.items():
+        vals = np.atleast_2d(v.T).T
+        if vals.shape[0] != nsegs:
+            raise ValueError('segprop value must the same size as the number of segments')
+        f.write("SCALARS %s FLOAT %d\n" % (str(k), vals.shape[1]))
+        f.write("LOOKUP_TABLE default\n")
+        np.savetxt(f, np.vstack((np.zeros(vals.shape[1]), vals)), fmt='%f')
+    
+    f.close()
