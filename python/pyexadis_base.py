@@ -62,16 +62,21 @@ class ExaDisNet(DisNet_Base):
     def write_data(self, datafile):
         self.net.write_data(datafile)
         
-    def generate_prismatic_config(self, crystal, Lbox, numsources, radius, maxseg=-1, seed=1234):
+    def generate_prismatic_config(self, crystal, Lbox, numsources, radius, maxseg=-1, Rorient=None, seed=1234):
         if crystal == 'BCC' or crystal == 'bcc':
             crystal = pyexadis.Crystal(pyexadis.BCC_CRYSTAL)
         elif crystal == 'FCC' or crystal == 'fcc':
             crystal = pyexadis.Crystal(pyexadis.FCC_CRYSTAL)
+        else:
+            raise ValueError('Unsupported crystal type = %s' % crystal)
+        if Rorient is not None:
+            crystal.set_orientation(Rorient)
         self.net = pyexadis.generate_prismatic_config(crystal, Lbox, numsources, radius, maxseg, seed)
         
-    def generate_line_config(self, crystal, Lbox, num_lines, theta=None, maxseg=-1, seed=-1, verbose=True):
+    def generate_line_config(self, crystal, Lbox, num_lines, theta=None, maxseg=-1, Rorient=None, seed=-1, verbose=True):
         from pyexadis_utils import generate_line_config
-        G = generate_line_config(crystal, Lbox, num_lines, theta=theta, maxseg=maxseg, seed=seed, verbose=verbose)
+        G = generate_line_config(crystal, Lbox, num_lines, theta=theta, maxseg=maxseg,
+                                 Rorient=Rorient, seed=seed, verbose=verbose)
         self.net = G.net
     
     def import_data(self, data):

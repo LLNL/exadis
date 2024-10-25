@@ -917,6 +917,7 @@ PYBIND11_MODULE(pyexadis, m) {
         .def(py::init<const Vec3&, const Vec3&>())
         .def(py::init<const Mat33&, const Vec3&, std::vector<int> >(), py::arg("h"), py::arg("origin")=Vec3(0.0),
              py::arg("is_periodic")=std::vector<int>({PBC_BOUND,PBC_BOUND,PBC_BOUND}))
+        .def(py::init([](Cell& cell) { return new Cell(cell.H, cell.origin, cell.get_pbc()); }), py::arg("cell"))
         .def_readonly("h", &Cell::H, "Cell matrix")
         .def_readonly("origin", &Cell::origin, "Origin of the cell")
         .def("center", &Cell::center, "Returns the center of the cell")
