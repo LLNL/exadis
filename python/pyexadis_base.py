@@ -507,12 +507,12 @@ class TimeIntegration:
 class Collision:
     """Collision: wrapper class for handling collisions
     """
-    def __init__(self, state: dict, collision_mode: str='Proximity', **kwargs) -> None:
+    def __init__(self, state: dict, collision_mode: str='Retroactive', **kwargs) -> None:
         self.collision_mode = collision_mode
         params = get_exadis_params(state)
         if params.rann < 0.0:
             params.rann = 2.0*params.rtol
-        self.collision = pyexadis.make_collision(params=params)
+        self.collision = pyexadis.make_collision(collision_mode, params=params)
         
     def HandleCol(self, N: DisNetManager, state: dict) -> None:
         G = N.get_disnet(ExaDisNet)
@@ -567,7 +567,7 @@ class Remesh:
     def __init__(self, state: dict, remesh_rule: str='LengthBased', **kwargs) -> None:
         self.remesh_rule = remesh_rule
         params = get_exadis_params(state)
-        self.remesh = pyexadis.make_remesh(params=params)
+        self.remesh = pyexadis.make_remesh(remesh_rule, params=params)
         
     def Remesh(self, N: DisNetManager, state: dict) -> None:
         G = N.get_disnet(ExaDisNet)
@@ -673,9 +673,7 @@ class SimulateNetwork:
             # account for topological operations nodal motion as well
             dEp, dWp = np.zeros(6), np.zeros(3)
         else:
-            # TO DO: get network data from DisNetManager, make last active network default
-            G = N.get_disnet(ExaDisNet)
-            data = G.export_data()
+            data = N.export_data()
             nodes = data.get("nodes")
             segs = data.get("segs")
             cell = G.cell

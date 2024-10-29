@@ -654,11 +654,17 @@ double integrate_euler(ExaDisNet& disnet, Params& _params, double dt, std::vecto
  *    Collision binding
  *
  *-------------------------------------------------------------------------*/
-CollisionBind make_collision(Params& params)
+CollisionBind make_collision(std::string collision_mode, Params& params)
 {
     System* system = make_system(new SerialDisNet(), Crystal(params.crystal, params.Rorient), params);
     
-    Collision* collision = new CollisionRetroactive(system);
+    Collision* collision;
+    if (collision_mode == "Retroactive" || collision_mode == "Proximity")
+        collision = new CollisionRetroactive(system);
+    else if (collision_mode == "None")
+        collision = new Collision(system);
+    else
+        ExaDiS_fatal("Error: invalid collision mode %s\n", collision_mode.c_str());
     
     exadis_delete(system);
     
@@ -733,6 +739,8 @@ TopologyBind make_topology(std::string topology_mode, Params& params,
         }
     } else if (topology_mode == "TopologySerial") {  
         topology = new TopologySerial(system, force, mobility, topolparams);
+    } else if (topology_mode == "None") {  
+        topology = new Topology(system);
     } else {
         ExaDiS_fatal("Error: invalid topology mode %s\n", topology_mode.c_str());
     }
@@ -762,11 +770,18 @@ void handle_topology(ExaDisNet& disnet, TopologyBind& topolbind, double dt)
  *    Remesh binding
  *
  *-------------------------------------------------------------------------*/
-RemeshBind make_remesh(Params& params)
+RemeshBind make_remesh(std::string remesh_rule, Params& params)
 {
     System* system = make_system(new SerialDisNet(), Crystal(params.crystal, params.Rorient), params);
     
-    Remesh* remesh = new RemeshSerial(system);
+    Remesh* remesh;
+    if (remesh_rule == "LengthBased") {
+        remesh = new RemeshSerial(system);
+    } else if (remesh_rule == "None") { 
+        remesh = new Remesh(system);
+    } else {
+        ExaDiS_fatal("Error: invalid remesh rule %s\n", remesh_rule.c_str());
+    }
     
     exadis_delete(system);
     
@@ -812,6 +827,8 @@ CrossSlipBind make_cross_slip(std::string cross_slip_mode, Params& params, Force
         }
     } else if (cross_slip_mode == "ForceBasedSerial") {  
         crossslip = new CrossSlipSerial(system, force);
+    } else if (cross_slip_mode == "None") { 
+        crossslip = new CrossSlip(system);
     } else {
         ExaDiS_fatal("Error: invalid cross-slip mode %s\n", cross_slip_mode.c_str());
     }
@@ -1086,7 +1103,7 @@ PYBIND11_MODULE(pyexadis, m) {
     py::class_<CollisionBind>(m, "Collision")
         .def(py::init<>())
         .def("handle", &CollisionBind::handle, "Handle collision of the system");
-    m.def("make_collision", &make_collision, "Instantiate a collision class", py::arg("params"));
+    m.def("make_collision", &make_collision, "Instantiate a collision class", py::arg("collision_mode"), py::arg("params"));
     m.def("handle_collision", &handle_collision, "Wrapper to handle collisions",
           py::arg("net"), py::arg("collision"), py::arg("xold")=std::vector<Vec3>(), py::arg("dt")=0.0);
     
@@ -1103,7 +1120,7 @@ PYBIND11_MODULE(pyexadis, m) {
     py::class_<RemeshBind>(m, "Remesh")
         .def(py::init<>())
         .def("remesh", &RemeshBind::remesh, "Remesh the system");
-    m.def("make_remesh", &make_remesh, "Instantiate a remesh class", py::arg("params"));
+    m.def("make_remesh", &make_remesh, "Instantiate a remesh class", py::arg("remesh_rule"), py::arg("params"));
     m.def("remesh", &remesh, "Wrapper to remesh the network",
           py::arg("net"), py::arg("remesh"));
     
