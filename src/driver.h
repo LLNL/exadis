@@ -66,7 +66,7 @@ public:
     static Stepper MAX_WALLTIME(double maxtime) { return Stepper(Stepper::MAX_WALLTIME, maxtime); }
     
     struct Prop {
-        enum fields {STEP, STRAIN, STRESS, DENSITY, NNODES, NSEGS, DT, TIME, WALLTIME, EDIR, ALLSTRESS};
+        enum fields {STEP, STRAIN, STRESS, DENSITY, NNODES, NSEGS, DT, TIME, WALLTIME, EDIR, RORIENT, ALLSTRESS};
         static fields get_field(std::string& name) {
             if (name == "Step" || name == "step") return STEP;
             else if (name == "Strain" || name == "strain") return STRAIN;
@@ -78,6 +78,7 @@ public:
             else if (name == "Time" || name == "time") return TIME;
             else if (name == "Walltime" || name == "walltime") return WALLTIME;
             else if (name == "edir") return EDIR;
+            else if (name == "Rorient") return RORIENT;
             else if (name == "Allstress" || name == "allstress") return ALLSTRESS;
             else ExaDiS_fatal("Unknown control property name = %s\n", name.c_str());
             return STEP;

@@ -627,6 +627,7 @@ class SimulateNetwork:
         self.loading_mode = loading_mode
         self.erate = erate
         self.edir = np.array(edir)
+        self.rotation = kwargs.get('rotation', None)
         self.max_step = max_step
         self.print_freq = print_freq
         self.plot_freq = plot_freq
@@ -645,12 +646,14 @@ class SimulateNetwork:
         self.results = []
         
         state["applied_stress"] = np.array(applied_stress)
+        self.edir = self.edir / np.linalg.norm(self.edir)
     
     def write_results(self):
         """write_results: write simulation results into a file
         """
-        if self.loading_mode == 'strain_rate':
-            np.savetxt('%s/stress_strain_dens.dat'%self.write_dir, np.array(self.results), fmt='%d %e %e %e %e')
+        with open('%s/stress_strain_dens.dat'%self.write_dir, 'w') as f:
+            f.write('# Step Strain Stress Density Walltime\n')
+            np.savetxt(f, np.array(self.results), fmt='%d %e %e %e %e')
     
     def save_old_nodes(self, N: DisNetManager, state: dict):
         """save_old_nodes: save current nodal positions
@@ -705,28 +708,38 @@ class SimulateNetwork:
     def update_mechanics(self, N: DisNetManager, state: dict):
         """update_mechanics: update applied stress and rotation if needed
         """
+        if self.exadis_plastic_strain:
+            # get values of plastic strain computed internally in exadis
+            dEp, dWp, self.density = N.get_disnet(ExaDisNet).net.get_plastic_strain()
+            dEp = np.array(dEp).ravel()[[0,4,8,5,2,1]] # xx,yy,zz,yz,xz,xy
+            dWp = np.array(dWp).ravel()[[5,2,1]] # yz,xz,xy
+        else:
+            dEp, dWp = state["dEp"], state["dWp"]
+        
+        if self.rotation:
+            from scipy.spatial.transform import Rotation
+            R = Rotation.from_euler('xyz', np.array([1.,-1.,1.])*dWp).as_matrix()
+            self.edir = np.matmul(R, self.edir)
+            self.edir = self.edir / np.linalg.norm(self.edir)
+        
         if self.loading_mode == 'strain_rate':
-            
-            if self.exadis_plastic_strain:
-                # get values of plastic strain computed internally in exadis
-                dEp, dWp, self.density = N.get_disnet(ExaDisNet).net.get_plastic_strain()
-                dEp = np.array(dEp).ravel()[[0,4,8,5,2,1]] # xx,yy,zz,yz,xz,xy
-                dWp = np.array(dWp).ravel()[[5,2,1]] # yz,xz,xy
-            else:
-                dEp, dWp = state["dEp"], state["dWp"]
-            
-            # TO DO: add rotation
-            A = np.outer(self.edir, self.edir)
-            A = np.hstack([np.diag(A), 2.0*A.ravel()[[5,2,1]]])
-            dpstrain = np.dot(dEp, A)
+            A0 = np.outer(self.edir, self.edir)
+            A = np.hstack([np.diag(A0), A0.ravel()[[5,2,1]]])
+            A2 = np.hstack([np.diag(A0), 2.0*A0.ravel()[[5,2,1]]])
+            dpstrain = np.dot(dEp, A2)
             dstrain = self.erate * self.timeint.dt
             Eyoung = 2.0 * state["mu"] * (1.0 + state["nu"])
             dstress = Eyoung * (dstrain - dpstrain)
             state["applied_stress"] += dstress * A
-            
             self.Etot += dstrain * A
-            self.strain = np.dot(self.Etot, A)
-            self.stress = np.dot(state["applied_stress"], A)
+            self.strain = np.dot(self.Etot, A2)
+            self.stress = np.dot(state["applied_stress"], A2)
+            
+        elif self.loading_mode == 'stress':
+            self.strain = 0.0
+            S = np.array(state["applied_stress"][[0,5,4,5,1,3,4,3,2]]).reshape(3,3)
+            Sdev = S - np.trace(S)/3.0*np.eye(3)
+            self.stress = np.sqrt(3.0/2.0*np.dot(Sdev.ravel(), Sdev.ravel())) # von Mises
             
         return state
     
@@ -782,9 +795,9 @@ class SimulateNetwork:
                     elapsed = time.perf_counter()-t0
                     if self.loading_mode == 'strain_rate':
                         print("step = %d, nodes = %d, dt = %e, strain = %e, elapsed = %.1f sec"%(tstep+1, Nnodes, dt, self.strain, elapsed))
-                        self.results.append([tstep+1, self.strain, self.stress, self.density, elapsed])
                     else:
                         print("step = %d, nodes = %d, dt = %e, time = %e, elapsed = %.1f sec"%(tstep+1, Nnodes, dt, state["time"], elapsed))
+                    self.results.append([tstep+1, self.strain, self.stress, self.density, elapsed])
 
             if self.vis != None and self.plot_freq != None:
                 if (tstep+1) % self.plot_freq == 0:
@@ -885,6 +898,7 @@ class SimulateNetworkPerf(SimulateNetwork):
             ctrl.erate = self.erate
             ctrl.edir = self.edir
         ctrl.appstress = np.array(state["applied_stress"][[0,5,4,5,1,3,4,3,2]]).reshape(3,3)
+        if self.rotation is not None: ctrl.rotation = self.rotation
         ctrl.printfreq = self.print_freq
         ctrl.propfreq = self.print_freq
         ctrl.outfreq = self.write_freq

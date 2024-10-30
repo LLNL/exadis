@@ -452,8 +452,12 @@ void ExaDiSApp::output(Control& ctrl)
             else if (field == Prop::DT) if (init) { fprintf(fp, " dt"); } else { fprintf(fp, "%e ", system->realdt); }
             else if (field == Prop::TIME) if (init) { fprintf(fp, " Time"); } else { fprintf(fp, "%e ", tottime); }
             else if (field == Prop::WALLTIME) if (init) { fprintf(fp, " Walltime"); } else { fprintf(fp, "%e ", timer.seconds()); }
-            else if (field == Prop::EDIR) if (init) { fprintf(fp, " edir"); } else { fprintf(fp, "%e %e %e ", edir.x, edir.y, edir.z); }
-            else if (field == Prop::ALLSTRESS) {
+            else if (field == Prop::EDIR) if (init) { fprintf(fp, " edirx ediry edirz"); } else { fprintf(fp, "%e %e %e ", edir.x, edir.y, edir.z); }
+            else if (field == Prop::RORIENT) {
+                Mat33 R = system->crystal.R;
+                if (init) fprintf(fp, " Rxx Rxy Rxz Ryx Ryy Ryz Rzx Rzy Rzz"); 
+                else fprintf(fp, "%e %e %e %e %e %e %e %e %e ", R.xx(), R.xy(), R.xz(), R.yx(), R.yy(), R.yz(), R.zx(), R.zy(), R.zz());
+            } else if (field == Prop::ALLSTRESS) {
                 if (init) fprintf(fp, " Sxx Syy Szz Sxy Sxz Syz"); 
                 else fprintf(fp, "%e %e %e %e %e %e ", system->extstress.xx(), system->extstress.yy(), system->extstress.zz(), 
                                                        system->extstress.xy(), system->extstress.xz(), system->extstress.yz());
@@ -527,7 +531,7 @@ bool ExaDiSApp::Stepper::iterate(ExaDiSApp* exadis)
         return false;
     }
     if (type == NUM_STEPS || type == MAX_STEPS) return (exadis->istep <= maxsteps);
-    if (type == MAX_STRAIN) return (exadis->strain < stopval);
+    if (type == MAX_STRAIN) return (fabs(exadis->strain) < stopval);
     if (type == MAX_TIME) return (exadis->tottime < stopval);
     if (type == MAX_WALLTIME) return (exadis->timer.seconds() < stopval);
     return false;
@@ -555,7 +559,7 @@ void ExaDiSApp::initialize(Control& ctrl)
     
     if (!restart) {
         system->extstress = ctrl.appstress;
-        edir = ctrl.edir;
+        edir = ctrl.edir.normalized();
     }
     
     init = true;
