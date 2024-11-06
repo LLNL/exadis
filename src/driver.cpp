@@ -298,19 +298,23 @@ void ExaDiSApp::read_restart(std::string restartfile)
                 ExaDiS_fatal("Error: inconsistent crystal type for restart\n");
         }
         else if (strncmp(line, "crystal orientation", 19) == 0) {
+            Mat33 R;
             sscanf(line, "crystal orientation %lf %lf %lf %lf %lf %lf %lf %lf %lf\n",
-            &system->crystal.R[0][0], &system->crystal.R[0][1], &system->crystal.R[0][2],
-            &system->crystal.R[1][0], &system->crystal.R[1][1], &system->crystal.R[1][2],
-            &system->crystal.R[2][0], &system->crystal.R[2][1], &system->crystal.R[2][2]);
+            &R[0][0], &R[0][1], &R[0][2],
+            &R[1][0], &R[1][1], &R[1][2],
+            &R[2][0], &R[2][1], &R[2][2]);
+            system->crystal.set_orientation(R);
         }
         
         // cell
         else if (strncmp(line, "pbc", 3) == 0) { sscanf(line, "pbc %d %d %d\n", &cell.xpbc, &cell.ypbc, &cell.zpbc); }
         else if (strncmp(line, "H", 1) == 0) {
+            Mat33 H;
             sscanf(line, "H %lf %lf %lf %lf %lf %lf %lf %lf %lf\n",
-            &cell.H[0][0], &cell.H[0][1], &cell.H[0][2],
-            &cell.H[1][0], &cell.H[1][1], &cell.H[1][2],
-            &cell.H[2][0], &cell.H[2][1], &cell.H[2][2]);
+            &H[0][0], &H[0][1], &H[0][2],
+            &H[1][0], &H[1][1], &H[1][2],
+            &H[2][0], &H[2][1], &H[2][2]);
+            cell.set_H(H);
         }
         else if (strncmp(line, "origin", 6) == 0) { sscanf(line, "origin %lf %lf %lf\n", &cell.origin.x, &cell.origin.y, &cell.origin.z); }
         
