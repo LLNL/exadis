@@ -26,6 +26,10 @@ void insert_frs(SerialDisNet *network, Vec3 burg, Vec3 plane, Vec3 ldir,
 void insert_frs(SerialDisNet *network, Vec3 burg, Vec3 plane, 
                 double thetadeg, double L, Vec3 center,
                 Mat33 R, int numnodes=10);
+double insert_infinite_line(SerialDisNet* network, Vec3 burg, Vec3 plane, Vec3 ldir, 
+                            Vec3 origin, Mat33 R, double maxseg=-1);
+double insert_infinite_line(SerialDisNet* network, Vec3 burg, Vec3 plane, double thetadeg, 
+                            Vec3 origin, Mat33 R, double maxseg=-1);
 void insert_prismatic_loop(Crystal& crystal, SerialDisNet *network, Vec3 burg, 
                            double radius, Vec3 center, double maxseg=-1);
 SerialDisNet* generate_frs_config(Crystal crystal, Cell cell, int numsources,

@@ -32,7 +32,7 @@ void insert_frs(SerialDisNet *network, Vec3 burg, Vec3 plane, Vec3 ldir,
     for (int i = 0; i < numnodes; i++) {
         Vec3 p = center + -0.5*L*ldir + 1.0*i*L/(numnodes-1)*ldir;
         p = network->cell.pbc_fold(p);
-        network->add_node(p);
+        network->add_node(p, (i == 0 || i == numnodes-1) ? PINNED_NODE : UNCONSTRAINED);
     }
     for (int i = 0; i < numnodes-1; i++)
         network->add_seg(istart+i, istart+i+1, burg, plane);
@@ -47,11 +47,79 @@ void insert_frs(SerialDisNet *network, Vec3 burg, Vec3 plane,
                 double thetadeg, double L, Vec3 center,
                 Mat33 R, int numnodes)
 {
-    Vec3 b = R * burg.normalized();
-    Vec3 p = R * plane.normalized();
+    Vec3 b = burg.normalized();
+    Vec3 p = plane.normalized();
     Vec3 y = cross(p, b).normalized();
     Vec3 ldir = cos(thetadeg*M_PI/180)*b+sin(thetadeg*M_PI/180)*y;
     insert_frs(network, burg, plane, ldir, L, center, R, numnodes);
+}
+
+/*---------------------------------------------------------------------------
+ *
+ *	Function:	insert_infinite_line
+ *
+ *-------------------------------------------------------------------------*/
+double insert_infinite_line(SerialDisNet* network, Vec3 burg, Vec3 plane, Vec3 ldir, 
+                            Vec3 origin, Mat33 R, double maxseg)
+{
+    ldir = R * ldir.normalized();
+    plane = R * plane.normalized();
+    burg = R * burg;
+    
+    if (fabs(dot(burg, plane)) >= 1e-5)
+        ExaDiS_log("Warning: Burgers vector and plane normal are not orthogonal\n");
+    
+    Mat33 H = network->cell.H;
+    double Lmin = fmin(fmin(H.xx(), H.yy()), H.zz());
+    double seglength = 0.15*Lmin;
+    if (maxseg > 0.0)
+        seglength = fmin(seglength, maxseg);
+        
+    bool meet = 0;
+    int maxnodes = 1000;
+    int numnodes = 0;
+    Vec3 p = 1.0*origin;
+    Vec3 originpbc = 1.0*origin;
+    while (!meet && (numnodes < maxnodes)) {
+        p += seglength*ldir;
+        Vec3 pp = network->cell.pbc_position(origin, p);
+        double dist = (pp-origin).norm();
+        if ((numnodes > 0) && (dist < seglength)) {
+            originpbc = network->cell.pbc_position(p, origin);
+            meet = 1;
+        }
+        numnodes++;
+    }
+    
+    if (numnodes == maxnodes) {
+        ExaDiS_log("Warning: infinite line is too long, aborting\n");
+        return -1.0;
+    }
+    
+    int istart = network->number_of_nodes();
+    for (int i = 0; i < numnodes; i++) {
+        Vec3 p = origin + 1.0*i/numnodes*(originpbc-origin);
+        p = network->cell.pbc_fold(p);
+        network->add_node(p);
+        network->add_seg(istart+i, istart+(i+1)%numnodes, burg, plane);
+    }
+    
+    return (originpbc-origin).norm();
+}
+
+/*---------------------------------------------------------------------------
+ *
+ *	Function:	insert_infinite_line
+ *
+ *-------------------------------------------------------------------------*/
+double insert_infinite_line(SerialDisNet* network, Vec3 burg, Vec3 plane, double thetadeg, 
+                            Vec3 origin, Mat33 R, double maxseg)
+{
+    Vec3 b = burg.normalized();
+    Vec3 p = plane.normalized();
+    Vec3 y = cross(p, b).normalized();
+    Vec3 ldir = cos(thetadeg*M_PI/180)*b+sin(thetadeg*M_PI/180)*y;
+    return insert_infinite_line(network, burg, plane, ldir, origin, R, maxseg);
 }
 
 /*---------------------------------------------------------------------------
