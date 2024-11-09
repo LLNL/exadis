@@ -198,22 +198,22 @@ complex conj(const complex &a) {
 KOKKOS_INLINE_FUNCTION
 void InverseComplex33(complex M[3][3])
 {
-	complex a, b, c, d, e, f, g, h, i, com;
-	a = M[0][0]; b = M[0][1]; c = M[0][2];
-	d = M[1][0]; e = M[1][1]; f = M[1][2];
-	g = M[2][0]; h = M[2][1]; i = M[2][2];
+    complex a, b, c, d, e, f, g, h, i, com;
+    a = M[0][0]; b = M[0][1]; c = M[0][2];
+    d = M[1][0]; e = M[1][1]; f = M[1][2];
+    g = M[2][0]; h = M[2][1]; i = M[2][2];
 
-	com = 1.0/(a*e*i - a*f*h - b*d*i + b*f*g + c*d*h - c*e*g);
+    com = 1.0/(a*e*i - a*f*h - b*d*i + b*f*g + c*d*h - c*e*g);
 
-	M[0][0] = com*(e*i - f*h);
-	M[0][1] = com*(c*h - b*i);
-	M[0][2] = com*(b*f - c*e);
-	M[1][0] = com*(f*g - d*i);
-	M[1][1] = com*(a*i - c*g);
-	M[1][2] = com*(c*d - a*f);
-	M[2][0] = com*(d*h - e*g);
-	M[2][1] = com*(b*g - a*h);
-	M[2][2] = com*(a*e - b*d);
+    M[0][0] = com*(e*i - f*h);
+    M[0][1] = com*(c*h - b*i);
+    M[0][2] = com*(b*f - c*e);
+    M[1][0] = com*(f*g - d*i);
+    M[1][1] = com*(a*i - c*g);
+    M[1][2] = com*(c*d - a*f);
+    M[2][0] = com*(d*h - e*g);
+    M[2][1] = com*(b*g - a*h);
+    M[2][2] = com*(a*e - b*d);
 }
 
 /*---------------------------------------------------------------------------
@@ -254,9 +254,11 @@ private:
     double stress_fact = 1.0;//1e-9;
     double C[3][3][3][3];
     
-    DeviceDisNet *d_net;
-    Vec3 Lbox, H, bmin;
-    double V;
+    DeviceDisNet* d_net;
+    Mat33 H0, Hk, Hkinv;
+    Cell cell;
+    Vec3 Hs;
+    double Vs;
     
     int TIMER_FFTPRECOMP, TIMER_FFTALPHA, TIMER_FFTSTRESS, TIMER_FFTTRANSFORMS;
 
@@ -268,7 +270,7 @@ public:
         Params(int Nx, int Ny, int Nz) { Ngrid[0] = Nx; Ngrid[1] = Ny; Ngrid[2] = Nz; }
     };
     
-    ForceFFT(System *system, Params params)
+    ForceFFT(System* system, Params params)
     {
 #ifndef EXADIS_FFT
         ExaDiS_fatal("Error: EXADIS_FFT must be enabled to use ForceFFT\n");
@@ -281,8 +283,8 @@ public:
         TIMER_FFTTRANSFORMS = system->add_timer("ForceFFT transforms");
     }
     
-    void initialize(System *system, Params params) {
-        
+    void initialize(System* system, Params params)
+    {
         for (int i = 0; i < 3; i++) {
             Ngrid[i] = params.Ngrid[i];
             if (Ngrid[i] <= 0)
@@ -310,7 +312,13 @@ public:
                         C[i][j][k][l] = LA*(delta[i][j]*delta[k][l]) +
                         MU*(delta[i][k]*delta[j][l]+delta[i][l]*delta[j][k]);
             
-        initialize_spectral_core(system);
+        SerialDisNet* network = system->get_serial_network();
+        if (network->cell.xpbc != PBC_BOUND ||
+            network->cell.ypbc != PBC_BOUND ||
+            network->cell.zpbc != PBC_BOUND)
+            ExaDiS_fatal("Error: ForceFFT requires full periodic boundary conditions\n");
+        
+        initialize_spectral_core(system, network);
     }
     
     struct TagComputeW {};
@@ -325,10 +333,8 @@ public:
         int kyy = ky; if (kyy >= kymax) kyy -= Ngrid[1];
         int kzz = kz; if (kzz >= kzmax) kzz -= Ngrid[2];
         
-        double x = kxx*Lbox.x/Ngrid[0];
-        double y = kyy*Lbox.y/Ngrid[1];
-        double z = kzz*Lbox.z/Ngrid[2];
-        double r2 = x*x + y*y + z*z;
+        Vec3 r = Hk * Vec3(kxx, kyy, kzz);
+        double r2 = r.norm2();
         double aw2 = rcgrid*rcgrid;
         double wr = 15.0*aw2*aw2/8.0/M_PI/pow(r2+aw2, 3.5);
         w(kx, ky, kz) = complex(wr, 0.0);
@@ -341,17 +347,22 @@ public:
         w(kx, ky, kz) /= wsum;
     }
     
-    void initialize_spectral_core(System *system)
+    template<class N>
+    void initialize_spectral_core(System* system, N* net)
     {
         // Non-singular kernel
-        SerialDisNet *network = system->get_serial_network();
-        Lbox.x = network->cell.H.xx();
-        Lbox.y = network->cell.H.yy();
-        Lbox.z = network->cell.H.zz();
+        H0 = net->cell.H;
+        Hk = Mat33().set_columns(
+            1.0/Ngrid[0] * H0.colx(),
+            1.0/Ngrid[1] * H0.coly(),
+            1.0/Ngrid[2] * H0.colz()
+        );
+        Hkinv = Hk.inverse();
         
-        H.x = 1.0/Ngrid[0] * Lbox.x;
-        H.y = 1.0/Ngrid[1] * Lbox.y;
-        H.z = 1.0/Ngrid[2] * Lbox.z;
+        Vec3 H;
+        H.x = H0.xx() / Ngrid[0];
+        H.y = H0.yy() / Ngrid[1];
+        H.z = H0.zz() / Ngrid[2];
         double Hmax = fmax(fmax(H.x, H.y), H.z);
         
         // Check voxel aspect ratio...
@@ -376,7 +387,6 @@ public:
         system->register_neighbor_cutoff(fmax(0.5*Hmax, system->params.maxseg));
         
         Kokkos::resize(w, Ngrid[0], Ngrid[1], Ngrid[2]);
-        Kokkos::deep_copy(w, 0.0);
         wsum = 0.0;
         
         Kokkos::parallel_reduce("ForceFFT::ComputeW",
@@ -501,10 +511,9 @@ public:
     struct TagNormalizeStress {};
     
     KOKKOS_INLINE_FUNCTION
-    void operator() (TagComputeAlpha, const int &i) const {
+    void operator() (TagComputeAlpha, const int& i) const {
         auto nodes = d_net->get_nodes();
         auto segs = d_net->get_segs();
-        auto cell = d_net->cell;
         
         int n1 = segs[i].n1;
         int n2 = segs[i].n2;
@@ -516,47 +525,52 @@ public:
         double L = t.norm();
         if (L > 1e-10) {
             
+            r1 = cell.scaled_position(r1);
+            r2 = cell.scaled_position(r2);
+            double Ls = (r2-r1).norm();
+            double scale = L / Ls;
+            
             t = t.normalized();
             
-            double xmin = fmin(r1.x, r2.x) - 0.5*H.x - bmin.x;
-            double xmax = fmax(r1.x, r2.x) - 0.5*H.x - bmin.x;
-            double ymin = fmin(r1.y, r2.y) - 0.5*H.y - bmin.y;
-            double ymax = fmax(r1.y, r2.y) - 0.5*H.y - bmin.y;
-            double zmin = fmin(r1.z, r2.z) - 0.5*H.z - bmin.z;
-            double zmax = fmax(r1.z, r2.z) - 0.5*H.z - bmin.z;
+            double xmin = fmin(r1.x, r2.x) - 0.5*Hs.x;
+            double xmax = fmax(r1.x, r2.x) - 0.5*Hs.x;
+            double ymin = fmin(r1.y, r2.y) - 0.5*Hs.y;
+            double ymax = fmax(r1.y, r2.y) - 0.5*Hs.y;
+            double zmin = fmin(r1.z, r2.z) - 0.5*Hs.z;
+            double zmax = fmax(r1.z, r2.z) - 0.5*Hs.z;
 
-            int imin = floor(xmin/H.x);
-            int imax = floor(xmax/H.x) + 1;
-            int jmin = floor(ymin/H.y);
-            int jmax = floor(ymax/H.y) + 1;
-            int kmin = floor(zmin/H.z);
-            int kmax = floor(zmax/H.z) + 1;
+            int imin = floor(xmin/Hs.x);
+            int imax = floor(xmax/Hs.x) + 1;
+            int jmin = floor(ymin/Hs.y);
+            int jmax = floor(ymax/Hs.y) + 1;
+            int kmin = floor(zmin/Hs.z);
+            int kmax = floor(zmax/Hs.z) + 1;
             
             for (int ib = imin; ib <= imax; ib++) {
                 for (int jb = jmin; jb <= jmax; jb++) {
                     for (int kb = kmin; kb <= kmax; kb++) {
                         
                         Vec3 bc;
-                        bc.x = (ib+0.5)*H.x + bmin.x;
-                        bc.y = (jb+0.5)*H.y + bmin.y;
-                        bc.z = (kb+0.5)*H.z + bmin.z;
+                        bc.x = (ib+0.5)*Hs.x;
+                        bc.y = (jb+0.5)*Hs.y;
+                        bc.z = (kb+0.5)*Hs.z;
 
-                        double W = alpha_box_segment(r1, t, L, bc, H);
+                        double W = scale * alpha_box_segment(r1, t, Ls, bc, Hs);
                         
                         // Box index
                         int kx = ib % Ngrid[0]; if (kx < 0) kx += Ngrid[0];
                         int ky = jb % Ngrid[1]; if (ky < 0) ky += Ngrid[1];
                         int kz = kb % Ngrid[2]; if (kz < 0) kz += Ngrid[2];
                         
-                        Kokkos::atomic_add(&gridval[0](kx, ky, kz), W/V*b.x*t.x);
-                        Kokkos::atomic_add(&gridval[1](kx, ky, kz), W/V*b.x*t.y);
-                        Kokkos::atomic_add(&gridval[2](kx, ky, kz), W/V*b.x*t.z);
-                        Kokkos::atomic_add(&gridval[3](kx, ky, kz), W/V*b.y*t.x);
-                        Kokkos::atomic_add(&gridval[4](kx, ky, kz), W/V*b.y*t.y);
-                        Kokkos::atomic_add(&gridval[5](kx, ky, kz), W/V*b.y*t.z);
-                        Kokkos::atomic_add(&gridval[6](kx, ky, kz), W/V*b.z*t.x);
-                        Kokkos::atomic_add(&gridval[7](kx, ky, kz), W/V*b.z*t.y);
-                        Kokkos::atomic_add(&gridval[8](kx, ky, kz), W/V*b.z*t.z);
+                        Kokkos::atomic_add(&gridval[0](kx, ky, kz), W/Vs*b.x*t.x);
+                        Kokkos::atomic_add(&gridval[1](kx, ky, kz), W/Vs*b.x*t.y);
+                        Kokkos::atomic_add(&gridval[2](kx, ky, kz), W/Vs*b.x*t.z);
+                        Kokkos::atomic_add(&gridval[3](kx, ky, kz), W/Vs*b.y*t.x);
+                        Kokkos::atomic_add(&gridval[4](kx, ky, kz), W/Vs*b.y*t.y);
+                        Kokkos::atomic_add(&gridval[5](kx, ky, kz), W/Vs*b.y*t.z);
+                        Kokkos::atomic_add(&gridval[6](kx, ky, kz), W/Vs*b.z*t.x);
+                        Kokkos::atomic_add(&gridval[7](kx, ky, kz), W/Vs*b.z*t.y);
+                        Kokkos::atomic_add(&gridval[8](kx, ky, kz), W/Vs*b.z*t.z);
                     }
                 }
             }
@@ -596,22 +610,22 @@ public:
         xk[1] = 2.0*M_PI*kyy/Ngrid[1];
         xk[2] = 2.0*M_PI*kzz/Ngrid[2];
         
-        complex cxk[3];
+        complex bxk[3];
         // iGreenOp=0: k=i*q
         if (GREEN_OP == 0) {
-            cxk[0] = 1.0/H[0]*complex(0.0, xk[0]);
-            cxk[1] = 1.0/H[1]*complex(0.0, xk[1]);
-            cxk[2] = 1.0/H[2]*complex(0.0, xk[2]);
+            bxk[0] = complex(0.0, xk[0]);
+            bxk[1] = complex(0.0, xk[1]);
+            bxk[2] = complex(0.0, xk[2]);
         // iGreenOp=1: k=i*sin(q) (C)
         } else if (GREEN_OP == 1) {
-            cxk[0] = 1.0/H[0]*complex(0.0, sin(xk[0]));
-            cxk[1] = 1.0/H[1]*complex(0.0, sin(xk[1]));
-            cxk[2] = 1.0/H[2]*complex(0.0, sin(xk[2]));
+            bxk[0] = complex(0.0, sin(xk[0]));
+            bxk[1] = complex(0.0, sin(xk[1]));
+            bxk[2] = complex(0.0, sin(xk[2]));
         // iGreenOp=2: k=e^(i*q)-1 (W)
         } else if (GREEN_OP == 2) {
-            cxk[0] = 1.0/H[0]*complex(cos(xk[0])-1.0, sin(xk[0]));
-            cxk[1] = 1.0/H[1]*complex(cos(xk[1])-1.0, sin(xk[1]));
-            cxk[2] = 1.0/H[2]*complex(cos(xk[2])-1.0, sin(xk[2]));
+            bxk[0] = complex(cos(xk[0])-1.0, sin(xk[0]));
+            bxk[1] = complex(cos(xk[1])-1.0, sin(xk[1]));
+            bxk[2] = complex(cos(xk[2])-1.0, sin(xk[2]));
         // iGreenOp=3: k(R), rotated scheme
         } else if (GREEN_OP == 3) {
             if (kxx == -Ngrid[0]/2 || kyy == -Ngrid[1]/2 || kzz == -Ngrid[2]/2) {
@@ -621,9 +635,16 @@ public:
             complex fact1(1.0+cos(xk[1]), sin(xk[1]));
             complex fact2(1.0+cos(xk[2]), sin(xk[2]));
             complex fact = fact0*fact1*fact2;
-            cxk[0] = 0.25/H[0]*fact*complex(0.0, tan(0.5*xk[0]));
-            cxk[1] = 0.25/H[1]*fact*complex(0.0, tan(0.5*xk[1]));
-            cxk[2] = 0.25/H[2]*fact*complex(0.0, tan(0.5*xk[2]));
+            bxk[0] = 0.25*fact*complex(0.0, tan(0.5*xk[0]));
+            bxk[1] = 0.25*fact*complex(0.0, tan(0.5*xk[1]));
+            bxk[2] = 0.25*fact*complex(0.0, tan(0.5*xk[2]));
+        }
+        
+        complex cxk[3];
+        for (int i = 0; i < 3; i++) {
+            cxk[i] = complex(0.0, 0.0);
+            for (int j = 0; j < 3; j++)
+                cxk[i] += Hkinv[j][i] * bxk[j];
         }
         
         double nxk2 = cxk[0].real()*cxk[0].real() + cxk[0].imag()*cxk[0].imag() +
@@ -704,22 +725,21 @@ public:
             gridval[stress_comps[i]](kx, ky, kz) /= (stress_fact*Ngrid3);
     }
     
-    void compute_alpha(System *system)
+    void compute_alpha(System* system)
     {
         d_net = system->get_device_network();
+        cell = d_net->cell;
         
-        // Only for orthorombic boxes as for now
-        if (d_net->cell.is_triclinic())
-            ExaDiS_fatal("Error: ForceFFT only implemented for orthorombic cells\n");
+        if ((cell.H.colx() - H0.colx()).norm2() > 1.0 ||
+            (cell.H.coly() - H0.coly()).norm2() > 1.0 ||
+            (cell.H.colz() - H0.colz()).norm2() > 1.0) {
+            initialize_spectral_core(system, d_net);
+        }
         
-        Lbox.x = d_net->cell.H.xx();
-        Lbox.y = d_net->cell.H.yy();
-        Lbox.z = d_net->cell.H.zz();
-        H.x = 1.0/Ngrid[0] * Lbox.x;
-        H.y = 1.0/Ngrid[1] * Lbox.y;
-        H.z = 1.0/Ngrid[2] * Lbox.z;
-        V = H.x * H.y * H.z;
-        bmin = d_net->cell.origin;
+        Hs.x = 1.0/Ngrid[0];
+        Hs.y = 1.0/Ngrid[1];
+        Hs.z = 1.0/Ngrid[2];
+        Vs = cell.H.det()/Ngrid[0]/Ngrid[1]/Ngrid[2];
         
         Kokkos::fence();
         system->devtimer[TIMER_FFTALPHA].start();
@@ -813,10 +833,12 @@ public:
     KOKKOS_INLINE_FUNCTION
     Mat33 interpolate_stress(N *net, const Vec3 &p)
     {
+        Vec3 s = cell.scaled_position(p);
+        
         double q[3];
-        q[0] = (p.x-bmin.x) / H.x - 0.5;
-        q[1] = (p.y-bmin.y) / H.y - 0.5;
-        q[2] = (p.z-bmin.z) / H.z - 0.5;
+        q[0] = s.x * Ngrid[0] - 0.5;
+        q[1] = s.y * Ngrid[1] - 0.5;
+        q[2] = s.z * Ngrid[2] - 0.5;
         
         int g[3];
         g[0] = (int)floor(q[0]);
