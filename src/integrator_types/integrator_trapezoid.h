@@ -166,7 +166,7 @@ public:
                 
                 if ((newdt < 1.0e-20) /*&& (system->proc_rank == 0)*/)
                     ExaDiS_fatal("IntegratorTrapezoid(): Timestep has dropped below\n"
-                                 "minimal threshold to %e. Aborting!", newdt);
+                                 "minimal threshold to %e. Aborting!\n", newdt);
             }
             
         } // while (!convergent)
