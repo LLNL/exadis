@@ -171,7 +171,7 @@ struct SystemBind : ExaDisNet {
     SystemBind(ExaDisNet disnet, Params params) : ExaDisNet()
     {
         SerialDisNet* net = disnet.system->get_serial_network();
-        system = make_system(net, Crystal(params.crystal, params.Rorient), params);
+        system = make_system(net, Crystal(params.crystal), params);
         system->params.check_params();
     }
     void set_neighbor_cutoff(double cutoff) {

@@ -25,15 +25,25 @@ enum CrystalType {BCC_CRYSTAL, FCC_CRYSTAL, USER_CRYSTAL};
 
 /*---------------------------------------------------------------------------
  *
+ *    Struct:       CrystalParams
+ *
+ *-------------------------------------------------------------------------*/
+struct CrystalParams
+{
+    int type; // crystal type
+    Mat33 R = Mat33().eye(); // crystal orientation
+    int enforce_glide_planes = -1;
+};
+
+/*---------------------------------------------------------------------------
+ *
  *    Struct:       Crystal
  *                  Base structrure to hold crystal structure information
  *                  and helper functions.
  *
  *-------------------------------------------------------------------------*/
-struct Crystal
+struct Crystal : CrystalParams
 {
-    int type; // crystal type
-    Mat33 R = Mat33().eye(); // crystal orientation
     Mat33 Rinv = Mat33().eye();
     bool use_R = 0;
     bool use_glide_planes = 0;
@@ -50,13 +60,26 @@ struct Crystal
     
     RandomGenerator random_gen;
     
-    Crystal() { type = -1; }
-    Crystal(int _type) : type(_type) {
+    Crystal() { type = -1; enforce_glide_planes = 0; }
+    Crystal(int _type) {
+        type = _type;
         if (type != -1) initialize();
     }
-    Crystal(int _type, Mat33 _R) : type(_type) {
-        set_orientation(_R);
+    Crystal(int _type, Mat33 _R) {
+        type = _type;
         if (type != -1) initialize();
+        set_orientation(_R);
+    }
+    Crystal(const CrystalParams& params) : CrystalParams(params) {
+        if (type != -1) initialize();
+        set_orientation(R);
+    }
+    
+    bool operator!=(const CrystalParams& p) {
+        if (type != p.type || R != p.R ||
+            (p.enforce_glide_planes != -1 && enforce_glide_planes != p.enforce_glide_planes))
+            return 1;
+        return 0;
     }
     
     void set_orientation(Mat33 _R) {
@@ -64,6 +87,8 @@ struct Crystal
         R[0] = R[0].normalized();
         R[1] = R[1].normalized();
         R[2] = R[2].normalized();
+        if (fabs(fabs(R.det()) - 1.0) > 1e-10)
+            ExaDiS_fatal("Error: improper crystal orientation matrix (det = %e)\n", R.det());
         Rinv = R.inverse();
         use_R = 1;
     }
@@ -94,6 +119,8 @@ struct Crystal
             ExaDiS_fatal("Error: invalid crystal type %d\n", type);
         
         use_glide_planes = (type == BCC_CRYSTAL) ? 0 : 1;
+        if (enforce_glide_planes < 0)
+            enforce_glide_planes = use_glide_planes;
         
         if (type == BCC_CRYSTAL) {
             

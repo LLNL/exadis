@@ -1356,6 +1356,8 @@ Vec3 AdjustMergePoint(System* system, SerialDisNet* network, int n, const Vec3& 
 bool test_collision_glide_planes(System* system, SerialDisNet* network, 
                                  int i, const Vec3& p, int coplanar)
 {
+    if (!system->crystal.use_glide_planes) return 1;
+    
     double tol_test = 1e-2;  //tolerance for plane test
     double tol_len = 1e-10;  //tolerance for "zero-length" segment
 
@@ -1584,7 +1586,7 @@ void CollisionRetroactive::retroactive_collision(System* system)
             }
             
             // Test for glide plane violations
-            if (system->crystal.use_glide_planes) {
+            if (system->crystal.enforce_glide_planes) {
                 if (!test_collision_glide_planes(system, network, mergenode1, newpos, coplanar) ||
                     !test_collision_glide_planes(system, network, mergenode2, newpos, coplanar))
                     continue;
@@ -1776,7 +1778,7 @@ void CollisionRetroactive::retroactive_collision(System* system)
                 }
                 
                 // Test for glide plane violations
-                if (system->crystal.use_glide_planes) {
+                if (system->crystal.enforce_glide_planes) {
                     if (!test_collision_glide_planes(system, network, mergenode1, newpos, 0) ||
                         !test_collision_glide_planes(system, network, mergenode2, newpos, 0))
                         continue;
@@ -2060,7 +2062,7 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
         }
         
         // Test for glide plane violations
-        if (system->crystal.use_glide_planes) {
+        if (system->crystal.enforce_glide_planes) {
             if (!test_collision_glide_planes(system, network, mergenode1, newpos, coplanar) ||
                 !test_collision_glide_planes(system, network, mergenode2, newpos, coplanar))
                 continue;
@@ -2254,7 +2256,7 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
                 }
                 
                 // Test for glide plane violations
-                if (system->crystal.use_glide_planes) {
+                if (system->crystal.enforce_glide_planes) {
                     if (!test_collision_glide_planes(system, network, mergenode1, newpos, 0) ||
                         !test_collision_glide_planes(system, network, mergenode2, newpos, 0))
                         continue;

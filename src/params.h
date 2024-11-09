@@ -12,6 +12,7 @@
 #define EXADIS_PARAMS_H
 
 #include "types.h"
+#include "crystal.h"
 
 namespace ExaDiS {
 
@@ -78,9 +79,8 @@ struct Params {
     }
     
     // Python binding
-    int crystal = -1;
-    Mat33 Rorient = Mat33().eye();
     Params(std::string, double, double, double, double, double, double, double, double, double, double, int);
+    CrystalParams crystal;
     void set_crystal(std::string);
 };
 

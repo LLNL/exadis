@@ -324,8 +324,8 @@ Params::Params(
 
 void Params::set_crystal(std::string crystalname) {
     if (!crystalname.empty()) {
-        if (crystalname == "bcc" || crystalname == "BCC") crystal = BCC_CRYSTAL;
-        else if (crystalname == "fcc" || crystalname == "FCC") crystal = FCC_CRYSTAL;
+        if (crystalname == "bcc" || crystalname == "BCC") crystal.type = BCC_CRYSTAL;
+        else if (crystalname == "fcc" || crystalname == "FCC") crystal.type = FCC_CRYSTAL;
         else ExaDiS_fatal("Error: unknown crystal type %s in the python binding\n", crystalname.c_str());
     }
 }
@@ -347,7 +347,7 @@ template<class F>
 ForceBind make_force(Params& params, typename F::Params fparams)
 {
     params.check_params();
-    System* system = make_system(new SerialDisNet(), Crystal(params.crystal, params.Rorient), params);
+    System* system = make_system(new SerialDisNet(), Crystal(params.crystal), params);
     
     Force* force = exadis_new<F>(system, fparams);
     
@@ -371,7 +371,7 @@ ForceBind make_force_ddd_fft(Params& params, ForceType::CORE_SELF_PKEXT::Params 
                              std::vector<int> Ngrid, Cell& cell, bool drift)
 {
     params.check_params();
-    System* system = make_system(new SerialDisNet(cell), Crystal(params.crystal, params.Rorient), params);
+    System* system = make_system(new SerialDisNet(cell), Crystal(params.crystal), params);
     
     Force* force;
     if (subcycling) {
@@ -397,9 +397,8 @@ std::vector<Vec3> compute_force(ExaDisNet& disnet, ForceBind& forcebind,
 {
     System* system = disnet.system;
     system->params = forcebind.params;
-    if (system->crystal.type != forcebind.params.crystal ||
-        system->crystal.R != forcebind.params.Rorient)
-        system->crystal = Crystal(forcebind.params.crystal, forcebind.params.Rorient);
+    if (system->crystal != forcebind.params.crystal)
+        system->crystal = Crystal(forcebind.params.crystal);
     
     system->extstress = Mat33().voigt(applied_stress.data());
     
@@ -488,9 +487,8 @@ void pre_compute_force(ExaDisNet& disnet, ForceBind& forcebind)
 {
     System* system = disnet.system;
     system->params = forcebind.params;
-    if (system->crystal.type != forcebind.params.crystal ||
-        system->crystal.R != forcebind.params.Rorient)
-        system->crystal = Crystal(forcebind.params.crystal, forcebind.params.Rorient);
+    if (system->crystal != forcebind.params.crystal)
+        system->crystal = Crystal(forcebind.params.crystal);
     
     Force* force = forcebind.force;
     force->pre_compute(system);
@@ -502,9 +500,8 @@ Vec3 compute_node_force(ExaDisNet& disnet, int i, ForceBind& forcebind,
 {
     System* system = disnet.system;
     system->params = forcebind.params;
-    if (system->crystal.type != forcebind.params.crystal ||
-        system->crystal.R != forcebind.params.Rorient)
-        system->crystal = Crystal(forcebind.params.crystal, forcebind.params.Rorient);
+    if (system->crystal != forcebind.params.crystal)
+        system->crystal = Crystal(forcebind.params.crystal);
     
     system->extstress = Mat33().voigt(applied_stress.data());
     
@@ -534,7 +531,7 @@ template<class M>
 MobilityBind make_mobility(Params& params, typename M::Params mobparams)
 {
     params.check_params();
-    System* system = make_system(new SerialDisNet(), Crystal(params.crystal, params.Rorient), params);
+    System* system = make_system(new SerialDisNet(), Crystal(params.crystal), params);
     
     Mobility* mobility = new M(system, mobparams);
     
@@ -549,9 +546,8 @@ std::vector<Vec3> compute_mobility(ExaDisNet& disnet, MobilityBind& mobbind,
 {
     System* system = disnet.system;
     system->params = mobbind.params;
-    if (system->crystal.type != mobbind.params.crystal ||
-        system->crystal.R != mobbind.params.Rorient)
-        system->crystal = Crystal(mobbind.params.crystal, mobbind.params.Rorient);
+    if (system->crystal != mobbind.params.crystal)
+        system->crystal = Crystal(mobbind.params.crystal);
     
     // Set forces
     set_forces(system, forces, tags);
@@ -567,9 +563,8 @@ Vec3 compute_node_mobility(ExaDisNet& disnet, int i, MobilityBind& mobbind, Vec3
 {
     System* system = disnet.system;
     system->params = mobbind.params;
-    if (system->crystal.type != mobbind.params.crystal ||
-        system->crystal.R != mobbind.params.Rorient)
-        system->crystal = Crystal(mobbind.params.crystal, mobbind.params.Rorient);
+    if (system->crystal != mobbind.params.crystal)
+        system->crystal = Crystal(mobbind.params.crystal);
     
     Mobility* mobility = mobbind.mobility;
     return mobility->node_velocity(system, i, fi);
@@ -585,7 +580,7 @@ IntegratorBind make_integrator(Params& params, typename I::Params itgrparams,
                                ForceBind& forcebind, MobilityBind& mobbind)
 {
     params.check_params();
-    System* system = make_system(new SerialDisNet(), Crystal(params.crystal, params.Rorient), params);
+    System* system = make_system(new SerialDisNet(), Crystal(params.crystal), params);
     
     Force* force = forcebind.force;
     Mobility* mobility = mobbind.mobility;
@@ -602,9 +597,8 @@ double integrate(ExaDisNet& disnet, IntegratorBind& itgrbind,
 {
     System* system = disnet.system;
     system->params = itgrbind.params;
-    if (system->crystal.type != itgrbind.params.crystal ||
-        system->crystal.R != itgrbind.params.Rorient)
-        system->crystal = Crystal(itgrbind.params.crystal, itgrbind.params.Rorient);
+    if (system->crystal != itgrbind.params.crystal)
+        system->crystal = Crystal(itgrbind.params.crystal);
     
     system->extstress = Mat33().voigt(applied_stress.data());
     
@@ -656,7 +650,7 @@ double integrate_euler(ExaDisNet& disnet, Params& _params, double dt, std::vecto
  *-------------------------------------------------------------------------*/
 CollisionBind make_collision(std::string collision_mode, Params& params)
 {
-    System* system = make_system(new SerialDisNet(), Crystal(params.crystal, params.Rorient), params);
+    System* system = make_system(new SerialDisNet(), Crystal(params.crystal), params);
     
     Collision* collision;
     if (collision_mode == "Retroactive" || collision_mode == "Proximity")
@@ -676,9 +670,8 @@ void handle_collision(ExaDisNet& disnet, CollisionBind& collisionbind,
 {
     System* system = disnet.system;
     system->params = collisionbind.params;
-    if (system->crystal.type != collisionbind.params.crystal ||
-        system->crystal.R != collisionbind.params.Rorient)
-        system->crystal = Crystal(collisionbind.params.crystal, collisionbind.params.Rorient);
+    if (system->crystal != collisionbind.params.crystal)
+        system->crystal = Crystal(collisionbind.params.crystal);
     
     // Make sure we have a value set for rann
     if (system->params.rann < 0.0)
@@ -718,7 +711,7 @@ TopologyBind make_topology(std::string topology_mode, Params& params,
                            ForceBind& forcebind, MobilityBind& mobbind)
 {
     params.check_params();
-    System* system = make_system(new SerialDisNet(), Crystal(params.crystal, params.Rorient), params);
+    System* system = make_system(new SerialDisNet(), Crystal(params.crystal), params);
     
     Force* force = forcebind.force;
     Mobility* mobility = mobbind.mobility;
@@ -754,9 +747,8 @@ void handle_topology(ExaDisNet& disnet, TopologyBind& topolbind, double dt)
 {
     System* system = disnet.system;
     system->params = topolbind.params;
-    if (system->crystal.type != topolbind.params.crystal ||
-        system->crystal.R != topolbind.params.Rorient)
-        system->crystal = Crystal(topolbind.params.crystal, topolbind.params.Rorient);
+    if (system->crystal != topolbind.params.crystal)
+        system->crystal = Crystal(topolbind.params.crystal);
     
     system->neighbor_cutoff = topolbind.neighbor_cutoff; // required for topology force calculation
     system->realdt = dt; // used for determining the noise level
@@ -772,7 +764,7 @@ void handle_topology(ExaDisNet& disnet, TopologyBind& topolbind, double dt)
  *-------------------------------------------------------------------------*/
 RemeshBind make_remesh(std::string remesh_rule, Params& params)
 {
-    System* system = make_system(new SerialDisNet(), Crystal(params.crystal, params.Rorient), params);
+    System* system = make_system(new SerialDisNet(), Crystal(params.crystal), params);
     
     Remesh* remesh;
     if (remesh_rule == "LengthBased") {
@@ -792,9 +784,8 @@ void remesh(ExaDisNet& disnet, RemeshBind& remeshbind)
 {
     System* system = disnet.system;
     system->params = remeshbind.params;
-    if (system->crystal.type != remeshbind.params.crystal ||
-        system->crystal.R != remeshbind.params.Rorient)
-        system->crystal = Crystal(remeshbind.params.crystal, remeshbind.params.Rorient);
+    if (system->crystal != remeshbind.params.crystal)
+        system->crystal = Crystal(remeshbind.params.crystal);
     
     Remesh* remesh = remeshbind.remesh_class;
     remesh->remesh(system);
@@ -807,7 +798,7 @@ void remesh(ExaDisNet& disnet, RemeshBind& remeshbind)
  *-------------------------------------------------------------------------*/
 CrossSlipBind make_cross_slip(std::string cross_slip_mode, Params& params, ForceBind& forcebind)
 {
-    System* system = make_system(new SerialDisNet(), Crystal(params.crystal, params.Rorient), params);
+    System* system = make_system(new SerialDisNet(), Crystal(params.crystal), params);
     
     Force* force = forcebind.force;
     double cutoff = forcebind.neighbor_cutoff; // required for force calculation
@@ -842,9 +833,8 @@ void handle_cross_slip(ExaDisNet& disnet, CrossSlipBind& crossslipbind)
 {
     System* system = disnet.system;
     system->params = crossslipbind.params;
-    if (system->crystal.type != crossslipbind.params.crystal ||
-        system->crystal.R != crossslipbind.params.Rorient)
-        system->crystal = Crystal(crossslipbind.params.crystal, crossslipbind.params.Rorient);
+    if (system->crystal != crossslipbind.params.crystal)
+        system->crystal = Crystal(crossslipbind.params.crystal);
     
     system->neighbor_cutoff = crossslipbind.neighbor_cutoff; // required for force calculation
     
@@ -906,8 +896,7 @@ PYBIND11_MODULE(pyexadis, m) {
              py::arg("maxseg"), py::arg("minseg"), py::arg("rann")=-1.0, py::arg("rtol")=-1.0, 
              py::arg("maxdt")=1e-7, py::arg("nextdt")=1e-12, py::arg("split3node")=1)
         .def("set_crystal", &Params::set_crystal, "Set the crystal type")
-        .def_readonly("crystal", &Params::crystal, "Index of the crystal type")
-        .def_readwrite("Rorient", &Params::Rorient, "Crystal orientation matrix")
+        .def_readwrite("crystal", &Params::crystal, "Crystal parameters")
         .def_readwrite("burgmag", &Params::burgmag, "Burgers vector magnitude (scaling length)")
         .def_readwrite("mu", &Params::MU, "Shear modulus")
         .def_readwrite("nu", &Params::NU, "Poisson's ratio")
@@ -919,11 +908,17 @@ PYBIND11_MODULE(pyexadis, m) {
         .def_readwrite("maxdt", &Params::maxdt, "Maximum timestep size")
         .def_readwrite("nextdt", &Params::nextdt, "Starting timestep size")
         .def_readwrite("split3node", &Params::split3node, "Enable splitting of 3-nodes");
-        
+    
+    py::class_<CrystalParams>(m, "CrystalParams")
+        .def(py::init<>())
+        .def_readwrite("R", &Crystal::R, "Crystal orientation matrix")
+        .def_readwrite("enforce_glide_planes", &Crystal::enforce_glide_planes, "Enforce glide planes option");
+    
     py::class_<Crystal>(m, "Crystal")
         .def(py::init<>())
         .def(py::init<int>())
         .def(py::init<int, Mat33>())
+        .def_readonly("type", &Crystal::type, "Index of the crystal type")
         .def_readonly("R", &Crystal::R, "Crystal orientation matrix")
         .def("set_orientation", (void (Crystal::*)(Mat33)) &Crystal::set_orientation, "Set crystal orientation matrix")
         .def("set_orientation", (void (Crystal::*)(Vec3)) &Crystal::set_orientation, "Set crystal orientation via Euler angles");

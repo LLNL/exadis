@@ -8,8 +8,8 @@
  *-------------------------------------------------------------------------*/
 
 #include "types.h"
-#include "params.h"
 #include "crystal.h"
+#include "params.h"
 
 #pragma once
 #ifndef EXADIS_SYSTEM_H

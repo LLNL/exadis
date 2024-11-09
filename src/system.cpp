@@ -182,7 +182,7 @@ void System::reset_glide_planes()
     DeviceDisNet* net = get_device_network();
     
     // Fix glide plane violations
-    if (xold.extent(0) > 0) {
+    if (xold.extent(0) > 0 && crystal.enforce_glide_planes) {
         T_x& xprev = xold;
         Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int& i) {
             auto nodes = net->get_nodes();
