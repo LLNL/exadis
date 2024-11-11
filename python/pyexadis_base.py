@@ -339,6 +339,15 @@ class MobilityLaw:
                                                             mobility_field, friction_field)
             self.mobility = pyexadis.make_mobility_fcc_0_fric(params=params, mobparams=mobparams)
             
+        elif self.mobility_law == 'FCC_0B':
+            Medge = get_module_arg(self.mobility_law, kwargs, 'Medge')
+            Mscrew = get_module_arg(self.mobility_law, kwargs, 'Mscrew')
+            Mclimb = get_module_arg(self.mobility_law, kwargs, 'Mclimb')
+            Mclimbjunc = kwargs.get('Mclimbjunc', -1.0)
+            vmax = kwargs.get('vmax', -1.0)
+            mobparams = pyexadis.Mobility_FCC_0B_Params(Medge, Mscrew, Mclimb, Mclimbjunc, vmax)
+            self.mobility = pyexadis.make_mobility_fcc_0b(params=params, mobparams=mobparams)
+            
         else:
             raise ValueError('Unknown mobility law %s' % mobility_law)
         

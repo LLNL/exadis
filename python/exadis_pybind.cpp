@@ -988,6 +988,9 @@ PYBIND11_MODULE(pyexadis, m) {
         .def(py::init<double, double, double, double, double, std::string, std::string>(), 
         py::arg("Medge"), py::arg("Mscrew"), py::arg("Fedge")=0.0, py::arg("Fscrew")=0.0, py::arg("vmax")=-1.0,
         py::arg("mobility_field")="", py::arg("friction_field")="");
+    py::class_<MobilityType::FCC_0B::Params>(m, "Mobility_FCC_0B_Params")
+        .def(py::init<double, double, double, double, double>(), py::arg("Medge"), py::arg("Mscrew"),
+        py::arg("Mclimb"), py::arg("Mclimbjunc")=-1.0, py::arg("vmax")=-1.0);
         
     py::class_<IntegratorTrapezoid::Params>(m, "Integrator_Trapezoid_Params")
         .def(py::init<>());
@@ -1065,6 +1068,8 @@ PYBIND11_MODULE(pyexadis, m) {
     m.def("make_mobility_fcc_0", &make_mobility<MobilityType::FCC_0>, "Instantiate a FCC_0 mobility law",
           py::arg("params"), py::arg("mobparams"));
     m.def("make_mobility_fcc_0_fric", &make_mobility<MobilityType::FCC_0_FRIC>, "Instantiate a FCC_0_FRIC mobility law",
+          py::arg("params"), py::arg("mobparams"));
+    m.def("make_mobility_fcc_0b", &make_mobility<MobilityType::FCC_0B>, "Instantiate a FCC_0B mobility law",
           py::arg("params"), py::arg("mobparams"));
     m.def("make_mobility_python", &make_mobility_python, "Instantiate a python-based mobility model",
           py::arg("params"), py::arg("mobility"));
