@@ -393,7 +393,7 @@ ForceBind make_force_ddd_fft(Params& params, ForceType::CORE_SELF_PKEXT::Params 
 }
 
 std::vector<Vec3> compute_force(ExaDisNet& disnet, ForceBind& forcebind, 
-                                std::vector<double> applied_stress)
+                                std::vector<double> applied_stress, bool pre_compute)
 {
     System* system = disnet.system;
     system->params = forcebind.params;
@@ -403,8 +403,10 @@ std::vector<Vec3> compute_force(ExaDisNet& disnet, ForceBind& forcebind,
     system->extstress = Mat33().voigt(applied_stress.data());
     
     Force* force = forcebind.force;
-    force->pre_compute(system);
-    forcebind.pre_computed = true;
+    if (pre_compute) {
+        force->pre_compute(system);
+        forcebind.pre_computed = true;
+    }
     force->compute(system);
     
     std::vector<Vec3> forces = get_forces(system);
@@ -1042,7 +1044,7 @@ PYBIND11_MODULE(pyexadis, m) {
           py::arg("params"), py::arg("force"));
     
     m.def("compute_force", &compute_force, "Wrapper to compute nodal forces",
-          py::arg("net"), py::arg("force"), py::arg("applied_stress"));
+          py::arg("net"), py::arg("force"), py::arg("applied_stress"), py::arg("pre_compute")=true);
     m.def("pre_compute_force", &pre_compute_force, "Wrapper to perform pre-computations before compute_node_force",
           py::arg("net"), py::arg("force"));
     m.def("compute_node_force", &compute_node_force, "Wrapper to compute the force on a single node",

@@ -220,7 +220,10 @@ public:
     
     void compute(System* system, bool zero=true) {
         ExaDisNet disnet(system);
-        pyforce.attr("NodeForce")(disnet);
+        // This can only be called from within ExaDiS modules 
+        // (integration, topology, etc.) so we assume that pre_compute()
+        // has been called before and there is no need to call it again.
+        pyforce.attr("NodeForce")(disnet, false);
     }
     
     Vec3 node_force(System* system, const int& i) {

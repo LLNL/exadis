@@ -225,10 +225,10 @@ class CalForce:
         else:
             raise ValueError('Unknown force %s' % force_mode)
             
-    def NodeForce(self, N: DisNetManager, state: dict) -> dict:
+    def NodeForce(self, N: DisNetManager, state: dict, pre_compute=True) -> dict:
         applied_stress = state["applied_stress"]
         G = N.get_disnet(ExaDisNet)
-        f = pyexadis.compute_force(G.net, force=self.force, applied_stress=applied_stress)
+        f = pyexadis.compute_force(G.net, force=self.force, applied_stress=applied_stress, pre_compute=pre_compute)
         state["nodeforces"] = np.array(f)
         state["nodeforcetags"] = G.get_tags()
         return state
@@ -273,9 +273,9 @@ class CalForcePython:
         self.force = force_module
         self.state = state
         
-    def NodeForce(self, net):
+    def NodeForce(self, net, pre_compute=True):
         N = DisNetManager(ExaDisNet(net))
-        self.force.NodeForce(N, self.state)
+        self.force.NodeForce(N, self.state, pre_compute)
         nodeforces = self.state["nodeforces"]
         nodetags = self.state["nodeforcetags"]
         net.set_forces(nodeforces, nodetags)
