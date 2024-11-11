@@ -81,7 +81,7 @@ public:
             
             } else if (length < minseg) {
                 // Merge segment nodes (coarsen)
-                if (system->crystal.use_glide_planes) {
+                if (system->crystal.enforce_glide_planes) {
                     // Do not remesh if node arms are on different planes
                     // to avoid creating glide plane violations
                     if (network->conn[n1].num == 2) {
