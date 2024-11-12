@@ -30,7 +30,7 @@ enum CrystalType {BCC_CRYSTAL, FCC_CRYSTAL, USER_CRYSTAL};
  *-------------------------------------------------------------------------*/
 struct CrystalParams
 {
-    int type; // crystal type
+    int type = -1; // crystal type
     Mat33 R = Mat33().eye(); // crystal orientation
     int enforce_glide_planes = -1;
 };
