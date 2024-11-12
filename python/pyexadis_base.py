@@ -689,7 +689,7 @@ class SimulateNetwork:
             data = N.export_data()
             nodes = data.get("nodes")
             segs = data.get("segs")
-            cell = G.cell
+            cell = N.cell
             
             oldnodes_dict = state["oldnodes_dict"]
             rold = oldnodes_dict["positions"]
@@ -723,6 +723,8 @@ class SimulateNetwork:
             dEp, dWp, self.density = N.get_disnet(ExaDisNet).net.get_plastic_strain()
             dEp = np.array(dEp).ravel()[[0,4,8,5,2,1]] # xx,yy,zz,yz,xz,xy
             dWp = np.array(dWp).ravel()[[5,2,1]] # yz,xz,xy
+            state["dEp"] = dEp
+            state["dWp"] = dWp
         else:
             dEp, dWp = state["dEp"], state["dWp"]
         
