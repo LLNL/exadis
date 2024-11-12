@@ -158,7 +158,7 @@ void tests(ExaDiSApp *exadis, int test_id)
         crystal = Crystal(BCC_CRYSTAL);
         maxseg = 10.0;
         minseg = 2.0;
-        std::string datafile = exadis_root_dir + "/tests/data/ta-elemental-single.data";
+        std::string datafile = exadis_root_dir + "/examples/06_nodal_xslip/ta-elemental-single.data";
         config = read_paradis(datafile.c_str());
         
         rtol = 0.3;
