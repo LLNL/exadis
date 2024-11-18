@@ -309,8 +309,8 @@ System* make_system(SerialDisNet* net, Crystal crystal, Params params) {
  *
  *-------------------------------------------------------------------------*/
 DisNetManager* make_network_manager(SerialDisNet* net) {
-    net->update_ptr();
     net->generate_connectivity();
+    net->update_ptr();
     return exadis_new<DisNetManager>(net);
 }
     

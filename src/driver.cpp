@@ -355,6 +355,7 @@ void ExaDiSApp::read_restart(std::string restartfile)
     }
     
     net->generate_connectivity();
+    net->update_ptr();
     system->density = net->dislocation_density(system->params.burgmag);
     
     free(line);
