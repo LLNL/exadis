@@ -86,7 +86,7 @@ class ExaDisNet(DisNet_Base):
         nodes_array = np.hstack((nodes["tags"], nodes["positions"], nodes["constraints"]))
         segs = data.get("segs")
         segs_array = np.hstack((segs["nodeids"], segs["burgers"], segs["planes"]))
-        self.net = pyexadis.ExaDisNet(cell=cell, nodes=nodes_array, segs=segs_array)
+        self.net.import_data(cell=cell, nodes=nodes_array, segs=segs_array)
     
     def export_data(self):
         cell = self.net.get_cell()

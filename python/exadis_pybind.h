@@ -133,7 +133,12 @@ std::vector<Vec3> get_velocities(System* system);
  *-------------------------------------------------------------------------*/
 struct ExaDisNet {
     System* system = nullptr;
-    ExaDisNet() {}
+    
+    ExaDisNet() {
+        system = make_system(new SerialDisNet(), Crystal(), Params());
+        system->pyexadis = true;
+    }
+    
     ExaDisNet(System* _system) : system(_system) {
         system->pyexadis = true;
     }
@@ -145,8 +150,24 @@ struct ExaDisNet {
         SerialDisNet* net = new SerialDisNet(cell);
         net->set_nodes_array(nodes_array);
         net->set_segs_array(segs_array);
+        net->sanity_check();
         system = make_system(net, Crystal(), Params());
         system->pyexadis = true;
+    }
+    
+    void import_data(Cell& cell,
+                     std::vector<std::vector<double> >& nodes_array, 
+                     std::vector<std::vector<double> >& segs_array)
+    {
+        if (!system)
+            ExaDiS_fatal("Error: cannot import data in unitialized ExaDisNet object\n");
+        SerialDisNet* net = system->get_serial_network();
+        net->cell = cell;
+        net->set_nodes_array(nodes_array);
+        net->set_segs_array(segs_array);
+        net->sanity_check();
+        net->generate_connectivity();
+        net->update_ptr();
     }
     
     int number_of_nodes() { return system->Nnodes_total(); }

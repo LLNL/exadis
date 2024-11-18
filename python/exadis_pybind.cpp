@@ -30,6 +30,7 @@ void SerialDisNet::set_nodes_array(std::vector<std::vector<double> >& nodes_arra
             ExaDiS_fatal("Error: node must have 3 (x,y,z), 4 (x,y,z,constraint),\n"
             " 5 (dom,id,x,y,z) or 6 (dom,id,x,y,z,constraint) attributes\n");
     }
+    update_ptr();
 }
 
 void SerialDisNet::set_segs_array(std::vector<std::vector<double> >& segs_array) {
@@ -42,6 +43,7 @@ void SerialDisNet::set_segs_array(std::vector<std::vector<double> >& segs_array)
         else
             ExaDiS_fatal("Error: segment must have 5 (n1,n2,burg) or 8 (n1,n2,burg,plane) attributes\n");
     }
+    update_ptr();
 }
 
 std::vector<std::vector<double> > SerialDisNet::get_nodes_array() {
@@ -68,6 +70,15 @@ std::vector<std::vector<double> > SerialDisNet::get_segs_array() {
         segs_array[i] = seg;
     }
     return segs_array;
+}
+
+void SerialDisNet::sanity_check() {
+    int Nnodes = (int)number_of_nodes();
+    for (int i = 0; i < number_of_segs(); i++) {
+        if (segs[i].n1 < 0 || segs[i].n1 >= Nnodes ||
+            segs[i].n2 < 0 || segs[i].n2 >= Nnodes)
+            ExaDiS_fatal("Error: invalid segment connectivity found in network\n");
+    }
 }
 
 std::vector<int> Cell::get_pbc() {
@@ -950,6 +961,8 @@ PYBIND11_MODULE(pyexadis, m) {
     py::class_<ExaDisNet>(m, "ExaDisNet")
         .def(py::init<>())
         .def(py::init<Cell&, std::vector<std::vector<double> >&, std::vector<std::vector<double> >&>(),
+             py::arg("cell"), py::arg("nodes"), py::arg("segs"))
+        .def("import_data", &ExaDisNet::import_data, "Set the network with (cell,nodes,segs) data",
              py::arg("cell"), py::arg("nodes"), py::arg("segs"))
         .def("number_of_nodes", &ExaDisNet::number_of_nodes, "Returns the number of nodes in the network")
         .def("number_of_segs", &ExaDisNet::number_of_segs, "Returns the number of segments in the network")

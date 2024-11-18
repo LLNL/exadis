@@ -437,6 +437,7 @@ public:
     void set_segs_array(std::vector<std::vector<double> >& segs);
     std::vector<std::vector<double> > get_nodes_array();
     std::vector<std::vector<double> > get_segs_array();
+    void sanity_check();
 };
 
 } // namespace ExaDiS
