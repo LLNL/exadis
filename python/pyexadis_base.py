@@ -394,6 +394,7 @@ class MobilityLawPython:
     """
     def __init__(self, mobility_module, state):
         self.mobility = mobility_module
+        self.non_linear = getattr(mobility_module, 'non_linear', False)
         self.state = state
         
     def Mobility(self, net):

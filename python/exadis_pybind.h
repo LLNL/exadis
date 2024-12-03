@@ -278,7 +278,9 @@ private:
     py::object pymobility;
     
 public:
-    MobilityPython(py::object _pymobility) : pymobility(_pymobility) {}
+    MobilityPython(py::object _pymobility) : pymobility(_pymobility) {
+        non_linear = pymobility.attr("non_linear").cast<bool>(); 
+    }
     
     void compute(System* system) {
         ExaDisNet disnet(system);
