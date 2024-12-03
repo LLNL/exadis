@@ -22,17 +22,19 @@ namespace ExaDiS {
  *-------------------------------------------------------------------------*/
 struct MobilityBCC0b
 {
-    const bool non_linear = false;
+    bool non_linear = false;
     double Beclimbj;
     double Bscrew2, Beclimb2;
     double Bline, BlmBsc, BlmBecl;
     double invBscrew2, invBedge2;
     double Bedge, Bscrew, Beclimb;
     double vmax, vscale;
+    double Fedge, Fscrew;
     
     struct Params {
         double Medge, Mscrew, Mclimb;
-        double vmax;
+        double Fedge = 0.0, Fscrew = 0.0;
+        double vmax = -1.0;
         Params() { Medge = Mscrew = Mclimb = vmax = -1.0; }
         Params(double _Medge, double _Mscrew, double _Mclimb) {
             Medge = _Medge;
@@ -46,6 +48,15 @@ struct MobilityBCC0b
             Mclimb = _Mclimb;
             vmax = _vmax;
         }
+        Params(double _Medge, double _Mscrew, double _Mclimb,
+               double _Fedge, double _Fscrew, double _vmax) {
+            Medge = _Medge;
+            Mscrew = _Mscrew;
+            Mclimb = _Mclimb;
+            Fedge = _Fedge;
+            Fscrew = _Fscrew;
+            vmax = _vmax;
+        }
     };
     
     MobilityBCC0b(System* system, Params& params)
@@ -53,7 +64,8 @@ struct MobilityBCC0b
         if (system->crystal.type != BCC_CRYSTAL)
             ExaDiS_fatal("Error: MobilityBCC0b() must be used with BCC crystal type\n");
             
-        if (params.Medge < 0 || params.Mscrew < 0.0 || params.Mclimb < 0.0)
+        if (params.Medge < 0 || params.Mscrew < 0.0 || params.Mclimb < 0.0 ||
+            params.Fedge < 0 || params.Fscrew < 0.0)
             ExaDiS_fatal("Error: invalid MobilityBCC0b() parameter values\n");
         
         Bedge   = 1.0 / params.Medge;
@@ -61,6 +73,11 @@ struct MobilityBCC0b
         Beclimb = 1.0 / params.Mclimb;
         vmax    = params.vmax;
         vscale  = system->params.burgmag; //vscale (convert factor from m/s)
+        Fedge   = params.Fedge;
+        Fscrew  = params.Fscrew;
+        
+        if (Fedge > 1e-5 || Fscrew > 1e-5)
+            non_linear = true;
         
         // Initialization
         Beclimbj   = Beclimb;
@@ -114,6 +131,7 @@ struct MobilityBCC0b
 
             double eps = 1e-12;
             Mat33 Btotal = Mat33().zero();
+            double FricForce = 0.0;
 
             // Build drag matrix
             Vec3 r1 = nodes[i].pos;
@@ -142,6 +160,10 @@ struct MobilityBCC0b
 
                 double costheta = dot(dr, burg);
                 double costheta2 = (costheta*costheta) * invbMag2;
+                
+                double dangle = 1.0 / bMag * fabs(costheta);
+                double fricStress = Fedge+(Fscrew-Fedge)*dangle;
+                FricForce += fricStress * bMag * mag;
                 
                 if (bMag > 1.0+eps) {
                     // [0 0 1] arms don't move as readily as other arms, so must be
@@ -220,10 +242,22 @@ struct MobilityBCC0b
             Btotal[1][0] = Btotal[0][1];
             Btotal[2][0] = Btotal[0][2];
             Btotal[2][1] = Btotal[1][2];
+            FricForce /= 2.0;
 
             if (numNonZeroLenSegs > 0) {
                 Mat33 invDragMatrix = Btotal.inverse();
-                vi = invDragMatrix * fi;
+                
+                Vec3 f = fi;
+                if (FricForce > eps) {
+                    double fmag = f.norm();
+                    if (fmag > FricForce) {
+                        f -= FricForce/fmag * f;
+                    } else {
+                        f = Vec3(0.0);
+                    }
+                }
+                
+                vi = invDragMatrix * f;
                 if (vmax > 0.0) 
                     apply_velocity_cap(vmax, vscale, vi);
             }

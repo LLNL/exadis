@@ -310,8 +310,10 @@ class MobilityLaw:
             Medge = get_module_arg(self.mobility_law, kwargs, 'Medge')
             Mscrew = get_module_arg(self.mobility_law, kwargs, 'Mscrew')
             Mclimb = get_module_arg(self.mobility_law, kwargs, 'Mclimb')
+            Fedge = kwargs.get('Fedge', 0.0)
+            Fscrew = kwargs.get('Fscrew', 0.0)
             vmax = kwargs.get('vmax', -1.0)
-            mobparams = pyexadis.Mobility_BCC_0B_Params(Medge, Mscrew, Mclimb, vmax)
+            mobparams = pyexadis.Mobility_BCC_0B_Params(Medge, Mscrew, Mclimb, Fedge, Fscrew, vmax)
             self.mobility = pyexadis.make_mobility_bcc_0b(params=params, mobparams=mobparams)
             
         elif self.mobility_law == 'BCC_NL':
