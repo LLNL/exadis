@@ -181,8 +181,21 @@ void System::reset_glide_planes()
     
     DeviceDisNet* net = get_device_network();
     
+    if (!crystal.enforce_glide_planes) {
+        // Check that all segments have a non-zero glide plane assigned
+        int err = 0;
+        Kokkos::parallel_reduce(net->Nsegs_local, KOKKOS_LAMBDA(const int& i, int& err) {
+            auto segs = net->get_segs();
+            if (segs[i].plane.norm2() < 1e-10) err += 1;
+        }, err);
+        Kokkos::fence();
+        if (err > 0)
+            ExaDiS_fatal("Error: %d segments have no glide plane assigned\n", err);
+    }
+    if (!crystal.enforce_glide_planes) return;
+    
     // Fix glide plane violations
-    if (xold.extent(0) > 0 && crystal.enforce_glide_planes) {
+    if (xold.extent(0) > 0 /*&& crystal.enforce_glide_planes*/) {
         T_x& xprev = xold;
         Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int& i) {
             auto nodes = net->get_nodes();
