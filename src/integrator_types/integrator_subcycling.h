@@ -658,9 +658,11 @@ public:
             ExaDiS_fatal("Error: must use ForceSubcycling with IntegratorSubcycling\n");
         
         // Need to use subcycling mode drift=1 for non-linear mobility laws
-        if (mobility->non_linear && !force->drift)
+        if (mobility->non_linear && !force->drift) {
             ExaDiS_log("WARNING: using non-linear mobility law with subcycling integrator\n"
-            " Use force option drift=1 to ensure correct time-integration\n");
+            " Switching to force option drift=1 to ensure correct time-integration\n");
+            force->drift = 1;
+        }
         
         double cutoff = force->fsegseg->get_cutoff();
         subgroups = exadis_new<G>(system, params.rgroups, cutoff);
