@@ -663,9 +663,10 @@ class SimulateNetwork:
     def write_results(self):
         """write_results: write simulation results into a file
         """
-        with open('%s/stress_strain_dens.dat'%self.write_dir, 'w') as f:
-            f.write('# Step Strain Stress Density Walltime\n')
-            np.savetxt(f, np.array(self.results), fmt='%d %e %e %e %e')
+        if len(self.results) > 0:
+            with open('%s/stress_strain_dens.dat'%self.write_dir, 'w') as f:
+                f.write('# Step Strain Stress Density Walltime\n')
+                np.savetxt(f, np.array(self.results), fmt='%d %e %e %e %e')
     
     def save_old_nodes(self, N: DisNetManager, state: dict):
         """save_old_nodes: save current nodal positions
