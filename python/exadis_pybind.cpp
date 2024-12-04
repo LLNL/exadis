@@ -924,8 +924,9 @@ PYBIND11_MODULE(pyexadis, m) {
     
     py::class_<CrystalParams>(m, "CrystalParams")
         .def(py::init<>())
-        .def_readwrite("R", &Crystal::R, "Crystal orientation matrix")
-        .def_readwrite("enforce_glide_planes", &Crystal::enforce_glide_planes, "Enforce glide planes option");
+        .def_readwrite("R", &CrystalParams::R, "Crystal orientation matrix")
+        .def_readwrite("use_glide_planes", &CrystalParams::use_glide_planes, "Use and maintain dislocation glide planes")
+        .def_readwrite("enforce_glide_planes", &CrystalParams::enforce_glide_planes, "Enforce glide planes option");
     
     py::class_<Crystal>(m, "Crystal")
         .def(py::init<>())

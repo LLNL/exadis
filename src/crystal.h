@@ -32,6 +32,7 @@ struct CrystalParams
 {
     int type = -1; // crystal type
     Mat33 R = Mat33().eye(); // crystal orientation
+    int use_glide_planes = -1;
     int enforce_glide_planes = -1;
 };
 
@@ -46,7 +47,6 @@ struct Crystal : CrystalParams
 {
     Mat33 Rinv = Mat33().eye();
     bool use_R = 0;
-    bool use_glide_planes = 0;
     
     int num_burgs = 0;
     int num_glissile_burgs = 0;
@@ -60,7 +60,7 @@ struct Crystal : CrystalParams
     
     RandomGenerator random_gen;
     
-    Crystal() { type = -1; enforce_glide_planes = 0; }
+    Crystal() { type = -1; use_glide_planes = enforce_glide_planes = 0; }
     Crystal(int _type) {
         type = _type;
         if (type != -1) initialize();
@@ -77,6 +77,7 @@ struct Crystal : CrystalParams
     
     bool operator!=(const CrystalParams& p) {
         if (type != p.type || R != p.R ||
+            (p.use_glide_planes != -1 && use_glide_planes != p.use_glide_planes) ||
             (p.enforce_glide_planes != -1 && enforce_glide_planes != p.enforce_glide_planes))
             return 1;
         return 0;
@@ -118,15 +119,19 @@ struct Crystal : CrystalParams
         if (type < BCC_CRYSTAL || type > USER_CRYSTAL)
             ExaDiS_fatal("Error: invalid crystal type %d\n", type);
         
-        use_glide_planes = (type == BCC_CRYSTAL) ? 0 : 1;
+        if (use_glide_planes < 0)
+            use_glide_planes = (type == BCC_CRYSTAL) ? 0 : 1;
         if (enforce_glide_planes < 0)
             enforce_glide_planes = use_glide_planes;
+        
+        if (enforce_glide_planes && !use_glide_planes)
+            ExaDiS_fatal("Error: cannot use option enforce_glide_planes = 1 with use_glide_planes = 0\n");
         
         if (type == BCC_CRYSTAL) {
             
             // Burgers vectors
             num_glissile_burgs = 4;
-            num_burgs = num_glissile_burgs;//+3;
+            num_burgs = num_glissile_burgs+3;
             Kokkos::resize(ref_burgs, num_burgs);
             // 1/2<111> glissile Burgers
             ref_burgs(0) = Vec3( 1.0, 1.0, 1.0).normalized();
@@ -134,15 +139,17 @@ struct Crystal : CrystalParams
             ref_burgs(2) = Vec3( 1.0,-1.0, 1.0).normalized();
             ref_burgs(3) = Vec3( 1.0, 1.0,-1.0).normalized();
             // <100> junction Burgers
-            //ref_burgs(4) = 2.0/sqrt(3.0) * Vec3(1.0, 0.0, 0.0);
-            //ref_burgs(5) = 2.0/sqrt(3.0) * Vec3(0.0, 1.0, 0.0);
-            //ref_burgs(6) = 2.0/sqrt(3.0) * Vec3(0.0, 0.0, 1.0);
+            ref_burgs(4) = 2.0/sqrt(3.0) * Vec3(1.0, 0.0, 0.0);
+            ref_burgs(5) = 2.0/sqrt(3.0) * Vec3(0.0, 1.0, 0.0);
+            ref_burgs(6) = 2.0/sqrt(3.0) * Vec3(0.0, 0.0, 1.0);
             
             // Habit planes
-            num_planes = 4*(3+3);
+            num_planes = 4*(3+3)+3*16;
             Kokkos::resize(ref_planes, num_planes);
             Kokkos::resize(planes_per_burg, num_burgs);
             Kokkos::resize(burg_start_plane, num_burgs);
+            
+            // 1/2<111> Burgers
             for (int i = 0; i < 4; i++) {
                 Vec3 b = ref_burgs(i);
                 // {110} planes
@@ -156,6 +163,30 @@ struct Crystal : CrystalParams
                 // Indexing
                 planes_per_burg(i) = 6;
                 burg_start_plane(i) = i*6;
+            }
+            
+            // <100> Burgers
+            std::vector<Vec3> pref100 = {
+                Vec3( 1.0, 0.0, 0.0), Vec3( 0.0, 1.0, 0.0), // {100}
+                Vec3( 1.0, 1.0, 0.0), Vec3( 1.0,-1.0, 0.0), // {110}
+                Vec3( 2.0, 1.0, 0.0), Vec3( 2.0,-1.0, 0.0), // {210}
+                Vec3( 1.0, 2.0, 0.0), Vec3( 1.0,-2.0, 0.0),
+                Vec3( 3.0, 1.0, 0.0), Vec3( 3.0,-1.0, 0.0), // {310}
+                Vec3( 1.0, 3.0, 0.0), Vec3( 1.0,-3.0, 0.0),
+                Vec3( 5.0, 1.0, 0.0), Vec3( 5.0,-1.0, 0.0), // {510}
+                Vec3( 1.0, 5.0, 0.0), Vec3( 1.0,-5.0, 0.0),
+            };
+            for (int i = 0; i < 3; i++) {
+                // Indexing
+                planes_per_burg(4+i) = 16;
+                burg_start_plane(4+i) = 4*6+i*16;
+                // <100> zonal planes
+                for (int j = 0; j < 16; j++) {
+                    Vec3 pj(0.0);
+                    pj[(i+1)%3] = pref100[j].x;
+                    pj[(i+2)%3] = pref100[j].y;
+                    ref_planes(4*6+i*16+j) = pj.normalized();
+                }
             }
             
             // Slip systems: only register the 1/2<111>{110} systems for now
@@ -328,20 +359,26 @@ struct Crystal : CrystalParams
     Vec3 pick_screw_glide_plane(N* net, const Vec3& b)
     {
         Vec3 plane(0.0);
-        if (use_glide_planes && type == FCC_CRYSTAL) {
-            double val = random_gen.drand<typename N::ExecutionSpace>(0.0, 1.0);
-            if (fabs(b.x) < 1e-10) {
-                plane.x = plane.y = 1.0 / sqrt(3.0);
-                plane.z = -SIGN(b.y * b.z) * plane.y;
-                if (val < 0.5) plane.x = -plane.y;
-            } else if (fabs(b.y) < 1e-10) {
-                plane.x = plane.y = 1.0 / sqrt(3.0);
-                plane.z = -SIGN(b.x * b.z) * plane.x;
-                if (val < 0.5) plane.y = -plane.x;
+        if (use_glide_planes) {
+            if (type == FCC_CRYSTAL) {
+                double val = random_gen.drand<typename N::ExecutionSpace>(0.0, 1.0);
+                if (fabs(b.x) < 1e-10) {
+                    plane.x = plane.y = 1.0 / sqrt(3.0);
+                    plane.z = -SIGN(b.y * b.z) * plane.y;
+                    if (val < 0.5) plane.x = -plane.y;
+                } else if (fabs(b.y) < 1e-10) {
+                    plane.x = plane.y = 1.0 / sqrt(3.0);
+                    plane.z = -SIGN(b.x * b.z) * plane.x;
+                    if (val < 0.5) plane.y = -plane.x;
+                } else {
+                    plane.x = plane.z = 1.0 / sqrt(3.0);
+                    plane.y = -SIGN(b.x * b.y) * plane.x;
+                    if (val < 0.5) plane.z = -plane.x;
+                }
             } else {
-                plane.x = plane.z = 1.0 / sqrt(3.0);
-                plane.y = -SIGN(b.x * b.y) * plane.x;
-                if (val < 0.5) plane.z = -plane.x;
+                int bid = identify_closest_Burgers(b);
+                int nid = random_gen.rand<typename N::ExecutionSpace>(0, planes_per_burg(bid));
+                plane = ref_planes(burg_start_plane(bid)+nid);
             }
         }
         plane = plane.normalized();

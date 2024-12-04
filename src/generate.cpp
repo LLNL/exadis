@@ -136,19 +136,21 @@ void insert_prismatic_loop(Crystal& crystal, SerialDisNet *network, Vec3 burg,
     if (crystal.type == BCC_CRYSTAL) {
         burg = -1.0*burg;
         Nsides = 6;
-        e[0] = crystal.R*Vec3(-2.0*burg.x, burg.y, burg.z);
-        e[2] = crystal.R*Vec3(burg.x, -2.0*burg.y, burg.z);
-        e[4] = crystal.R*Vec3(burg.x, burg.y, -2.0*burg.z);
+        e[0] = Vec3(-2.0*burg.x, burg.y, burg.z);
+        e[2] = Vec3(burg.x, -2.0*burg.y, burg.z);
+        e[4] = Vec3(burg.x, burg.y, -2.0*burg.z);
         e[1] = -1.0*e[4];
         e[3] = -1.0*e[0];
         e[5] = -1.0*e[2];
         
         for (int i = 0; i < 6; i++)
-            e[i] = e[i].normalized();
+            n[i] = cross(burg, e[(i+1)%Nsides]-e[i]).normalized();
+        for (int i = 0; i < 6; i++)
+            e[i] = crystal.R * e[i].normalized();
         
     } else if (crystal.type == FCC_CRYSTAL) {
         Nsides = 4;
-        int bid = crystal.identify_closest_Burgers(burg);
+        int bid = crystal.identify_closest_Burgers(crystal.R * burg);
         Vec3 p1 = crystal.ref_planes(bid*3+0);
         Vec3 p2 = crystal.ref_planes(bid*3+1);
         
@@ -158,6 +160,9 @@ void insert_prismatic_loop(Crystal& crystal, SerialDisNet *network, Vec3 burg,
         e[1] = +0.5*l1-0.5*l2; n[1] = p2;
         e[2] = +0.5*l1+0.5*l2; n[2] = p1;
         e[3] = -0.5*l1+0.5*l2; n[3] = p2;
+        
+        for (int i = 0; i < 4; i++)
+            e[i] = crystal.R * e[i];
         
     } else {
         ExaDiS_fatal("Error: insert_prismatic_loop() not available for crystal type = %d\n", crystal.type);

@@ -303,10 +303,25 @@ struct RandomGenerator {
     Kokkos::Random_XorShift64_Pool<Kokkos::Serial> random_pool_serial;
     Kokkos::Random_XorShift64_Pool<Kokkos::DefaultExecutionSpace> random_pool_device;
     
-    RandomGenerator() {
-        int seed = 12345;
+    RandomGenerator(int seed=12345) {
         random_pool_serial = Kokkos::Random_XorShift64_Pool<Kokkos::Serial>(seed);
         random_pool_device = Kokkos::Random_XorShift64_Pool<Kokkos::DefaultExecutionSpace>(seed);
+    }
+    
+    template<class ExecutionSpace>
+    KOKKOS_FORCEINLINE_FUNCTION
+    int rand(int min, int max) {
+        if constexpr (std::is_same<ExecutionSpace,Kokkos::Serial>::value) {
+            auto generator = random_pool_serial.get_state();
+            int val = generator.rand(min, max);
+            random_pool_serial.free_state(generator);
+            return val;
+        } else {
+            auto generator = random_pool_device.get_state();
+            int val = generator.rand(min, max);
+            random_pool_device.free_state(generator);
+            return val;
+        }
     }
     
     template<class ExecutionSpace>
