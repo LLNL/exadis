@@ -10,7 +10,9 @@ bertin1@llnl.gov
 
 import os
 import numpy as np
+
 from typing import Tuple
+Tag = Tuple[int, int]
 
 import pyexadis
 try:
@@ -239,7 +241,7 @@ class CalForce:
         pyexadis.pre_compute_force(G.net, force=self.force)
         return state
     
-    def OneNodeForce(self, N: DisNetManager, state: dict, tag, update_state=True) -> np.array:
+    def OneNodeForce(self, N: DisNetManager, state: dict, tag: Tag, update_state=True) -> np.array:
         applied_stress = state["applied_stress"]
         G = N.get_disnet(ExaDisNet)
         # find node index
@@ -363,7 +365,7 @@ class MobilityLaw:
         state["nodeveltags"] = G.get_tags()
         return state
         
-    def OneNodeMobility(self, N: DisNetManager, state: dict, tag, f, update_state=True) -> np.array:
+    def OneNodeMobility(self, N: DisNetManager, state: dict, tag: Tag, f: np.array, update_state=True) -> np.array:
         G = N.get_disnet(ExaDisNet)
         # find node index
         tags = G.get_tags()
@@ -373,11 +375,11 @@ class MobilityLaw:
         # compute node force
         v = pyexadis.compute_node_mobility(G.net, ind[0], mobility=self.mobility, fi=np.array(f))
         v = np.array(v)
-        # update force dictionary if needed
+        # update velocity dictionary if needed
         if update_state:
             if "nodevels" in state and "nodeveltags" in state:
                 nodeveltags = state["nodeveltags"]
-                ind = np.where((nodeforcetags[:,0]==tag[0])&(nodeforcetags[:,1]==tag[1]))[0]
+                ind = np.where((nodeveltags[:,0]==tag[0])&(nodeveltags[:,1]==tag[1]))[0]
                 if ind.size == 1:
                     state["nodevels"][ind[0]] = v
                 else:
@@ -619,6 +621,7 @@ class SimulateNetwork:
                  burgmag: float=1.0,
                  loading_mode: str='stress',
                  applied_stress: np.ndarray=np.zeros(6),
+                 srate: np.ndarray=np.zeros(6),
                  erate: float=0.0,
                  edir: np.ndarray=np.array([0.,0.,1.]),
                  max_step: int=10,
@@ -639,6 +642,7 @@ class SimulateNetwork:
         self.vis = vis
         self.burgmag = burgmag
         self.loading_mode = loading_mode
+        self.srate = srate
         self.erate = erate
         self.edir = np.array(edir)
         self.rotation = kwargs.get('rotation', None)
@@ -720,8 +724,42 @@ class SimulateNetwork:
         
         return state
     
-    def update_mechanics(self, N: DisNetManager, state: dict):
-        """update_mechanics: update applied stress and rotation if needed
+    def step_begin(self, N: DisNetManager, state: dict):
+        """step_begin: invoked at the begining of each time step
+        """
+        pass
+        
+    def step_integrate(self, N: DisNetManager, state: dict):
+        """step_integrate: invoked for time-integration at each time step
+        """
+        self.save_old_nodes(N, state)
+        self.calforce.NodeForce(N, state)
+        self.mobility.Mobility(N, state)
+        self.timeint.Update(N, state)
+        self.plastic_strain(N, state)
+        
+    def step_post_integrate(self, N: DisNetManager, state: dict):
+        """step_post_integrate: invoked after time-integration of each time step
+        """
+        pass
+        
+    def step_topological_operations(self, N: DisNetManager, state: dict):
+        """step_topological_operations: invoked for handling topological events at each time step
+        """
+        if self.cross_slip is not None:
+            self.cross_slip.Handle(N, state)
+
+        if self.collision is not None:
+            self.collision.HandleCol(N, state)
+            
+        if self.topology is not None:
+            self.topology.Handle(N, state)
+
+        if self.remesh is not None:
+            self.remesh.Remesh(N, state)
+    
+    def step_update_response(self, N: DisNetManager, state: dict):
+        """step_update_response: update applied stress and rotation if needed
         """
         if self.exadis_plastic_strain:
             # get values of plastic strain computed internally in exadis
@@ -744,7 +782,7 @@ class SimulateNetwork:
             A = np.hstack([np.diag(A0), A0.ravel()[[5,2,1]]])
             A2 = np.hstack([np.diag(A0), 2.0*A0.ravel()[[5,2,1]]])
             dpstrain = np.dot(dEp, A2)
-            dstrain = self.erate * self.timeint.dt
+            dstrain = self.erate * state["dt"]
             Eyoung = 2.0 * state["mu"] * (1.0 + state["nu"])
             dstress = Eyoung * (dstrain - dpstrain)
             state["applied_stress"] += dstress * A
@@ -752,40 +790,41 @@ class SimulateNetwork:
             self.strain = np.dot(self.Etot, A2)
             self.stress = np.dot(state["applied_stress"], A2)
             
-        elif self.loading_mode == 'stress':
+        elif self.loading_mode in ['stress', 'stress_rate']:
+            if self.loading_mode == 'stress_rate':
+                state["applied_stress"] += self.srate * state["dt"]
             self.strain = 0.0
             S = np.array(state["applied_stress"][[0,5,4,5,1,3,4,3,2]]).reshape(3,3)
             Sdev = S - np.trace(S)/3.0*np.eye(3)
             self.stress = np.sqrt(3.0/2.0*np.dot(Sdev.ravel(), Sdev.ravel())) # von Mises
             
         return state
+        
+    def step_end(self, N: DisNetManager, state: dict):
+        """step_end: invoked at the begining of each time step
+        """
+        pass
     
     def step(self, N: DisNetManager, state: dict):
         """step: take a time step of DD simulation on DisNetManager N
         """
-        self.calforce.NodeForce(N, state)
-
-        self.mobility.Mobility(N, state)
+        # Step begin
+        self.step_begin(N, state)
         
-        self.save_old_nodes(N, state)
+        # Step time-integrate
+        self.step_integrate(N, state)
         
-        self.timeint.Update(N, state)
+        # Step post-integrate
+        self.step_post_integrate(N, state)
         
-        self.plastic_strain(N, state)
+        # Step topological operations
+        self.step_topological_operations(N, state)
         
-        if self.cross_slip is not None:
-            self.cross_slip.Handle(N, state)
-
-        if self.collision is not None:
-            self.collision.HandleCol(N, state)
-            
-        if self.topology is not None:
-            self.topology.Handle(N, state)
-
-        if self.remesh is not None:
-            self.remesh.Remesh(N, state)
-            
-        self.update_mechanics(N, state)
+        # Step update response
+        self.step_update_response(N, state)
+        
+        # Step end
+        self.step_end(N, state)
         
     def run(self, N: DisNetManager, state: dict):
         
@@ -803,6 +842,7 @@ class SimulateNetwork:
         
         # time stepping
         for tstep in range(self.max_step):
+            state["istep"] = tstep
             self.step(N, state)
 
             if self.print_freq != None:
@@ -1044,13 +1084,12 @@ class VisualizeNetwork:
         ax.set_xlabel('x')
         ax.set_ylabel('y')
         ax.set_zlabel('z')
-        try: ax.set_box_aspect([1,1,1])
+        try: ax.set_box_aspect(np.diag(h)/np.diag(h).max())
         except AttributeError:
             #print('ax.set_box_aspect does not work')
             pass
-
         plt.draw()
         plt.show(block=block)
-        plt.pause(pause_seconds)
+        if pause_seconds > 0: plt.pause(pause_seconds)
 
         return fig, ax
