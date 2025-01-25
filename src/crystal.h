@@ -60,18 +60,21 @@ struct Crystal : CrystalParams
     
     RandomGenerator random_gen;
     
-    Crystal() { type = -1; use_glide_planes = enforce_glide_planes = 0; }
+    Crystal() { 
+        type = -1;
+        initialize();
+    }
     Crystal(int _type) {
         type = _type;
-        if (type != -1) initialize();
+        initialize();
     }
     Crystal(int _type, Mat33 _R) {
         type = _type;
-        if (type != -1) initialize();
+        initialize();
         set_orientation(_R);
     }
     Crystal(const CrystalParams& params) : CrystalParams(params) {
-        if (type != -1) initialize();
+        initialize();
         set_orientation(R);
     }
     
@@ -116,6 +119,11 @@ struct Crystal : CrystalParams
     
     void initialize()
     {
+        if (type == -1) {
+            use_glide_planes = enforce_glide_planes = 0;
+            return;
+        }
+        
         if (type < BCC_CRYSTAL || type > USER_CRYSTAL)
             ExaDiS_fatal("Error: invalid crystal type %d\n", type);
         
