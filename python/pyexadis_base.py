@@ -101,9 +101,16 @@ class ExaDisNet(DisNet_Base):
     @property
     def cell(self):
         return self.net.get_cell()
-        
+    
+    def num_nodes(self):
+        return self.net.number_of_nodes()
+    
+    def num_segments(self):
+        return self.net.number_of_segs()
+    
     def get_nodes_data(self):
-        nodes_array = np.atleast_2d(self.net.get_nodes_array())
+        nodes_array = np.array(self.net.get_nodes_array())
+        if nodes_array.size == 0: nodes_array = np.empty((0,6))
         nodes_dict = {
             "tags": nodes_array[:,0:2].astype(int),
             "positions": nodes_array[:,2:5],
@@ -124,7 +131,8 @@ class ExaDisNet(DisNet_Base):
         return np.array(self.net.get_velocities())
         
     def get_segs_data(self):
-        segs_array = np.atleast_2d(self.net.get_segs_array())
+        segs_array = np.array(self.net.get_segs_array())
+        if segs_array.size == 0: segs_array = np.empty((0,8))
         segs_dict = {
             "nodeids": segs_array[:,0:2].astype(int),
             "burgers": segs_array[:,2:5],
@@ -360,6 +368,7 @@ class MobilityLaw:
         G = N.get_disnet(ExaDisNet)
         f = state["nodeforces"]
         nodetags = state.get("nodeforcetags", np.empty((0,2)))
+        if f.size == 0: f, nodetags = np.empty((0,3)), np.empty((0,2))
         v = pyexadis.compute_mobility(G.net, mobility=self.mobility, nodeforces=f, nodetags=nodetags)
         state["nodevels"] = np.array(v)
         state["nodeveltags"] = G.get_tags()
@@ -414,7 +423,7 @@ class MobilityLawPython:
         
     def OneNodeMobility(self, net, tag, f):
         N = DisNetManager(ExaDisNet(net))
-        return self.mobility.OneNodeMobility(N, self.state, tag, f)
+        return self.mobility.OneNodeMobility(N, self.state, tag, np.array(f))
 
 
 class TimeIntegration:
@@ -505,12 +514,14 @@ class TimeIntegration:
     def Update_EulerForward(self, G: ExaDisNet, state: dict) -> None:
         v = state["nodevels"]
         nodetags = state.get("nodeveltags", np.empty((0,2)))
+        if v.size == 0: v, nodetags = np.empty((0,3)), np.empty((0,2))
         self.dt = pyexadis.integrate_euler(G.net, params=self.params, dt=self.dt, nodevels=v, nodetags=nodetags)
         
     def Integrate(self, G: ExaDisNet, state: dict) -> None:
         applied_stress = state["applied_stress"]
         v = state["nodevels"]
         nodetags = state["nodeveltags"]
+        if v.size == 0: v, nodetags = np.empty((0,3)), np.empty((0,2))
         # update state dictionary if force/mobility are python-based
         # so that ExaDiS can internally call the wrappers with up-to-date state
         if self.force_python is not None:
@@ -835,7 +846,7 @@ class SimulateNetwork:
         t0 = time.perf_counter()
         
         if self.vis != None and self.plot_freq != None:
-            self.vis.plot_disnet(N, trim=True, block=False)
+            self.vis.plot_disnet(N, state=state, trim=True, block=False)
             
         if self.write_freq != None:
             N.get_disnet(ExaDisNet).write_data(os.path.join(self.write_dir, 'config.0.data'))
@@ -858,7 +869,7 @@ class SimulateNetwork:
 
             if self.vis != None and self.plot_freq != None:
                 if (tstep+1) % self.plot_freq == 0:
-                    self.vis.plot_disnet(N, trim=True, block=False, pause_seconds=self.plot_pause_seconds)
+                    self.vis.plot_disnet(N, state=state, trim=True, block=False, pause_seconds=self.plot_pause_seconds)
             
             if self.write_freq != None:
                 if (tstep+1) % self.write_freq == 0:
@@ -910,6 +921,8 @@ class SimulateNetworkPerf(SimulateNetwork):
         ]):
             raise ValueError("SimulateNetworkPerf can only accept exadis modules.\n"
                              "Adjust modules or use SimulateNetwork driver.")
+        if self.timeint.integrator_type == 'EulerForward':
+            raise ValueError("SimulateNetworkPerf cannot be used with EulerForward integrator.")
         
         # convert DisNet to a complete exadis system object
         params = get_exadis_params(state)
@@ -1013,7 +1026,7 @@ class VisualizeNetwork:
         if view_init:
             self.ax.view_init(**view_init)
         
-    def plot_disnet(self, N: DisNetManager,
+    def plot_disnet(self, N: DisNetManager, state: dict={},
                     plot_nodes=True, plot_segs=True, plot_cell=True, trim=False,
                     fig=None, ax=None, block=False, pause_seconds=0.01):
         if fig == None: fig = self.fig
