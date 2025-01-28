@@ -1,0 +1,6 @@
+set(Kokkos_ENABLE_SERIAL On)
+set(Kokkos_ENABLE_OPENMP On)
+
+set(Kokkos_ARCH_NATIVE On)
+
+set(CRAYPE_LINK_TYPE dynamic)
