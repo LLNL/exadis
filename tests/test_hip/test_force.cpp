@@ -278,7 +278,7 @@ struct ForceBase {
 
 typedef ForceBase<SegSegIso> Force;
 
-template<typename TagCompute>
+template<typename TagCompute, bool use_lauchbounds=false>
 void force(System* system)
 {
     system->timer.reset();
@@ -288,11 +288,22 @@ void force(System* system)
         Force(system)
     );
     Kokkos::fence();
-    
-    Kokkos::parallel_for(
-        Kokkos::RangePolicy<TagCompute>(0, system->Nsegs),
-        Force(system)
-    );
+
+    if (use_lauchbounds) {
+        const unsigned int MaxThreads = 16;
+        const unsigned int MinBlocks = 1;
+        using policy = Kokkos::RangePolicy<Kokkos::LaunchBounds<MaxThreads,MinBlocks>,TagCompute>;
+        Kokkos::parallel_for("ComputeForce",
+            policy(0, system->Nsegs),
+            Force(system)
+        );
+    } else {
+        using policy = Kokkos::RangePolicy<TagCompute>;
+        Kokkos::parallel_for("ComputeForce",
+            policy(0, system->Nsegs),
+            Force(system)
+        );
+    }
     Kokkos::fence();
 
     system->time_force += system->timer.seconds();
@@ -433,10 +444,18 @@ int main(int argc, char* argv[])
     for (int i = 0; i < nsteps; i++) {
         printf(" step %d / %d\n", i+1, nsteps);
         
-        force<Force::TagCompute1>(system);
+        // Original kernel
+        //force<Force::TagCompute1>(system);
+
+        // Kernel with manual inlining
         //force<Force::TagCompute2>(system);
 
-        //mobility(system);
+        // Original kernel with lauchbounds hint
+        //force<Force::TagCompute1,true>(system);
+
+        // Kernel with manual inlining and lauchbounds hint
+        force<Force::TagCompute2,true>(system);
+
     }
 
     if (1) {
