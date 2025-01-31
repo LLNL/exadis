@@ -57,7 +57,7 @@ struct Params {
     void check_params() {
         if (burgmag <= 0.0)
             ExaDiS_fatal("Error: invalid parameter value of burgmag (%f)\n", burgmag);
-        if (MU <= 0.0 || NU <= 0.0 || a <= 0.0)
+        if (MU <= 0.0 || NU < 0.0 || a <= 0.0)
             ExaDiS_fatal("Error: invalid parameter values of MU (%f) / NU (%f) / a (%f)\n", MU, NU, a);
         if (maxseg <= 0.0)
             ExaDiS_fatal("Error: invalid parameter values of maxseg (%f)\n", maxseg);
