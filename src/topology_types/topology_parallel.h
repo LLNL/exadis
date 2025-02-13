@@ -757,30 +757,7 @@ public:
                         nodeflag[network->conn[i].node[l]] = 1;
                     }
                 }
-                int inew = network->split_node(i, arms);
-                // Update the plastic strain to avoid topological flickers
-                network->update_node_plastic_strain(i, network->nodes[i].pos, p0, system->dEp);
-                network->update_node_plastic_strain(inew, network->nodes[inew].pos, p1, system->dEp);
-                // Update nodes position
-                network->nodes[i].pos = network->cell.pbc_fold(p0);
-                network->nodes[inew].pos = network->cell.pbc_fold(p1);
-                
-                // Flag physical corner nodes for 3-node splitting
-                if (nconn == 3) {
-                    if (network->conn[i].num == 2) network->nodes[i].constraint = CORNER_NODE;
-                    if (network->conn[inew].num == 2) network->nodes[inew].constraint = CORNER_NODE;
-                }
-                
-                // Find glide plane for new segment if it exists
-                int cnew = network->find_connection(i, inew);
-                if (cnew != -1 && system->crystal.use_glide_planes) {
-                    int snew = network->conn[i].seg[cnew];
-                    Vec3 bnew = network->segs[snew].burg;
-                    Vec3 pnew = system->crystal.find_precise_glide_plane(bnew, p1-p0);
-                    if (pnew.norm2() < 1e-3)
-                        pnew = system->crystal.pick_screw_glide_plane(network, bnew);
-                    network->segs[snew].plane = pnew;
-                }
+                execute_split(system, network, i, kmax, arms, p0, p1);
             }
         }
         

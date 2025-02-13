@@ -304,12 +304,6 @@ public:
                 //network->verify_Burgers();
                 //output("output/config." + std::to_string(k+1) + ".ca");
                 
-            #if 0
-                //network->merge_nodes(i, nnew);
-                network->merge_nodes_position(i, nnew, node0.pos);
-                network->purge_network();
-                network->nodes[i] = node0; // restore original node
-            #else
                 // Restore original configuration
                 // We need to do this because otherwise the order of the nodes
                 // connectivity may change, which may cause an issue when
@@ -319,13 +313,6 @@ public:
                 network->nodes.pop_back();
                 if (cnew != -1) network->segs.pop_back();
                 network->conn.pop_back();
-            #endif
-                
-                if (network->conn[i].num != nconn) {
-                    printf("Error: merging back failed during split multi-node %d trial %d\n", i, k);
-                    printf("num conn = %d != %d\n", network->conn[i].num, nconn);
-                    exit(1);
-                }
             }
             
             // Execute the favorable split
@@ -336,31 +323,7 @@ public:
                     if (armsets[kmax][l] == 1) 
                         arms.push_back(network->find_connection(i, nei[l]));
                 }
-                int nnew = network->split_node(i, arms);
-                // Update the plastic strain to avoid topological flickers
-                network->update_node_plastic_strain(i, network->nodes[i].pos, p0, system->dEp);
-                network->update_node_plastic_strain(nnew, network->nodes[nnew].pos, p1, system->dEp);
-                // Update nodes position
-                network->nodes[i].pos = network->cell.pbc_fold(p0);
-                network->nodes[nnew].pos = network->cell.pbc_fold(p1);
-                
-                // Flag physical corner nodes for 3-node splitting
-                if (nconn == 3) {
-                    if (network->conn[i].num == 2) network->nodes[i].constraint = CORNER_NODE;
-                    if (network->conn[nnew].num == 2) network->nodes[nnew].constraint = CORNER_NODE;
-                }
-                
-                // Set glide plane for new segment if needed
-                int cnew = network->find_connection(i, nnew);
-                if (cnew != -1 && system->crystal.use_glide_planes) {
-                    int snew = network->conn[i].seg[cnew];
-                    Vec3 bnew = network->segs[snew].burg;
-                    Vec3 pnew = system->crystal.find_precise_glide_plane(bnew, p1-p0);
-                    if (pnew.norm2() < 1e-3)
-                        pnew = system->crystal.pick_screw_glide_plane(network, bnew);
-                    network->segs[snew].plane = pnew;
-                    if (debug) printf("set new plane = %e %e %e\n",pnew.x,pnew.y,pnew.z);
-                }
+                execute_split(system, network, i, kmax, arms, p0, p1);
             }
             
             for (int k = 0; k < numsets; k++) free(armsets[k]);

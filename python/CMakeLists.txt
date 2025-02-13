@@ -25,6 +25,7 @@ set(SOURCES
     ${EXADIS_SRC_PATH}/driver.cpp
     ${EXADIS_SRC_PATH}/generate.cpp
     ${EXADIS_SRC_PATH}/network.cpp
+    ${EXADIS_SRC_PATH}/oprec.cpp
     ${EXADIS_SRC_PATH}/system.cpp
     ${EXADIS_SRC_PATH}/utils.cpp
     ${EXADIS_SRC_PATH}/collision_types/collision_retroactive.cpp

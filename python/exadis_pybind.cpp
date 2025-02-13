@@ -1161,9 +1161,10 @@ PYBIND11_MODULE(pyexadis, m) {
                py::arg("force"), py::arg("mobility"), py::arg("integrator"), py::arg("collision"),
                py::arg("topology"), py::arg("remesh"), py::arg("cross_slip")=CrossSlipBind())
           .def("set_simulation", &Driver::set_simulation, "Set things up before running the simulation", py::arg("restart")="")
-          .def("initialize", &Driver::initialize, "Initialize simulation")
+          .def("initialize", &Driver::initialize, "Initialize simulation", py::arg("ctrl"), py::arg("check_modules")=true)
           .def("step", &Driver::step, "Execute a simulation step")
-          .def("run", &Driver::run, "Run the simulation");
+          .def("run", &Driver::run, "Run the simulation")
+          .def("oprec_replay", &Driver::oprec_replay, "Replay the simulation from OpRec files");
     // Driver control
     py::class_<Driver::Control>(driver, "Control")
         .def(py::init<>())
@@ -1176,7 +1177,10 @@ PYBIND11_MODULE(pyexadis, m) {
         .def_readwrite("printfreq", &Driver::Control::printfreq, "Print frequency")
         .def_readwrite("propfreq", &Driver::Control::propfreq, "Properties output frequency")
         .def_readwrite("outfreq", &Driver::Control::outfreq, "Configuration and restart output frequency")
-        .def("set_props", &Driver::Control::set_props, "Set property fields for the output");
+        .def("set_props", &Driver::Control::set_props, "Set property fields for the output")
+        .def_readwrite("oprecwritefreq", &Driver::Control::oprecwritefreq, "OpRec write frequency")
+        .def_readwrite("oprecfilefreq", &Driver::Control::oprecfilefreq, "OpRec new file frequency")
+        .def_readwrite("oprecposfreq", &Driver::Control::oprecposfreq, "OpRec nodal positions save frequency");
     py::enum_<Driver::Loadings>(driver, "Loadings")
         .value("STRESS_CONTROL", Driver::Loadings::STRESS_CONTROL)
         .value("STRAIN_RATE_CONTROL", Driver::Loadings::STRAIN_RATE_CONTROL)

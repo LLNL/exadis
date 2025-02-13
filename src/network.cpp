@@ -79,6 +79,9 @@ void SerialDisNet::update_node_plastic_strain(int i, const Vec3& pold, const Vec
  *-------------------------------------------------------------------------*/
 int SerialDisNet::split_seg(int i, const Vec3 &pos, bool update_conn)
 {
+    if (oprec)
+        oprec->add_op(OpRec::SplitSeg(), i, pos);
+    
     int n1 = segs[i].n1;
     int n2 = segs[i].n2;
     
@@ -183,6 +186,9 @@ int SerialDisNet::split_node(int i, std::vector<int> arms)
  *-------------------------------------------------------------------------*/
 bool SerialDisNet::merge_nodes_position(int n1, int n2, const Vec3 &pos, Mat33& dEp)
 {    
+    if (oprec)
+        oprec->add_op(OpRec::MergeNodes(), n1, n2, pos);
+    
     // Save original nodes in case we need to revert the merge
     SaveNode saved_node1 = save_node(n1);
     SaveNode saved_node2 = save_node(n2);
@@ -366,6 +372,9 @@ void SerialDisNet::remove_nodes(std::vector<int> nodelist)
  *-------------------------------------------------------------------------*/
 void SerialDisNet::purge_network()
 {
+    if (oprec)
+        oprec->add_op(OpRec::PurgeNetwork());
+    
     // Remove links with zero Burgers vector
     std::vector<int> remlinks;
     for (int i = 0; i < number_of_segs(); i++)
@@ -534,7 +543,7 @@ void SerialDisNet::write_data(std::string filename)
     if (fp == NULL) {
         ExaDiS_fatal("Error: cannot open output file %s\n", filename.c_str());
     }
-
+    
     if (cell.is_triclinic()) {
         ExaDiS_fatal("Error in write_data(): volume must be orthorombic\n");
     }
@@ -553,7 +562,7 @@ void SerialDisNet::write_data(std::string filename)
 
     fprintf(fp, "dataDecompType = 2\n");
     fprintf(fp, "dataDecompGeometry = [\n 1\n 1\n 1\n ]\n\n");
-
+    
     fprintf(fp, "#\n#  END OF DATA FILE PARAMETERS\n#\n\n");
 
     fprintf(fp, "domainDecomposition = \n");

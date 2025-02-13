@@ -39,7 +39,7 @@ public:
      *                  splitting arm sets for the SplitMultiNode procedure
      *---------------------------------------------------------------------*/
     static const int MAX_POSSIBLE_SPLITS = 16;
-    const int POSSIBLE_SPLITS[16] =
+    constexpr static int POSSIBLE_SPLITS[16] =
     {
         0,0,0,3,3,10,25,56,119,246,501,1012,2035,4082,8177,16368
     };
@@ -49,8 +49,8 @@ public:
      *                  Recursive function to build the list of arm-splitting 
      *                  possibilities for SplitMultiNode
      *---------------------------------------------------------------------*/
-    int build_split_list(int totalArms, int splitCnt, int level, int countOnly,
-                         int *currentSplit, int **splitList)
+    static int build_split_list(int totalArms, int splitCnt, int level, int countOnly,
+                                int *currentSplit, int **splitList)
     {
         int nextArm = currentSplit[level] + 1;
         int maxLevel = splitCnt - 1;
@@ -86,7 +86,7 @@ public:
      *                  for each possible way in which a node can split.
      *                  Arms with flag=1 will be moved to the new node.
      *---------------------------------------------------------------------*/
-    void get_arm_sets(int numNbrs, int *setCnt, int ***armSetList)
+    static void get_arm_sets(int numNbrs, int *setCnt, int ***armSetList)
     {
         if (numNbrs > MAX_CONN)
             ExaDiS_fatal("Topology found node with too many segs (%d)", numNbrs);
@@ -130,6 +130,43 @@ public:
 
         *setCnt = totalSets;
         *armSetList = armSets;
+    }
+    
+    /*-----------------------------------------------------------------------
+     *    Function:     execute_split()
+     *                  Execute the favorable node splitting
+     *---------------------------------------------------------------------*/
+    static void execute_split(System* system, SerialDisNet* network, int i, int kmax,
+                              std::vector<int>& arms, Vec3& p0, Vec3& p1)
+    {
+        if (system->oprec)
+            system->oprec->add_op(OpRec::SplitMultiNode(), i, kmax, p0, p1);
+        
+        int nconn = network->conn[i].num;
+        int inew = network->split_node(i, arms);
+        // Update the plastic strain to avoid topological flickers
+        network->update_node_plastic_strain(i, network->nodes[i].pos, p0, system->dEp);
+        network->update_node_plastic_strain(inew, network->nodes[inew].pos, p1, system->dEp);
+        // Update nodes position
+        network->nodes[i].pos = network->cell.pbc_fold(p0);
+        network->nodes[inew].pos = network->cell.pbc_fold(p1);
+        
+        // Flag physical corner nodes for 3-node splitting
+        if (nconn == 3) {
+            if (network->conn[i].num == 2) network->nodes[i].constraint = CORNER_NODE;
+            if (network->conn[inew].num == 2) network->nodes[inew].constraint = CORNER_NODE;
+        }
+        
+        // Find glide plane for new segment if it exists
+        int cnew = network->find_connection(i, inew);
+        if (cnew != -1 && system->crystal.use_glide_planes) {
+            int snew = network->conn[i].seg[cnew];
+            Vec3 bnew = network->segs[snew].burg;
+            Vec3 pnew = system->crystal.find_precise_glide_plane(bnew, p1-p0);
+            if (pnew.norm2() < 1e-3)
+                pnew = system->crystal.pick_screw_glide_plane(network, bnew);
+            network->segs[snew].plane = pnew;
+        }
     }
 };
 

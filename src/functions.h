@@ -17,6 +17,7 @@
 namespace ExaDiS {
 
 // utils.cpp
+std::string replace_string(std::string& str, const std::string& from, const std::string& to);
 int create_directory(std::string dirname);
 void remove_directory(std::string dirname);
 

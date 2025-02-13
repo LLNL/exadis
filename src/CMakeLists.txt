@@ -1,11 +1,12 @@
 cmake_minimum_required(VERSION 3.14)
 
 set(SOURCES
+    driver.cpp
     generate.cpp
     network.cpp
+    oprec.cpp
     system.cpp
     utils.cpp
-    driver.cpp
 )
 
 add_library(exadis ${SOURCES})

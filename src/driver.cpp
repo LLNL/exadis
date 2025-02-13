@@ -165,6 +165,7 @@ void ExaDiSApp::write_restart(std::string restartfile)
     fprintf(fp, "pstrain %.17g\n", pstrain);
     fprintf(fp, "tottime %.17g\n", tottime);
     fprintf(fp, "edir %.17g %.17g %.17g\n", edir.x, edir.y, edir.z);
+    if (system->oprec) fprintf(fp, "opreccounter %d\n", system->oprec->filecounter);
     fprintf(fp, "\n");
     
     // system
@@ -176,11 +177,13 @@ void ExaDiSApp::write_restart(std::string restartfile)
     fprintf(fp, "\n");
     
     // integrator
-    fprintf(fp, "integrator %s\n", integrator->name());
-    integrator->write_restart(fp);
-    fprintf(fp, "\n");
+    if (integrator) {
+        fprintf(fp, "integrator %s\n", integrator->name());
+        integrator->write_restart(fp);
+        fprintf(fp, "\n");
+    }
     
-    //crystal
+    // crystal
     fprintf(fp, "crystal type %d\n", system->crystal.type);
     fprintf(fp, "crystal orientation %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g\n",
     system->crystal.R.xx(), system->crystal.R.xy(), system->crystal.R.xz(),
@@ -262,6 +265,9 @@ void ExaDiSApp::read_restart(std::string restartfile)
         else if (strncmp(line, "pstrain", 7) == 0) { sscanf(line, "pstrain %lf\n", &pstrain); }
         else if (strncmp(line, "tottime", 7) == 0) { sscanf(line, "tottime %lf\n", &tottime); }
         else if (strncmp(line, "edir", 4) == 0) { sscanf(line, "edir %lf %lf %lf\n", &edir.x, &edir.y, &edir.z); }
+        else if (strncmp(line, "opreccounter", 12) == 0) {
+            if (system->oprec) sscanf(line, "opreccounter %d\n", &system->oprec->filecounter);
+        }
         
         // system
         else if (strncmp(line, "extstress", 9) == 0) {
@@ -394,6 +400,7 @@ void ExaDiSApp::update_mechanics(Control& ctrl)
         
         // Rotate stress
         system->extstress = Rspin * system->extstress * Rspin.transpose();
+    
     }
     
     if (ctrl.loading == STRAIN_RATE_CONTROL) {
@@ -418,6 +425,9 @@ void ExaDiSApp::update_mechanics(Control& ctrl)
     }
     
     tottime += system->realdt;
+    
+    if (system->oprec)
+        system->oprec->add_op(OpRec::UpdateOutput());
 }
 
 /*---------------------------------------------------------------------------
@@ -511,6 +521,15 @@ void ExaDiSApp::output(Control& ctrl)
             fclose(fp);
         }
     }
+    
+    // OpRec output
+    if (system->oprec && ctrl.oprecwritefreq > 0 && istep > 0) {
+        if (istep % ctrl.oprecwritefreq == 0)
+            system->oprec->write_file(outputdir+"/oprec."+std::to_string(system->oprec->filecounter)+".exadis");
+        
+        if (istep % ctrl.oprecfilefreq == 0)
+            system->oprec->filecounter++;
+    }
 }
 
 /*---------------------------------------------------------------------------
@@ -548,16 +567,18 @@ bool ExaDiSApp::Stepper::iterate(ExaDiSApp* exadis)
  *                  Iniatialize and check that everything is setup properly
  *
  *-------------------------------------------------------------------------*/
-void ExaDiSApp::initialize(Control& ctrl)
+void ExaDiSApp::initialize(Control& ctrl, bool check_modules)
 {
     // Required modules
     if (system == nullptr) ExaDiS_fatal("Error: undefined system\n");
-    if (force == nullptr) ExaDiS_fatal("Error: undefined force\n");
-    if (mobility == nullptr) ExaDiS_fatal("Error: undefined mobility\n");
-    if (integrator == nullptr) ExaDiS_fatal("Error: undefined integrator\n");
-    if (collision == nullptr) ExaDiS_fatal("Error: undefined collision\n");
-    if (topology == nullptr) ExaDiS_fatal("Error: undefined topology\n");
-    if (remesh == nullptr) ExaDiS_fatal("Error: undefined remesh\n");
+    if (check_modules) {
+        if (force == nullptr) ExaDiS_fatal("Error: undefined force module\n");
+        if (mobility == nullptr) ExaDiS_fatal("Error: undefined mobility module\n");
+        if (integrator == nullptr) ExaDiS_fatal("Error: undefined integrator module\n");
+        if (collision == nullptr) ExaDiS_fatal("Error: undefined collision module\n");
+        if (topology == nullptr) ExaDiS_fatal("Error: undefined topology module\n");
+        if (remesh == nullptr) ExaDiS_fatal("Error: undefined remesh module\n");
+    }
     
     system->params.check_params();
     if (!setup) set_simulation();
@@ -565,6 +586,13 @@ void ExaDiSApp::initialize(Control& ctrl)
     if (!restart) {
         system->extstress = ctrl.appstress;
         edir = ctrl.edir.normalized();
+    }
+    
+    // OpRec
+    if (ctrl.oprecwritefreq > 0) {
+        if (ctrl.oprecfilefreq <= 0)
+            ctrl.oprecfilefreq = ctrl.oprecwritefreq;
+        system->oprec->activate();
     }
     
     init = true;
@@ -592,6 +620,7 @@ void ExaDiSApp::step(Control& ctrl)
     
     // Time-integration
     integrator->integrate(system);
+    oprec_save_integration(ctrl);
     
     // Compute plastic strain
     system->plastic_strain();

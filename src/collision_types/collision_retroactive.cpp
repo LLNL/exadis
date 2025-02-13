@@ -1634,7 +1634,7 @@ void CollisionRetroactive::retroactive_collision(System* system)
                 newpos = AdjustMergePoint(system, network, mergenode1, vmn1, newpos);
                 
                 if ((newpos-newpos0).norm2() <= 16 * mindist2)
-                    network->nodes[mergenode1].pos = network->cell.pbc_fold(newpos);
+                    network->move_node(mergenode1, newpos, system->dEp);
             }
             
             // Check glide plane violations
@@ -1813,7 +1813,7 @@ void CollisionRetroactive::retroactive_collision(System* system)
                     newpos = AdjustMergePoint(system, network, mergenode1, vmn1, newpos);
                     
                     if ((newpos-newpos0).norm2() <= 16 * mindist2)
-                        network->nodes[mergenode1].pos = network->cell.pbc_fold(newpos);
+                        network->move_node(mergenode1, newpos, system->dEp);
                 }
                 
                 //check_node_plane_violation(network, conn, mergenode1, "after merge hinge collision");
@@ -2110,7 +2110,7 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
             newpos = AdjustMergePoint(system, network, mergenode1, vmn1, newpos);
             
             if ((newpos-newpos0).norm2() <= 16 * mindist2)
-                network->nodes[mergenode1].pos = network->cell.pbc_fold(newpos);
+                network->move_node(mergenode1, newpos, system->dEp);
         }
         
         // Check glide plane violations
@@ -2291,7 +2291,7 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
                     newpos = AdjustMergePoint(system, network, mergenode1, vmn1, newpos);
                     
                     if ((newpos-newpos0).norm2() <= 16 * mindist2)
-                        network->nodes[mergenode1].pos = network->cell.pbc_fold(newpos);
+                        network->move_node(mergenode1, newpos, system->dEp);
                 }
                 
                 //check_node_plane_violation(network, conn, mergenode1, "after merge hinge collision");

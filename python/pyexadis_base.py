@@ -31,6 +31,10 @@ except ImportError:
         @property
         def cell(self):
             return self.disnet.cell
+        def num_nodes(self):
+            return self.disnet.num_nodes()
+        def num_segments(self):
+            return self.disnet.num_segments()
     class DisNet_Base:
         pass
 
@@ -859,7 +863,7 @@ class SimulateNetwork:
             if self.print_freq != None:
                 if (tstep+1) % self.print_freq == 0:
                     dt = self.timeint.dt if self.timeint else 0.0
-                    Nnodes = N.get_disnet(ExaDisNet).net.number_of_nodes()
+                    Nnodes = N.num_nodes()
                     elapsed = time.perf_counter()-t0
                     if self.loading_mode == 'strain_rate':
                         print("step = %d, nodes = %d, dt = %e, strain = %e, elapsed = %.1f sec"%(tstep+1, Nnodes, dt, self.strain, elapsed))
@@ -904,8 +908,37 @@ class SimulateNetworkPerf(SimulateNetwork):
         self.max_walltime = kwargs.get('max_walltime', None)
         self.out_props = kwargs.get('out_props', None)
         
+        self.oprecwritefreq = kwargs.get('oprecwritefreq', 0)
+        self.oprecfilefreq = kwargs.get('oprecfilefreq', 0)
+        self.oprecposfreq = kwargs.get('oprecposfreq', 0)
+    
+    def get_exadis_ctrl(self, state: dict):
+        """get_exadis_ctrl: instantiate an exadis simulation control object
+        """
+        ctrl = pyexadis.Driver.Control()
+        loading = {
+            "strain_rate": pyexadis.Driver.STRAIN_RATE_CONTROL,
+            "stress": pyexadis.Driver.STRESS_CONTROL
+        }
+        ctrl.loading = loading[self.loading_mode]
+        if self.loading_mode == 'strain_rate':
+            ctrl.erate = self.erate
+            ctrl.edir = self.edir
+        ctrl.appstress = np.array(state["applied_stress"][[0,5,4,5,1,3,4,3,2]]).reshape(3,3)
+        if self.rotation is not None: ctrl.rotation = self.rotation
+        ctrl.printfreq = self.print_freq
+        ctrl.propfreq = self.print_freq
+        ctrl.outfreq = self.write_freq
+        if self.out_props is not None:
+            ctrl.set_props(self.out_props)
+        ctrl.oprecwritefreq = self.oprecwritefreq
+        ctrl.oprecfilefreq = self.oprecfilefreq
+        ctrl.oprecposfreq = self.oprecposfreq
+        return ctrl
+    
     def run(self, N: DisNetManager, state: dict):
-        
+        """run: run DDD simulation
+        """
         import time
         t0 = time.perf_counter()
         
@@ -957,23 +990,7 @@ class SimulateNetworkPerf(SimulateNetwork):
             stepper = pyexadis.Driver.NUM_STEPS(self.num_step)
         else:
             stepper = pyexadis.Driver.MAX_STEPS(self.max_step)
-        
-        ctrl = pyexadis.Driver.Control()
-        loading = {
-            "strain_rate": pyexadis.Driver.STRAIN_RATE_CONTROL,
-            "stress": pyexadis.Driver.STRESS_CONTROL
-        }
-        ctrl.loading = loading[self.loading_mode]
-        if self.loading_mode == 'strain_rate':
-            ctrl.erate = self.erate
-            ctrl.edir = self.edir
-        ctrl.appstress = np.array(state["applied_stress"][[0,5,4,5,1,3,4,3,2]]).reshape(3,3)
-        if self.rotation is not None: ctrl.rotation = self.rotation
-        ctrl.printfreq = self.print_freq
-        ctrl.propfreq = self.print_freq
-        ctrl.outfreq = self.write_freq
-        if self.out_props is not None:
-            ctrl.set_props(self.out_props)
+        ctrl = self.get_exadis_ctrl(state)
         
         # initialize simulation
         driver.initialize(ctrl)
@@ -987,6 +1004,25 @@ class SimulateNetworkPerf(SimulateNetwork):
         print('RUN TIME: %f sec' % (t1-t0))
         
         return state
+        
+    def replay(self, N: DisNetManager, state: dict, oprec_files: str):
+        """replay: replay DDD simulation from OpRec files
+        """
+        # convert DisNet to a complete exadis system object
+        params = get_exadis_params(state)
+        system = pyexadis.System(N.get_disnet(ExaDisNet).net, params)
+        system.set_neighbor_cutoff(self.calforce.force.neighbor_cutoff)
+        
+        # set driver
+        driver = pyexadis.Driver(system)
+        driver.outputdir = self.write_dir
+        driver.set_simulation("" if self.restart is None else self.restart)
+        
+        # get simulation control
+        ctrl = self.get_exadis_ctrl(state)
+        
+        # replay simulation
+        driver.oprec_replay(ctrl, oprec_files)
 
 
 def read_restart(state: dict, restart_file: str):

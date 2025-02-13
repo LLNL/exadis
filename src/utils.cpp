@@ -92,6 +92,19 @@ int get_step_number(const std::string &filename)
 
 /*---------------------------------------------------------------------------
  *
+ *	Function:	replace_string
+ *
+ *-------------------------------------------------------------------------*/
+std::string replace_string(std::string& str, const std::string& from, const std::string& to) {
+    std::string new_str = str;
+    size_t start_pos = new_str.find(from);
+    if (start_pos == std::string::npos) return new_str;
+    new_str.replace(start_pos, from.length(), to);
+    return new_str;
+}
+
+/*---------------------------------------------------------------------------
+ *
  *	Function:	create_directory
  *
  *-------------------------------------------------------------------------*/

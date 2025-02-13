@@ -96,6 +96,9 @@ public:
         int printfreq = 1;
         int propfreq = 10;
         int outfreq = 100;
+        int oprecwritefreq = 0;
+        int oprecfilefreq = 0;
+        int oprecposfreq = 0;
         std::vector<Prop::fields> props = {Prop::STEP, Prop::STRAIN, Prop::STRESS, Prop::DENSITY};
         void set_props(std::vector<std::string> fields) {
             props.clear();
@@ -120,11 +123,14 @@ public:
     virtual void set_simulation(std::string restartfile="");
     virtual void set_directory();
     
-    virtual void initialize(Control& ctrl);
+    virtual void initialize(Control& ctrl, bool check_modules=true);
     virtual void step(Control& ctrl);
     virtual void run(Control& ctrl);
     virtual void update_mechanics(Control& ctrl);
     virtual void output(Control& ctrl);
+    
+    virtual void oprec_save_integration(Control& ctrl);
+    virtual void oprec_replay(Control& ctrl, std::string oprec_file);
     
     virtual void write_restart(std::string restartfile);
     virtual void read_restart(std::string restartfile);

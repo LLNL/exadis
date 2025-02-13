@@ -13,6 +13,7 @@
 
 #include <Kokkos_Core.hpp>
 #include "vec.h"
+#include "oprec.h"
 #include <stack>
 
 namespace ExaDiS {
@@ -318,6 +319,8 @@ public:
     std::vector<DisSeg> segs;
     std::vector<Conn> conn;
     
+    OpRec* oprec = nullptr;
+    
     int maxindex = -1;
     bool recycle = true;
     std::stack<int> recycled_indices;
@@ -407,6 +410,13 @@ public:
     bool discretization_node(int i);
     
     void update_node_plastic_strain(int i, const Vec3& pold, const Vec3& pnew, Mat33& dEp);
+    
+    inline void move_node(int i, const Vec3& pos, Mat33& dEp)
+    {
+        if (oprec) oprec->add_op(OpRec::MoveNode(), i, pos);
+        update_node_plastic_strain(i, nodes[i].pos, pos, dEp);
+        nodes[i].pos = cell.pbc_fold(pos);
+    }
     
     int split_seg(int i, const Vec3 &pos, bool update_conn=true);
     int split_node(int i, std::vector<int> arms);

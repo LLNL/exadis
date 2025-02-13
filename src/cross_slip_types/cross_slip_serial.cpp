@@ -112,10 +112,6 @@ void CrossSlipSerial::handle(System* system)
         Vec3 nbr1p = network->cell.pbc_position(nodep, network->nodes[n1].pos);
         Vec3 nbr2p = network->cell.pbc_position(nodep, network->nodes[n2].pos);
         
-        bool resetNodePos = 0;
-        bool resetNbr1Pos = 0;
-        bool resetNbr2Pos = 0;
-        
         // If the node is a point on a long screw then we can consider
         // it for possible cross slip.
         Vec3 vec1 = nbr1p - nbr2p;
@@ -256,18 +252,22 @@ void CrossSlipSerial::handle(System* system)
                         Vec3 newforce = force->node_force(system, i);
                         double newfdotglide = dot(newforce, glideDirLab[fplane]);
                         
+                        // Reset the original positions. We will need the original positions
+                        // even if we accept the cross-slip operation to call move_node().
+                        network->nodes[i].pos = nodep0;
+                        network->nodes[n2].pos = nbr2p0;
+                        
                         if ((SIGN(newfdotglide) * SIGN(fdotglide)) < 0.0) {
-                            network->nodes[i].pos = nodep0;
-                            network->nodes[n2].pos = nbr2p0;
                             continue;
                         }
                         
-                        resetNbr2Pos = 1;
-                        resetNodePos = 1;
+                        // Execute node motion
+                        network->move_node(i, nodep, system->dEp);
+                        network->move_node(n2, nbr2p, system->dEp);
                         
                         // Now update the glide plane for both segments
-                        network->segs[s1].plane = newplane;
-                        network->segs[s2].plane = newplane;
+                        update_seg_plane(network, s1, newplane);
+                        update_seg_plane(network, s2, newplane);
                     }
                 } else {
                     // Neighbor 1 can be moved, so proceed with the
@@ -298,18 +298,22 @@ void CrossSlipSerial::handle(System* system)
                     Vec3 newforce = force->node_force(system, i);
                     double newfdotglide = dot(newforce, glideDirLab[fplane]);
                     
+                    // Reset the original positions. We will need the original positions
+                    // even if we accept the cross-slip operation to call move_node().
+                    network->nodes[i].pos = nodep0;
+                    network->nodes[n1].pos = nbr1p0;
+                    
                     if ((SIGN(newfdotglide) * SIGN(fdotglide)) < 0.0) {
-                        network->nodes[i].pos = nodep0;
-                        network->nodes[n1].pos = nbr1p0;
                         continue;
                     }
                     
-                    resetNbr1Pos = 1;
-                    resetNodePos = 1;
+                    // Execute node motion
+                    network->move_node(i, nodep, system->dEp);
+                    network->move_node(n1, nbr1p, system->dEp);
                     
                     // Now update the glide plane for both segments
-                    network->segs[s1].plane = newplane;
-                    network->segs[s2].plane = newplane;
+                    update_seg_plane(network, s1, newplane);
+                    update_seg_plane(network, s2, newplane);
                 }
             
             } else if (seg1_is_screw && (plane1 != plane2) && (plane2 == fplane) &&
@@ -337,11 +341,12 @@ void CrossSlipSerial::handle(System* system)
                     Vec3 newSegForce = force->node_force(system, nnew);
                     
                     // Restore the original configuration
+                    network->restore_node(saved_nodep);
+                    network->restore_node(saved_node1);
+                    network->free_tag(network->nodes[nnew].tag);
                     network->nodes.pop_back();
                     network->conn.pop_back();
                     network->segs.pop_back();
-                    network->restore_node(saved_nodep);
-                    network->restore_node(saved_node1);
                     
                     double zipperThreshold = noiseFactor * shearModulus *
                                              burgSize *  L1;
@@ -355,11 +360,11 @@ void CrossSlipSerial::handle(System* system)
                     if (!pinned1) {
                         double vec2dotb = dot(vec2, burg);
                         nbr1p = nodep - vec2dotb * burg;
-                        resetNbr1Pos = 1;
+                        network->move_node(n1, nbr1p, system->dEp);
                     }
                     
                     // Update the segment glide plane
-                    network->segs[s1].plane = newplane;
+                    update_seg_plane(network, s1, newplane);
                 }
                 
             } else if (seg2_is_screw && (plane1 != plane2) && (plane1 == fplane) &&
@@ -380,11 +385,12 @@ void CrossSlipSerial::handle(System* system)
                     Vec3 newSegForce = force->node_force(system, nnew);
                     
                     // Restore the original configuration
+                    network->restore_node(saved_nodep);
+                    network->restore_node(saved_node2);
+                    network->free_tag(network->nodes[nnew].tag);
                     network->nodes.pop_back();
                     network->conn.pop_back();
                     network->segs.pop_back();
-                    network->restore_node(saved_nodep);
-                    network->restore_node(saved_node2);
                     
                     double zipperThreshold = noiseFactor * shearModulus *
                                              burgSize *  L2;
@@ -398,25 +404,13 @@ void CrossSlipSerial::handle(System* system)
                     if (!pinned2) {
                         double vec3dotb = dot(vec3, burg);
                         nbr2p = nodep - vec3dotb * burg;
-                        resetNbr2Pos = 1;
+                        network->move_node(n2, nbr2p, system->dEp);
                     }
                     
                     // Update the segment glide plane
-                    network->segs[s2].plane = newplane;
+                    update_seg_plane(network, s2, newplane);
                 }
                 
-            }
-            
-            // If any of the nodes were repositioned, shift the new coordinates
-            // back into the primary image space 
-            if (resetNodePos) {
-                network->nodes[i].pos = network->cell.pbc_fold(nodep);
-            }
-            if (resetNbr1Pos) {
-                network->nodes[n1].pos = network->cell.pbc_fold(nbr1p);
-            }
-            if (resetNbr2Pos) {
-                network->nodes[n2].pos = network->cell.pbc_fold(nbr2p);
             }
             
         } // end of screw check

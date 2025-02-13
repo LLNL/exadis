@@ -63,6 +63,10 @@ void System::initialize(Params _params, Crystal _crystal, SerialDisNet *network)
     realdt = 0.0;
     density = network->dislocation_density(params.burgmag);
     
+    // Create oprec
+    oprec = new OpRec();
+    network->oprec = oprec;
+    
     // Initialize timers
     for (int i = 0; i < TIMER_END; i++)
         timer[i].accumtime = 0.0;
@@ -76,6 +80,7 @@ void System::initialize(Params _params, Crystal _crystal, SerialDisNet *network)
 System::~System()
 {
     exadis_delete(net_mngr);
+    if (oprec) delete oprec;
     if (flog) fclose(flog);
 }
 
@@ -163,6 +168,9 @@ void System::plastic_strain()
         PlasticStrain<DeviceDisNet>(this, net)
     );
     Kokkos::fence();
+    
+    if (oprec)
+        oprec->add_op(OpRec::PlasticStrain(), dEp, dWp, density);
 }
 
 /*---------------------------------------------------------------------------
@@ -194,9 +202,21 @@ void System::reset_glide_planes()
     //}
     if (!crystal.enforce_glide_planes) return;
     
+    // OpRec
+    bool use_oprec = (oprec);
+    if (use_oprec) use_oprec = oprec->record;
+    Kokkos::DualView<int*> flag;
+    Kokkos::DualView<Vec3*> val;
+    if (use_oprec) {
+        int N_local = MAX(net->Nnodes_local, net->Nsegs_local);
+        flag = Kokkos::DualView<int*>("flag", N_local);
+        val = Kokkos::DualView<Vec3*>("val", N_local);
+    }
+    
     // Fix glide plane violations
     if (xold.extent(0) > 0 /*&& crystal.enforce_glide_planes*/) {
         T_x& xprev = xold;
+        if (use_oprec) Kokkos::deep_copy(flag.d_view, 0);
         Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int& i) {
             auto nodes = net->get_nodes();
             auto segs = net->get_segs();
@@ -220,30 +240,65 @@ void System::reset_glide_planes()
                 }
             }
             
-            Vec3 p = cell.pbc_position(xprev(i), nodes[i].pos);
+            Vec3 pold = xprev(i);
+            Vec3 pcur = nodes[i].pos;
+            Vec3 p = cell.pbc_position(xprev(i), pcur);
             if (numplanes == 1) {
-                double eqn = dot(planes[0], p) - dot(planes[0], xprev(i));
+                double eqn = dot(planes[0], p) - dot(planes[0], pold);
                 p -= eqn * planes[0];
             } else if (numplanes == 2) {
                 Vec3 l = cross(planes[0], planes[1]).normalized();
-                Vec3 dr = p - xprev(i);
-                p = xprev(i) + dot(l, dr) * l;
+                Vec3 dr = p - pold;
+                p = pold + dot(l, dr) * l;
             } else {
-                p = xprev(i);
+                p = pold;
             }
-            nodes[i].pos = cell.pbc_fold(p);
+            if ((p-pcur).norm2() > 1e-5) {
+                p = cell.pbc_fold(p);
+                nodes[i].pos = p;
+                if (use_oprec) {
+                    flag.d_view(i) = 1;
+                    val.d_view(i) = p;
+                }
+            }
         });
         Kokkos::fence();
+        
+        if (use_oprec) {
+            Kokkos::deep_copy(flag.h_view, flag.d_view);
+            Kokkos::deep_copy(val.h_view, val.d_view);
+            for (int i = 0; i < net->Nnodes_local; i++) {
+                if (!flag.h_view(i)) continue;
+                oprec->add_op(OpRec::MoveNode(), i, val.h_view(i));
+            }
+        }
     }
     
     // Now reset the glide planes
     Crystal* cryst = &crystal;
+    if (use_oprec) Kokkos::deep_copy(flag.d_view, 0);
     Kokkos::parallel_for(net->Nsegs_local, KOKKOS_LAMBDA(const int& i) {
         auto segs = net->get_segs();
-        Vec3 p = cryst->find_seg_glide_plane(net, i);
-        if (p.norm2() > 1e-5) segs[i].plane = p;
+        Vec3 pold = segs[i].plane;
+        Vec3 pnew = cryst->find_seg_glide_plane(net, i);
+        if (pnew.norm2() > 1e-5 && (pnew-pold).norm2() > 1e-5) {
+            segs[i].plane = pnew;
+            if (use_oprec) {
+                flag.d_view(i) = 1;
+                val.d_view(i) = pnew;
+            }
+        }
     });
     Kokkos::fence();
+    
+    if (use_oprec) {
+        Kokkos::deep_copy(flag.h_view, flag.d_view);
+        Kokkos::deep_copy(val.h_view, val.d_view);
+        for (int i = 0; i < net->Nsegs_local; i++) {
+            if (!flag.h_view(i)) continue;
+            oprec->add_op(OpRec::UpdateSegPlane(), i, val.h_view(i));
+        }
+    }
 }
 
 /*---------------------------------------------------------------------------

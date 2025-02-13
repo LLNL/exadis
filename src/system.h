@@ -10,6 +10,7 @@
 #include "types.h"
 #include "crystal.h"
 #include "params.h"
+#include "oprec.h"
 
 #pragma once
 #ifndef EXADIS_SYSTEM_H
@@ -50,6 +51,8 @@ public:
     void plastic_strain();
     void reset_glide_planes();
     void write_config(std::string filename);
+    
+    OpRec* oprec;
     
     int num_ranks;
     int proc_rank;

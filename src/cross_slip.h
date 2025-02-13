@@ -27,6 +27,19 @@ public:
     virtual void handle(System* system) {}
     virtual ~CrossSlip() {}
     virtual const char* name() { return "CrossSlipNone"; }
+    
+    
+    /*-----------------------------------------------------------------------
+     *    Function:     update_seg_plane()
+     *                  Update a segment glide plane
+     *---------------------------------------------------------------------*/
+    inline void update_seg_plane(SerialDisNet* network, int i, const Vec3& newplane)
+    {
+        if (network->oprec)
+            network->oprec->add_op(OpRec::UpdateSegPlane(), i, newplane);
+        
+        network->segs[i].plane = newplane;
+    }
 };
 
 /*---------------------------------------------------------------------------

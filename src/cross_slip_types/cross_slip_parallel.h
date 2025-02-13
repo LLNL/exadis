@@ -607,9 +607,9 @@ public:
             eventflag[k] = 1;
             
             // Reposition neighbor node
-            network->nodes[n].pos = network->cell.pbc_fold(event.p1);
+            network->move_node(n, event.p1, system->dEp);
             // Update the segment glide plane
-            network->segs[s].plane = newplane;
+            update_seg_plane(network, s, newplane);
         }
         
         // Continue with the cross-slip events
@@ -670,11 +670,11 @@ public:
             eventflag[k] = 1;
             
             // Reposition nodes
-            network->nodes[i].pos = network->cell.pbc_fold(event.p0);
-            network->nodes[n].pos = network->cell.pbc_fold(event.p1);
+            network->move_node(i, event.p0, system->dEp);
+            network->move_node(n, event.p1, system->dEp);
             // Update segments glide plane
-            network->segs[s1].plane = newplane;
-            network->segs[s2].plane = newplane;
+            update_seg_plane(network, s1, newplane);
+            update_seg_plane(network, s2, newplane);
         }
         
         

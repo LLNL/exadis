@@ -12,6 +12,7 @@
 #define EXADIS_TYPES_H
 
 #include <Kokkos_Core.hpp>
+#include <Kokkos_DualView.hpp>
 
 #include "vec.h"
 #include "network.h"
@@ -26,6 +27,11 @@ namespace ExaDiS {
 template <unsigned int error> void print_(const char *format, ...);
 #define ExaDiS_log print_<0>
 #define ExaDiS_fatal print_<1>
+
+#define EXADIS_NOT_IMPLEMENTED() { \
+    printf("Error: function %s not implemented at %s:%d\n", __FUNCTION__, __FILE__, __LINE__); \
+    exit(1); \
+}
 
 /*---------------------------------------------------------------------------
  *

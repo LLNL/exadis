@@ -30,7 +30,8 @@ public:
     virtual ~Integrator() {}
     virtual const char* name() { return "IntegratorNone"; }
     
-    virtual void write_restart(FILE* fp) { 
+    // Restart
+    virtual void write_restart(FILE* fp) {
         fprintf(fp, "nextdt %.17g\n", nextdt);
     }
     virtual void read_restart(FILE* fp) {
