@@ -58,17 +58,14 @@ public:
  *-------------------------------------------------------------------------*/
 template<class N>
 KOKKOS_INLINE_FUNCTION
-bool node_pinned(System* system, N* net, int i,
-                 int planeIndex, const Mat33& glidedir)
+bool node_pinned(System* system, N* net, int i, int planeIndex,
+                 const Mat33& glidedir, int numglidedir)
 {
     auto nodes = net->get_nodes();
     auto segs = net->get_segs();
     auto conn = net->get_conn();
     
     if (nodes[i].constraint == PINNED_NODE) return 1;
-
-    // Number of cross-slip glide directions
-    int kmax = (system->crystal.type == FCC_CRYSTAL) ? 2 : 3;
     
     // If the node is not owned by the current domain, it
     // may not be repositioned.
@@ -87,7 +84,7 @@ bool node_pinned(System* system, N* net, int i,
 
         int planetest = 0;
         double planetestmin = 10.0;
-        for (int k = 0; k < kmax; k++) {
+        for (int k = 0; k < numglidedir; k++) {
             double ptest = fabs(dot(glidedir[k], segplane));
             double ptest2 = ptest * ptest;
             if (ptest2 < planetestmin) {

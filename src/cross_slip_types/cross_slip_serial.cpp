@@ -49,12 +49,18 @@ void CrossSlipSerial::handle(System* system)
     Kokkos::fence();
     system->timer[system->TIMER_CROSSSLIP].start();
     
-    if (!system->crystal.use_glide_planes) return;
-    if (system->crystal.type != FCC_CRYSTAL)
-        ExaDiS_fatal("Error: CrossSlipSerial only implemented for FCC crystals\n");
+    if (system->crystal.type != FCC_CRYSTAL && system->crystal.type != BCC_CRYSTAL)
+        ExaDiS_fatal("Error: CrossSlipSerial only implemented for FCC and BCC crystals\n");
+    
+    if (!system->crystal.use_glide_planes)
+        ExaDiS_fatal("Error: CrossSlipSerial requires use_glide_planes option\n");
     
     double eps = 1e-6;
-    double thetacrit = 2.0 / 180.0 * M_PI;
+    double thetacrit = 0.0;
+    if (system->crystal.type == FCC_CRYSTAL)
+        thetacrit = 2.0 / 180.0 * M_PI;
+    else if (system->crystal.type == BCC_CRYSTAL)
+        thetacrit = 0.5 / 180.0 * M_PI;
     double sthetacrit = sin(thetacrit);
     double s2thetacrit = sthetacrit * sthetacrit;
     double shearModulus = system->params.MU;
@@ -80,29 +86,40 @@ void CrossSlipSerial::handle(System* system)
         Vec3 burgCrystal = system->crystal.Rinv * burg;
         burgCrystal = burgCrystal.normalized();
         
-        // Only consider glide dislocations. If the Burgers vector is not
-        // a [1 1 0] type, ignore it.
-        if (!((fabs(fabs(burgCrystal.x)-fabs(burgCrystal.y)) < eps) &&
-              (fabs(burgCrystal.z) < eps)) &&
-            !((fabs(fabs(burgCrystal.y)-fabs(burgCrystal.z)) < eps) &&
-              (fabs(burgCrystal.x) < eps )) &&
-            !((fabs(fabs(burgCrystal.z)-fabs(burgCrystal.x)) < eps) &&
-              (fabs(burgCrystal.y) < eps))) {
-            continue;
-        }
+        if (system->crystal.type == FCC_CRYSTAL) {
+            
+            // Only consider glide dislocations. If the Burgers vector is not
+            // a [1 1 0] type, ignore it.
+            if (!((fabs(fabs(burgCrystal.x)-fabs(burgCrystal.y)) < eps) &&
+                  (fabs(burgCrystal.z) < eps)) &&
+                !((fabs(fabs(burgCrystal.y)-fabs(burgCrystal.z)) < eps) &&
+                  (fabs(burgCrystal.x) < eps )) &&
+                !((fabs(fabs(burgCrystal.z)-fabs(burgCrystal.x)) < eps) &&
+                  (fabs(burgCrystal.y) < eps))) {
+                continue;
+            }
 
-        if ((fabs(burgCrystal.x) < eps) && (fabs(burgCrystal.y) < eps) &&
-            (fabs(burgCrystal.z) < eps)) {
-            continue;
-        }
-        
-        // Also test that the segment resides on a (1 1 1) plane, since these
-        // are the only planes where cross-slip occurs.
-        Vec3 plane = network->segs[s].plane.normalized();
-        Vec3 planeCrystal = system->crystal.Rinv * plane;
-        if ((fabs(fabs(planeCrystal.x) - fabs(planeCrystal.y)) > eps) ||
-            (fabs(fabs(planeCrystal.y) - fabs(planeCrystal.z)) > eps)) {
-            continue; // not a {111} plane
+            if ((fabs(burgCrystal.x) < eps) && (fabs(burgCrystal.y) < eps) &&
+                (fabs(burgCrystal.z) < eps)) {
+                continue;
+            }
+            
+            // Also test that the segment resides on a (1 1 1) plane, since these
+            // are the only planes where cross-slip occurs.
+            Vec3 plane = network->segs[s].plane.normalized();
+            Vec3 planeCrystal = system->crystal.Rinv * plane;
+            if ((fabs(fabs(planeCrystal.x) - fabs(planeCrystal.y)) > eps) ||
+                (fabs(fabs(planeCrystal.y) - fabs(planeCrystal.z)) > eps)) {
+                continue; // not a {111} plane
+            }
+            
+        } else if (system->crystal.type == BCC_CRYSTAL) {
+            
+            // Only consider <111> dislocations
+            if (fabs(burgCrystal.x * burgCrystal.y * burgCrystal.z) < eps) {
+                continue;
+            }
+            
         }
         
         int n1 = network->conn[i].node[0];
@@ -152,28 +169,47 @@ void CrossSlipSerial::handle(System* system)
             double fnodeThreshold = noiseFactor * shearModulus * burgSize * 
                                     0.5 * (L1 + L2);
             
-            // Find which glide planes the segments are on
-            // e.g. for burg = [ 1  1  0 ], the two glide directions are
-            //                 [ 1 -1  2 ] and
-            //                 [ 1 -1 -2 ]
-            // Use Burgers vectors in crystal frame to generate initial glide
-            // planes in crystal frame.
             Mat33 glideDirCrystal = Mat33().zero();
-            double tmp = 1.0;
-            for (int j = 0; j < 3; j++) {
-                if (fabs(burgCrystal[j]) > eps) {
-                    glideDirCrystal[0][j] = (burgCrystal[j]*tmp > 0) ? 1.0 : -1.0;
-                    glideDirCrystal[1][j] = (burgCrystal[j]*tmp > 0) ? 1.0 : -1.0;
-                    tmp = -1.0;
-                } else {
-                    glideDirCrystal[0][j] =  2.0;
-                    glideDirCrystal[1][j] = -2.0;
-                }
-            }
+            int numGlideDir = 0; // Number of cross-slip glide directions
             
-            // Normalization
-            glideDirCrystal[0] = sqrt(1.0/6.0) * glideDirCrystal[0];
-            glideDirCrystal[1] = sqrt(1.0/6.0) * glideDirCrystal[1];
+            if (system->crystal.type == FCC_CRYSTAL) {
+                // Find which glide planes the segments are on
+                // e.g. for burg = [ 1  1  0 ], the two glide directions are
+                //                 [ 1 -1  2 ] and
+                //                 [ 1 -1 -2 ]
+                // Use Burgers vectors in crystal frame to generate initial glide
+                // planes in crystal frame.
+                numGlideDir = 2;
+                double tmp = 1.0;
+                for (int j = 0; j < 3; j++) {
+                    if (fabs(burgCrystal[j]) > eps) {
+                        glideDirCrystal[0][j] = (burgCrystal[j]*tmp > 0) ? 1.0 : -1.0;
+                        glideDirCrystal[1][j] = (burgCrystal[j]*tmp > 0) ? 1.0 : -1.0;
+                        tmp = -1.0;
+                    } else {
+                        glideDirCrystal[0][j] =  2.0;
+                        glideDirCrystal[1][j] = -2.0;
+                    }
+                }
+                
+                // Normalization
+                glideDirCrystal[0] = sqrt(1.0/6.0) * glideDirCrystal[0];
+                glideDirCrystal[1] = sqrt(1.0/6.0) * glideDirCrystal[1];
+                
+            } else if (system->crystal.type == BCC_CRYSTAL) {
+                // Find which glide planes the segments are on. Initial
+                // glidedir array contains glide directions in crystal frame
+                // For BCC geometry burgCrystal should be of <1 1 1> type
+                numGlideDir = 3;
+                Mat33 tmp33 = outer(burgCrystal, burgCrystal);
+                for (int m = 0; m < 3; m++)
+                    for (int n = 0; n < 3; n++)
+                        glideDirCrystal[m][n] = ((m==n)-tmp33[m][n]) * sqrt(1.5);
+
+                // glideDirCrystal should now contain the three <112> type
+                // directions that a screw dislocation may move in if glide
+                // is restricted to <110> type glide planes
+            }
             
             int s1 = network->conn[i].seg[0];
             int s2 = network->conn[i].seg[1];
@@ -197,7 +233,7 @@ void CrossSlipSerial::handle(System* system)
             int plane2 = 0;
             int fplane = 0;
             
-            for (int j = 1; j < 2; j++) {
+            for (int j = 1; j < numGlideDir; j++) {
                 plane1 = (fabs(tmp3[j])  < fabs(tmp3[plane1]) ) ? j : plane1;
                 plane2 = (fabs(tmp3B[j]) < fabs(tmp3B[plane2])) ? j : plane2;
                 fplane = (fabs(tmp3C[j]) > fabs(tmp3C[fplane])) ? j : fplane;
@@ -213,8 +249,8 @@ void CrossSlipSerial::handle(System* system)
                 // is close to screw.
                 
                 // Determine if the neighbor nodes should be considered immobile
-                bool pinned1 = node_pinned(system, network, n1, plane1, glideDirLab);
-                bool pinned2 = node_pinned(system, network, n2, plane2, glideDirLab);
+                bool pinned1 = node_pinned(system, network, n1, plane1, glideDirLab, numGlideDir);
+                bool pinned2 = node_pinned(system, network, n2, plane2, glideDirLab, numGlideDir);
                 
                 if (pinned1) {
                     if ((!pinned2) || ((testmax1-test1) < (eps*eps*burgSize*burgSize))) {
@@ -234,7 +270,7 @@ void CrossSlipSerial::handle(System* system)
                         nodep = nbr1p + vec2dotb * burg;
                         
                         double fdotglide = dot(fLab, glideDirLab[fplane]);
-                        tmp = areamin / fabs(vec1dotb) * 2.0 * (1.0 + eps) * SIGN(fdotglide);
+                        double tmp = areamin / fabs(vec1dotb) * 2.0 * (1.0 + eps) * SIGN(fdotglide);
                         nodep += tmp * glideDirLab[fplane];
                         
                         // It looks like we should do the cross-slip, but to
@@ -280,7 +316,7 @@ void CrossSlipSerial::handle(System* system)
                     nodep = nbr2p + vec3dotb * burg;
                     
                     double fdotglide = dot(fLab, glideDirLab[fplane]);
-                    tmp = areamin / fabs(vec1dotb) * 2.0 * (1.0 + eps) * SIGN(fdotglide);
+                    double tmp = areamin / fabs(vec1dotb) * 2.0 * (1.0 + eps) * SIGN(fdotglide);
                     nodep += tmp * glideDirLab[fplane];
                     
                     // It looks like we should do the cross-slip, but to
@@ -323,7 +359,7 @@ void CrossSlipSerial::handle(System* system)
                 // neighbor is either not pinned or pinned but already
                 // sufficiently aligned, proceed with the cross-slip event
                 
-                bool pinned1 = node_pinned(system, network, n1, plane1, glideDirLab);
+                bool pinned1 = node_pinned(system, network, n1, plane1, glideDirLab, numGlideDir);
                 
                 if ((!pinned1) || ((testmax2-test2) < (eps*eps*burgSize*burgSize))) {
                     
@@ -372,7 +408,7 @@ void CrossSlipSerial::handle(System* system)
                 
                 // Zipper condition met for second segment
                 
-                bool pinned2 = node_pinned(system, network, n2, plane2, glideDirLab);
+                bool pinned2 = node_pinned(system, network, n2, plane2, glideDirLab, numGlideDir);
                 
                 if ((!pinned2) || ((testmax2-test2) < (eps*eps*burgSize*burgSize))) {
                     
