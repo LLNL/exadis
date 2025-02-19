@@ -28,6 +28,7 @@ namespace ExaDiS { namespace tools {
  * 					  See Bertin and Cai, CMS, 2018.
  *
  *-------------------------------------------------------------------------*/
+KOKKOS_INLINE_FUNCTION
 Mat33 DispGradientDueToSeg(const Vec3& p, const Vec3& p1, const Vec3& p2, 
                            const Vec3& b, double a, double NU)
 {
@@ -40,7 +41,7 @@ Mat33 DispGradientDueToSeg(const Vec3& p, const Vec3& p1, const Vec3& p2,
     double  s1, s2, a2, d2, da2, da2inv;
     double  Ra1, Ra2, Ra1inv, Ra1inv3, Ra2inv, Ra2inv3;
     double  J03, J05, J13, J15, J25, J35;
-    double  A, Ab[3][3][3], B[3][3][3], delta[3][3];
+    double  A, Ab[3][3][3];
     double  U1[3][3], U2[3][3], U3[3][3];
     double  m8pi, m8pinu;
 
