@@ -243,9 +243,10 @@ void ExaDiSApp::oprec_replay(Control& ctrl, std::string oprec_file)
                     if (rec_pos) {
                         DeviceDisNet* net = system->get_device_network();
                         Kokkos::resize(system->xold, net->Nnodes_local);
+                        System* s = system;
                         Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int i) {
                             auto nodes = net->get_nodes();
-                            system->xold(i) = nodes[i].pos;
+                            s->xold(i) = nodes[i].pos;
                         });
                         
                         SerialDisNet* network = system->get_serial_network();
