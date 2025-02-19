@@ -35,6 +35,38 @@ template <unsigned int error> void print_(const char *format, ...);
 
 /*---------------------------------------------------------------------------
  *
+ *    Class:        Initialize
+ *                  This class acts as an alias for the Kokkos ScopeGuard
+ *                  to initialize and finalize both Kokkos and MPI.
+ *
+ *-------------------------------------------------------------------------*/
+class Initialize {
+public:
+    Initialize(int argc, char* argv[]) {
+#ifdef MPI
+        MPI_Init(&argc, &argv);
+#endif
+        if (Kokkos::is_initialized()) {
+            Kokkos::abort(Kokkos::Impl::scopeguard_create_while_initialized_warning().c_str());
+        }
+        if (Kokkos::is_finalized()) {
+            Kokkos::abort(Kokkos::Impl::scopeguard_create_after_finalize_warning().c_str());
+        }
+        Kokkos::initialize(argc, argv);
+    }
+    ~Initialize() {
+        if (Kokkos::is_finalized()) {
+            Kokkos::abort(Kokkos::Impl::scopeguard_destruct_after_finalize_warning().c_str());
+        }
+        Kokkos::finalize();
+#ifdef MPI
+        MPI_Finalize();
+#endif
+    }
+};
+
+/*---------------------------------------------------------------------------
+ *
  *    Functions:    Memory management and defintions
  *
  *-------------------------------------------------------------------------*/
