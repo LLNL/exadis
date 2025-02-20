@@ -22,7 +22,7 @@ extern FILE* flog;
 
 class System {
 public:
-    DisNetManager* net_mngr;
+    DisNetManager* net_mngr = nullptr;
     double neighbor_cutoff;
     
     inline SerialDisNet* get_serial_network() { return net_mngr->get_serial_network(); }
@@ -52,7 +52,7 @@ public:
     void reset_glide_planes();
     void write_config(std::string filename);
     
-    OpRec* oprec;
+    OpRec* oprec = nullptr;
     
     int num_ranks;
     int proc_rank;
