@@ -195,6 +195,7 @@ struct DispGradIso {
     };
     Params params;
     
+    DispGradIso() {}
     DispGradIso(Params _params) {
         params = _params;
         if (params.NU < 0.0 || params.a < 0.0)
@@ -202,7 +203,7 @@ struct DispGradIso {
     }
     
     KOKKOS_INLINE_FUNCTION
-    T_val field_seg_value(const Vec3& r1, const Vec3& r2, const Vec3& b, const Vec3& r) {
+    T_val field_seg_value(const Vec3& r1, const Vec3& r2, const Vec3& b, const Vec3& r) const {
         return DispGradientDueToSeg(r, r1, r2, b, params.a, params.NU);
     }
 };

@@ -24,7 +24,7 @@ namespace ExaDiS { namespace tools {
 template<class F>
 struct FieldParams {
     typedef typename F::T_val T_val;
-    F* field;
+    F field;
     int Nimg[3];
     Vec3 d1, d2, d3;
 };
@@ -38,7 +38,7 @@ struct FieldParams {
  *-------------------------------------------------------------------------*/
 template<class F, class N>
 KOKKOS_INLINE_FUNCTION
-typename F::T_val field_seg_value(F& f, N* net, int i, const Vec3& p)
+typename F::T_val field_seg_value(const F& f, N* net, int i, const Vec3& p)
 {
     auto nodes = net->get_nodes();
     auto segs = net->get_segs();
@@ -57,7 +57,7 @@ typename F::T_val field_seg_value(F& f, N* net, int i, const Vec3& p)
         for (int jj = -f.Nimg[1]; jj < f.Nimg[1]+1; jj++) {
             for (int kk = -f.Nimg[2]; kk < f.Nimg[2]+1; kk++) {
                 Vec3 pp = p + ii*f.d1 + jj*f.d2 + kk*f.d3;
-                val += f.field->field_seg_value(r1, r2, b, pp);
+                val += f.field.field_seg_value(r1, r2, b, pp);
             }
         }
     }
@@ -105,26 +105,26 @@ struct FieldGrid {
         params.d2 = net->cell.H.coly();
         params.d3 = net->cell.H.colz();
         
-        params.field = exadis_new<F>(p);
+        params.field = p;
         
         compute(net);
     }
     
     struct ComputeGrid {
-        FieldGrid* f;
+        FieldGrid f;
         N* net;
-        ComputeGrid(FieldGrid* _f, N* _net) : f(_f), net(_net) {}
+        ComputeGrid(FieldGrid _f, N* _net) : f(_f), net(_net) {}
         
         KOKKOS_INLINE_FUNCTION
         void operator() (const int& kx, const int& ky, const int& kz) const {
-            Vec3 s((kx+0.5)/f->Ng[0], (ky+0.5)/f->Ng[1], (kz+0.5)/f->Ng[2]);
+            Vec3 s((kx+0.5)/f.Ng[0], (ky+0.5)/f.Ng[1], (kz+0.5)/f.Ng[2]);
             Vec3 p = net->cell.real_position(s);
             
             T_val val = T_val().zero();
             for (int i = 0; i < net->Nsegs_local; i++)
-                val += field_seg_value(f->params, net, i, p);
+                val += field_seg_value(f.params, net, i, p);
             
-            f->gridval(kx, ky, kz) = val;
+            f.gridval(kx, ky, kz) = val;
         }
     };
     
@@ -134,63 +134,61 @@ struct FieldGrid {
         cell = net->cell;
         net->update_ptr();
         using policy = Kokkos::MDRangePolicy<typename N::ExecutionSpace,Kokkos::Rank<3>>;
-        Kokkos::parallel_for(policy({0, 0, 0}, {Ng[0], Ng[1], Ng[2]}), ComputeGrid(this, net));
+        Kokkos::parallel_for(policy({0, 0, 0}, {Ng[0], Ng[1], Ng[2]}), ComputeGrid(*this, net));
         Kokkos::fence();
         
         regularize_convergence(net);
     }
     
     struct RegularizeConvergence {
-        FieldGrid* f;
+        FieldGrid f;
         N* net;
         Vec3 p0, px, py, pz;
-        Kokkos::View<Mat33*> V;
+        Kokkos::View<T_val*> V;
+        T_val Vavg;
         
-        RegularizeConvergence(FieldGrid* _f, N* _net, Kokkos::View<Mat33*>& _V) :
-                              f(_f), net(_net), V(_V) {
+        RegularizeConvergence(FieldGrid _f, N* _net, Kokkos::View<T_val*>& _V, T_val _Vavg=T_val()) :
+                              f(_f), net(_net), V(_V), Vavg(_Vavg) {
             p0 = net->cell.origin;
-            px = p0 + f->params.d1;
-            py = p0 + f->params.d2;
-            pz = p0 + f->params.d3;
+            px = p0 + f.params.d1;
+            py = p0 + f.params.d2;
+            pz = p0 + f.params.d3;
         }
         
         KOKKOS_INLINE_FUNCTION
         void operator() (const int& i) const {
             
-            T_val V0 = field_seg_value(f->params, net, i, p0);
+            T_val V0 = field_seg_value(f.params, net, i, p0);
             Kokkos::atomic_add(&V(0), V0); // V0 value
             
             if (net->cell.xpbc == PBC_BOUND) {
-                T_val Vx = field_seg_value(f->params, net, i, px);
+                T_val Vx = field_seg_value(f.params, net, i, px);
                 Kokkos::atomic_add(&V(1), Vx); // Vx value
             }
             if (net->cell.ypbc == PBC_BOUND) {
-                T_val Vy = field_seg_value(f->params, net, i, py);
+                T_val Vy = field_seg_value(f.params, net, i, py);
                 Kokkos::atomic_add(&V(2), Vy); // Vy value
             }
             if (net->cell.zpbc == PBC_BOUND) {
-                T_val Vz = field_seg_value(f->params, net, i, pz);
+                T_val Vz = field_seg_value(f.params, net, i, pz);
                 Kokkos::atomic_add(&V(3), Vz); // Vz value
             }
         }
         
-        struct TagRegularizeLinear {};
-        struct TagRegularizeAverage {};
-        
         KOKKOS_INLINE_FUNCTION
-        void operator() (TagRegularizeLinear, const int& kx, const int& ky, const int& kz) const {
-            T_val val = f->gridval(kx, ky, kz);
-            Kokkos::atomic_add(&V(4), val); // Vavg value
+        void operator() (const int& kx, const int& ky, const int& kz, T_val& Vsum) const {
+            T_val val = f.gridval(kx, ky, kz);
+            Vsum += val;
             
-            Vec3 s((kx+0.5)/f->Ng[0], (ky+0.5)/f->Ng[1], (kz+0.5)/f->Ng[2]);
+            Vec3 s((kx+0.5)/f.Ng[0], (ky+0.5)/f.Ng[1], (kz+0.5)/f.Ng[2]);
             val -= (s.x*(V(1)-V(0)) + s.y*(V(2)-V(0)) + s.z*(V(3)-V(0)));
-            f->gridval(kx, ky, kz) = val;
+            f.gridval(kx, ky, kz) = val;
         }
         
         KOKKOS_INLINE_FUNCTION
-        void operator() (TagRegularizeAverage, const int& kx, const int& ky, const int& kz) const {
-            T_val Vavg = 1.0/(f->Ng[0]*f->Ng[1]*f->Ng[2])*V(4) - 0.5*(V(1)-V(0) + V(2)-V(0) + V(3)-V(0));
-            f->gridval(kx, ky, kz) -= Vavg;
+        void operator() (const int& kx, const int& ky, const int& kz) const {
+            T_val Vreg = 1.0/(f.Ng[0]*f.Ng[1]*f.Ng[2])*Vavg - 0.5*(V(1)-V(0) + V(2)-V(0) + V(3)-V(0));
+            f.gridval(kx, ky, kz) -= Vreg;
         }
     };
     
@@ -201,25 +199,26 @@ struct FieldGrid {
             net->cell.zpbc == FREE_BOUND) return;
         
         // Conditional convergence regularization
-        Kokkos::View<Mat33*> V("Vfield", 5);
+        Kokkos::View<T_val*> V("Vfield", 4);
         Kokkos::deep_copy(V, 0.0);
         
         // Cell corner values
-        Kokkos::parallel_for(net->Nsegs_local, RegularizeConvergence(this, net, V));
+        Kokkos::parallel_for(net->Nsegs_local, RegularizeConvergence(*this, net, V));
         Kokkos::fence();
         
         // Linear term
-        Kokkos::parallel_for(Kokkos::MDRangePolicy<typename N::ExecutionSpace, Kokkos::Rank<3>,
-            typename RegularizeConvergence::TagRegularizeLinear>({0, 0, 0}, {Ng[0], Ng[1], Ng[2]}),
-            RegularizeConvergence(this, net, V)
+        T_val Vavg;
+        Kokkos::parallel_reduce(Kokkos::MDRangePolicy<typename N::ExecutionSpace,
+            Kokkos::Rank<3>>({0, 0, 0}, {Ng[0], Ng[1], Ng[2]}),
+            RegularizeConvergence(*this, net, V), Vavg
         );
         Kokkos::fence();
         
         // Average term
         if (average) {
-            Kokkos::parallel_for(Kokkos::MDRangePolicy<typename N::ExecutionSpace, Kokkos::Rank<3>,
-                typename RegularizeConvergence::TagRegularizeAverage>({0, 0, 0}, {Ng[0], Ng[1], Ng[2]}),
-                RegularizeConvergence(this, net, V)
+            Kokkos::parallel_for(Kokkos::MDRangePolicy<typename N::ExecutionSpace,
+                Kokkos::Rank<3>>({0, 0, 0}, {Ng[0], Ng[1], Ng[2]}),
+                RegularizeConvergence(*this, net, V, Vavg)
             );
             Kokkos::fence();
         }
@@ -275,10 +274,6 @@ struct FieldGrid {
         
         return val;
     }
-    
-    ~FieldGrid() {
-        exadis_delete(params.field);
-    }
 };
 
 /*---------------------------------------------------------------------------
@@ -321,25 +316,25 @@ struct FieldPoints {
         params.d2 = net->cell.H.coly();
         params.d3 = net->cell.H.colz();
         
-        params.field = exadis_new<F>(p);
+        params.field = p;
         
         compute(net);
     }
     
     struct ComputePoints {
-        FieldPoints* f;
+        FieldPoints f;
         N* net;
-        ComputePoints(FieldPoints* _f, N* _net) : f(_f), net(_net) {}
+        ComputePoints(FieldPoints _f, N* _net) : f(_f), net(_net) {}
         
         KOKKOS_INLINE_FUNCTION
         void operator() (const int& i) const {
-            Vec3 p = f->points(i);
+            Vec3 p = f.points(i);
             
             T_val val = T_val().zero();
             for (int i = 0; i < net->Nsegs_local; i++)
-                val += field_seg_value(f->params, net, i, p);
+                val += field_seg_value(f.params, net, i, p);
             
-            f->pointval(i) = val;
+            f.pointval(i) = val;
         }
         
         KOKKOS_INLINE_FUNCTION
@@ -349,16 +344,16 @@ struct FieldPoints {
             
             int i = lid; // point id
             Vec3 p;
-            if (tid == 0) p = f->points(i);
+            if (tid == 0) p = f.points(i);
             team.team_broadcast(p, 0);
             
             T_val val;
             Kokkos::parallel_reduce(Kokkos::TeamThreadRange(team, net->Nsegs_local), [&](const int& j, T_val& vsum) {
-                vsum += field_seg_value(f->params, net, j, p);
+                vsum += field_seg_value(f.params, net, j, p);
             }, val);
             
             Kokkos::single(Kokkos::PerTeam(team), [=]() {
-                f->pointval(i) = val;
+                f.pointval(i) = val;
             });
         }
     };
@@ -370,16 +365,12 @@ struct FieldPoints {
         
         if constexpr (std::is_same<typename N::ExecutionSpace, Kokkos::Serial>::value) {
             using policy = Kokkos::RangePolicy<typename N::ExecutionSpace>;
-            Kokkos::parallel_for(policy(0, Npoints), ComputePoints(this, net));
+            Kokkos::parallel_for(policy(0, Npoints), ComputePoints(*this, net));
         } else {
             using team_policy = Kokkos::TeamPolicy<typename N::ExecutionSpace>;
-            Kokkos::parallel_for(team_policy(Npoints, Kokkos::AUTO), ComputePoints(this, net));
+            Kokkos::parallel_for(team_policy(Npoints, Kokkos::AUTO), ComputePoints(*this, net));
         }
         Kokkos::fence();
-    }
-    
-    ~FieldPoints() {
-        exadis_delete(params.field);
     }
 };
 
@@ -409,7 +400,7 @@ typename F::T_val field_point(N* net, typename F::Params params, const Vec3& p, 
     fparams.d2 = net->cell.H.coly();
     fparams.d3 = net->cell.H.colz();
     
-    fparams.field = exadis_new<F>(params);
+    fparams.field = params;
     
     // Make sure the accessors are properly set up (for SerialDisNet)
     net->update_ptr();
@@ -434,8 +425,6 @@ typename F::T_val field_point(N* net, typename F::Params params, const Vec3& p, 
         });
     });
     Kokkos::fence();
-    
-    exadis_delete(fparams.field);
     
     return val(0);
 }
