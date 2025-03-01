@@ -168,8 +168,11 @@ struct MobilityFCC0_fric : MobilityFCC0
             double eps = 1e-10;
             
             Vec3 r1 = nodes[i].pos;
-            Vec3 norm[MAX_CONN];
-            Vec3 line[MAX_CONN];
+            
+            Vec3 norm[3], line;
+            int ngc = 0;
+            int nlc = 0;
+            Mat33 P = Mat33().eye();
             
             int numNonZeroLenSegs = 0;
             double LtimesB = 0.0;
@@ -189,20 +192,8 @@ struct MobilityFCC0_fric : MobilityFCC0
                 int order = conn[i].order[j];
                 Vec3 burg = order*segs[s].burg;
                 double bMag = burg.norm();
-                double invbMag = 1.0 / bMag;
+                double dangle = 1.0 / bMag * fabs(dot(burg, dr));
                 
-                norm[j] = segs[s].plane.normalized();
-                // Need crystal rotation here
-                Vec3 n = system->crystal.Rinv * norm[j];
-                if ((fabs(fabs(n.x) - fabs(n.y)) > 1e-4) ||
-                    (fabs(fabs(n.y) - fabs(n.z)) > 1e-4)) {
-                    // not a {111} plane
-                    line[j] = dr.normalized();
-                } else {
-                    line[j] = Vec3(0.0);
-                }
-                
-                double dangle = invbMag * fabs(dot(burg, dr));
                 double Mob = Medge+(Mscrew-Medge)*dangle;
                 if (mobility_field.active)
                     Mob *= mobility_field.interpolate(cell, rmid);
@@ -212,14 +203,56 @@ struct MobilityFCC0_fric : MobilityFCC0
                 if (friction_field.active)
                     fricStress *= friction_field.interpolate(cell, rmid);
                 FricForce += fricStress * bMag * L;
+                
+                // Glide constraints
+                Vec3 plane = segs[s].plane.normalized();
+                Vec3 n = system->crystal.Rinv * plane;
+                Vec3 l(0.0);
+                if ((fabs(fabs(n.x) - fabs(n.y)) > 1e-4) ||
+                    (fabs(fabs(n.y) - fabs(n.z)) > 1e-4)) {
+                    l = dr; // not a {111} plane
+                }
+                // Find independent glide constraints
+                if (ngc < 3) {
+                    for (int k = 0; k < ngc; k++)
+                        plane = plane.orthogonalize(norm[k]);
+                    if (plane.norm2() >= 0.05) {
+                        plane = plane.normalized();
+                        Mat33 Q = Mat33().eye() - outer(plane, plane);
+                        P = Q * P;
+                        norm[ngc++] = plane;
+                    }
+                }
+                // Find independent line constraints
+                if (nlc < 2) {
+                    if (nlc == 1)
+                        l = l.orthogonalize(line);
+                    if (l.norm2() >= 0.05) {
+                        line = l.normalized();
+                        nlc++;
+                    }
+                }
             }
             LtimesB /= 2.0;
             FricForce /= 2.0;
             
             if (numNonZeroLenSegs > 0) {
-                // Get glide constraints projection matrix
-                Mat33 P = glide_constraints(nconn, norm, line);
                 
+                // Apply glide constraints
+                if (nlc == 1) {
+                    P = outer(line, line) * P;
+                    for (int j = 0; j < ngc; j++)
+                        if (fabs(dot(norm[j], line)) > 0.05) P.zero();
+                } else if (nlc >= 2) {
+                    P.zero();
+                }
+                
+                // Zero-out tiny non-zero components due to round-off errors
+                for (int j = 0; j < 3; j++)
+                    for (int k = 0; k < 3; k++)
+                        if (fabs(P[j][k]) < 1e-10) P[j][k] = 0.0;
+                
+                // Subtract friction force to nodal force
                 Vec3 f = fi;
                 if (FricForce > 0.0) {
                     double fmag = f.norm();
@@ -230,6 +263,7 @@ struct MobilityFCC0_fric : MobilityFCC0
                     }
                 }
                 
+                // Compute nodal velocity
                 vi = P * (1.0/LtimesB * f);
                 if (vmax > 0.0) 
                     apply_velocity_cap(vmax, vscale, vi);
