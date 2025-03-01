@@ -33,80 +33,7 @@ namespace ExaDiS {
 
 /*---------------------------------------------------------------------------
  *
- *    Struct:       OpRec::Op
- *
- *-------------------------------------------------------------------------*/
-OpRec::Op::Op(int _optype, char* line) : optype(_optype)
-{
-    int type;
-    switch (optype) {
-        case TIME_INTEGRATE:
-            sscanf(line, "%d %d %lf",
-                   &type, &i1, &d1);
-            break;
-        case PLASTIC_STRAIN:
-            sscanf(line, "%d %lf %lf %lf %lf %lf %lf %lf",
-                   &type, &d1, &v1.x, &v1.y, &v1.z, &v2.x, &v2.y, &v2.z);
-            break;
-        case MOVE_NODE:
-        case SPLIT_SEG:
-        case UPDATE_SEG_PLANE:
-            sscanf(line, "%d %d %lf %lf %lf",
-                   &type, &i1, &v1.x, &v1.y, &v1.z);
-            break;
-        case MERGE_NODES:
-            sscanf(line, "%d %d %d %lf %lf %lf",
-                   &type, &i1, &i2, &v1.x, &v1.y, &v1.z);
-            break;
-        case SPLIT_MULTI_NODE:
-            sscanf(line, "%d %d %d %lf %lf %lf %lf %lf %lf",
-                   &type, &i1, &i2, &v1.x, &v1.y, &v1.z, &v2.x, &v2.y, &v2.z);
-            break;
-        case PURGE_NETWORK:
-        case UPDATE_OUTPUT:
-            sscanf(line, "%d",
-                   &type);
-            break;
-        default:
-            break;
-    }
-}
-
-void OpRec::Op::write(FILE* fp)
-{
-    switch (optype) {
-        case TIME_INTEGRATE:
-            fprintf(fp, "%d %d %e\n",
-                    optype, i1, d1);
-            break;
-        case PLASTIC_STRAIN:
-            fprintf(fp, "%d %e %e %e %e %e %e %e\n",
-                    optype, d1, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
-            break;
-        case MOVE_NODE:
-        case SPLIT_SEG:
-        case UPDATE_SEG_PLANE:
-            fprintf(fp, "%d %d %e %e %e\n",
-                    optype, i1, v1.x, v1.y, v1.z);
-            break;
-        case MERGE_NODES:
-            fprintf(fp, "%d %d %d %e %e %e\n",
-                    optype, i1, i2, v1.x, v1.y, v1.z);
-            break;
-        case SPLIT_MULTI_NODE:
-            fprintf(fp, "%d %d %d %e %e %e %e %e %e\n",
-                    optype, i1, i2, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
-            break;
-        default:
-            fprintf(fp, "%d\n",
-                    optype);
-            break;
-    }
-}
-
-/*---------------------------------------------------------------------------
- *
- *    Struct:       OpRec
+ *    Struct:       OpRec::write_file()
  *
  *-------------------------------------------------------------------------*/
 void OpRec::write_file(std::string oprec_file)
@@ -120,14 +47,38 @@ void OpRec::write_file(std::string oprec_file)
     if (fp == NULL)
         ExaDiS_fatal("Error: cannot open oprec file %s\n", oprec_file.c_str());
     
-    for (size_t i = 0; i < ops.size(); i++)
-        ops[i].write(fp);
+    for (const auto& op : ops) {
+        if (op.type() == typeid(TimeIntegrate)) {
+            std::any_cast<TimeIntegrate>(op).write(fp);
+        } else if (op.type() == typeid(PlasticStrain)) {
+            std::any_cast<PlasticStrain>(op).write(fp);
+        } else if (op.type() == typeid(MoveNode)) {
+            std::any_cast<MoveNode>(op).write(fp);
+        } else if (op.type() == typeid(SplitSeg)) {
+            std::any_cast<SplitSeg>(op).write(fp);
+        } else if (op.type() == typeid(MergeNodes)) {
+            std::any_cast<MergeNodes>(op).write(fp);
+        } else if (op.type() == typeid(SplitMultiNode)) {
+            std::any_cast<SplitMultiNode>(op).write(fp);
+        } else if (op.type() == typeid(UpdateSegPlane)) {
+            std::any_cast<UpdateSegPlane>(op).write(fp);
+        } else if (op.type() == typeid(PurgeNetwork)) {
+            std::any_cast<PurgeNetwork>(op).write(fp);
+        } else if (op.type() == typeid(UpdateOutput)) {
+            std::any_cast<UpdateOutput>(op).write(fp);
+        }
+    }
     
     fclose(fp);
     
     clear();
 }
 
+/*---------------------------------------------------------------------------
+ *
+ *    Struct:       OpRec::read_file()
+ *
+ *-------------------------------------------------------------------------*/
 void OpRec::read_file(std::string oprec_file)
 {
     clear();
@@ -142,7 +93,38 @@ void OpRec::read_file(std::string oprec_file)
     while (getline(&line, &len, fp) != -1) {
         int optype;
         sscanf(line, "%d", &optype);
-        ops.emplace_back(optype, line);
+        
+        switch (optype) {
+            case TIME_INTEGRATE:
+                ops.push_back(TimeIntegrate(line));
+                break;
+            case PLASTIC_STRAIN:
+                ops.push_back(PlasticStrain(line));
+                break;
+            case MOVE_NODE:
+                ops.push_back(MoveNode(line));
+                break;
+            case SPLIT_SEG:
+                ops.push_back(SplitSeg(line));
+                break;
+            case MERGE_NODES:
+                ops.push_back(MergeNodes(line));
+                break;
+            case SPLIT_MULTI_NODE:
+                ops.push_back(SplitMultiNode(line));
+                break;
+            case UPDATE_SEG_PLANE:
+                ops.push_back(UpdateSegPlane(line));
+                break;
+            case PURGE_NETWORK:
+                ops.push_back(PurgeNetwork(line));
+                break;
+            case UPDATE_OUTPUT:
+                ops.push_back(UpdateOutput(line));
+                break;
+            default:
+                break;
+        }
     }
     
     fclose(fp);
@@ -161,27 +143,84 @@ void ExaDiSApp::oprec_save_integration(Control& ctrl)
     bool rec_pos = (ctrl.oprecposfreq > 0) ? (istep % ctrl.oprecposfreq == 0) : false;
     
     // Start time step
-    system->oprec->add_op(OpRec::TimeIntegrate(), rec_pos, system->realdt);
+    system->oprec->add_op(OpRec::TimeIntegrate(rec_pos, system->realdt));
     
     if (rec_pos) {
         // Save new node positions
         DeviceDisNet* net = system->get_device_network();
-        Kokkos::View<Vec3*> pos("pos", net->Nnodes_local);
-        Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int i) {
-            auto nodes = net->get_nodes();
-            pos(i) = nodes[i].pos;
-        });
-        Kokkos::fence();
-        
-        auto h_pos = Kokkos::create_mirror_view(pos);
-        Kokkos::deep_copy(h_pos, pos);
+        auto h_nodes = Kokkos::create_mirror_view(net->nodes);
+        Kokkos::deep_copy(h_nodes, net->nodes);
         for (int i = 0; i < net->Nnodes_local; i++)
-            system->oprec->add_op(OpRec::MoveNode(), i, h_pos(i));
+            system->oprec->add_op(OpRec::MoveNode(h_nodes(i).tag, h_nodes(i).pos));
+    }
+}
+
+/*---------------------------------------------------------------------------
+ *
+ *    Struct:       NodeMap
+ *                  Struct to track and retrieve nodes by their tag
+ *
+ *-------------------------------------------------------------------------*/
+struct NodeMap {
+    std::map<NodeTag,int> map;
+    
+    void reset(SerialDisNet* network) {
+        map.clear();
+        for (int i = 0; i < network->Nnodes_local; i++)
+            map.emplace(network->nodes[i].tag, i);
     }
     
-    // End time step
-    system->oprec->add_op(OpRec::TimeIntegrate(), rec_pos, system->realdt);
-}
+    inline void add(const NodeTag& tag, int i) {
+        if (find(tag, false) != -1)
+            ExaDiS_fatal("Error: node with tag = (%d,%d) already exists\n", tag.domain, tag.index);
+        map.emplace(tag, i);
+    }
+    
+    inline int find(const NodeTag& tag, bool required=true) {
+        auto iter = map.find(tag);
+        if (iter == map.end()) {
+            if (required)
+                ExaDiS_fatal("Error: cannot find node with tag = (%d,%d)\n", tag.domain, tag.index);
+            return -1;
+        } else {
+            return iter->second;
+        }
+    }
+    
+    inline int find_seg(SerialDisNet* network, const NodeTag& tag1, const NodeTag& tag2) {
+        int n1 = find(tag1);
+        int s = -1;
+        for (int i = 0; i < network->conn[n1].num; i++) {
+            if (network->nodes[network->conn[n1].node[i]].tag == tag2) {
+                s = network->conn[n1].seg[i]; break;
+            }
+        }
+        if (s < 0)
+            ExaDiS_fatal("Error: cannot find segment with tag = (%d,%d)-(%d,%d)\n",
+            tag1.domain, tag1.index, tag2.domain, tag2.index);
+        return s;
+    }
+    
+    inline int find_arm(SerialDisNet* network, const NodeTag& tag1, const NodeTag& tag2) {
+        int n1 = find(tag1);
+        int c = -1;
+        for (int i = 0; i < network->conn[n1].num; i++) {
+            if (network->nodes[network->conn[n1].node[i]].tag == tag2) {
+                c = i; break;
+            }
+        }
+        if (c < 0)
+            ExaDiS_fatal("Error: cannot find arm with tag = (%d,%d)-(%d,%d)\n",
+            tag1.domain, tag1.index, tag2.domain, tag2.index);
+        return c;
+    }
+    
+    inline void check_size(SerialDisNet* network, std::string name) {
+        if (map.size() != network->nodes.size())
+            ExaDiS_fatal("Error: inconsistent node sizes %lu - %lu after %s\n",
+            map.size(), network->nodes.size(), name.c_str());
+    }
+};
 
 /*---------------------------------------------------------------------------
  *
@@ -198,6 +237,9 @@ void ExaDiSApp::oprec_replay(Control& ctrl, std::string oprec_file)
     
     OpRec* oprec = system->oprec;
     oprec->deactivate();
+    
+    NodeMap nodemap;
+    nodemap.reset(system->get_serial_network());
     
     timer.reset();
     
@@ -230,133 +272,124 @@ void ExaDiSApp::oprec_replay(Control& ctrl, std::string oprec_file)
     
         // Main loop
         while (oprec->step()) {
+        
+            OpRec::OpAny* op = oprec->current();
             
-            OpRec::Op* op = oprec->current();
-            switch (op->optype) {
+            if (op->type() == typeid(OpRec::TimeIntegrate))
+            {
+                // Time-integration
+                OpRec::TimeIntegrate* opcur = std::any_cast<OpRec::TimeIntegrate>(op);
                 
-                case OpRec::TIME_INTEGRATE:
-                {
-                    // Time-integration
-                    int rec_pos = op->i1;
-                    system->realdt = op->d1;
-                    
-                    if (rec_pos) {
-                        DeviceDisNet* net = system->get_device_network();
-                        Kokkos::resize(system->xold, net->Nnodes_local);
-                        System* s = system;
-                        Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int i) {
-                            auto nodes = net->get_nodes();
-                            s->xold(i) = nodes[i].pos;
-                        });
-                        
-                        SerialDisNet* network = system->get_serial_network();
-                        op = oprec->iterate();
-                        while (op->optype == OpRec::MOVE_NODE) {
-                            int i = op->i1;
-                            Vec3 pos = op->v1;
-                            network->nodes[i].pos = pos;
-                            op = oprec->iterate();
-                        }
-                    }
-                    
+                system->realdt = opcur->dt;
+                
+                if (opcur->rec_pos) {
+                    DeviceDisNet* net = system->get_device_network();
+                    Kokkos::resize(system->xold, net->Nnodes_local);
+                    System* s = system;
+                    Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int i) {
+                        auto nodes = net->get_nodes();
+                        s->xold(i) = nodes[i].pos;
+                    });
                     Kokkos::fence();
-                    break;
                 }
-                
-                case OpRec::PLASTIC_STRAIN:
-                {
-                    // Plastic strain
-                    system->density = op->d1;
-                    system->dEp = Mat33().symmetric(op->v1.x, op->v1.y, op->v1.z,
-                                                    op->v2.x, op->v2.y, op->v2.z);
-                    op = oprec->iterate();
-                    system->dWp = Mat33().symmetric(op->v1.x, op->v1.y, op->v1.z,
-                                                    op->v2.x, op->v2.y, op->v2.z);                    
-                    break;
-                }
-                
-                case OpRec::MOVE_NODE:
-                {
-                    SerialDisNet* network = system->get_serial_network();
-                    int i = op->i1;
-                    Vec3 pos = op->v1;
-                    network->move_node(i, pos, system->dEp);
-                    break;
-                }
-                
-                case OpRec::SPLIT_SEG:
-                {
-                    SerialDisNet* network = system->get_serial_network();
-                    int i = op->i1;
-                    Vec3 pos = op->v1;
-                    network->split_seg(i, pos);
-                    break;
-                }
-                
-                case OpRec::MERGE_NODES:
-                {
-                    SerialDisNet* network = system->get_serial_network();
-                    int n1 = op->i1;
-                    int n2 = op->i2;
-                    Vec3 pos = op->v1;
-                    bool error = network->merge_nodes_position(n1, n2, pos, system->dEp);
-                    if (!error && system->crystal.use_glide_planes)
-                        system->crystal.reset_node_glide_planes(network, n1);
-                    break;
-                }
-                
-                case OpRec::SPLIT_MULTI_NODE:
-                {
-                    SerialDisNet* network = system->get_serial_network();
-                    int i = op->i1;
-                    int kmax = op->i2;
-                    Vec3 p0 = op->v1;
-                    Vec3 p1 = op->v2;
-                    int numsets, **armsets;
-                    int nconn = network->conn[i].num;
-                    Topology::get_arm_sets(nconn, &numsets, &armsets);
-                    std::vector<int> arms;
-                    for (int l = 0; l < nconn; l++)
-                        if (armsets[kmax][l] == 1) arms.push_back(l);
-                    Topology::execute_split(system, network, i, kmax, arms, p0, p1);
-                    for (int k = 0; k < numsets; k++) free(armsets[k]);
-                    free(armsets);
-                    break;
-                }
-                
-                case OpRec::UPDATE_SEG_PLANE:
-                {
-                    SerialDisNet* network = system->get_serial_network();
-                    int i = op->i1;
-                    Vec3 plane = op->v1;
-                    network->segs[i].plane = plane;
-                    break;
-                }
-                
-                case OpRec::PURGE_NETWORK:
-                {
-                    SerialDisNet* network = system->get_serial_network();
-                    network->purge_network();
-                    break;
-                }
-                
-                case OpRec::UPDATE_OUTPUT:
-                {
-                    // Stepping
-                    istep++;
-                    
-                    // Update stress
-                    update_mechanics(ctrl);
-                    
-                    // Output
-                    output(ctrl);
-                    
-                    break;
-                }
-                    
-                default:
-                    break;
             }
+            else if (op->type() == typeid(OpRec::PlasticStrain))
+            {
+                // Plastic strain
+                OpRec::PlasticStrain* opcur = std::any_cast<OpRec::PlasticStrain>(op);
+                system->density = opcur->density;
+                system->dEp = opcur->dEp;
+                system->dWp = opcur->dWp;
+            }
+            else if (op->type() == typeid(OpRec::MoveNode))
+            {
+                // Move node
+                OpRec::MoveNode* opcur = std::any_cast<OpRec::MoveNode>(op);
+                int i = nodemap.find(opcur->tag);
+                Vec3 pos = opcur->pos;
+                
+                SerialDisNet* network = system->get_serial_network();
+                network->move_node(i, pos, system->dEp);
+            }
+            else if (op->type() == typeid(OpRec::SplitSeg))
+            {
+                // Split segment
+                OpRec::SplitSeg* opcur = std::any_cast<OpRec::SplitSeg>(op);
+                
+                SerialDisNet* network = system->get_serial_network();
+                int s = nodemap.find_seg(network, opcur->tag1, opcur->tag2);
+                Vec3 pos = opcur->pos;
+                int nnew = network->split_seg(s, pos);
+                
+                NodeTag tagnew = network->nodes[nnew].tag;
+                if (!(tagnew == opcur->tagnew))
+                    ExaDiS_fatal("Error: inconsistent new node tag after SplitSeg\n");
+                nodemap.add(tagnew, nnew);
+                nodemap.check_size(network,"SPLIT_SEG");
+            }
+            else if (op->type() == typeid(OpRec::MergeNodes))
+            {
+                // Merge nodes
+                OpRec::MergeNodes* opcur = std::any_cast<OpRec::MergeNodes>(op);
+                int n1 = nodemap.find(opcur->tag1);
+                int n2 = nodemap.find(opcur->tag2);
+                Vec3 pos = opcur->pos;
+                
+                SerialDisNet* network = system->get_serial_network();
+                bool error = network->merge_nodes_position(n1, n2, pos, system->dEp);
+                if (!error && system->crystal.use_glide_planes)
+                    system->crystal.reset_node_glide_planes(network, n1);
+                nodemap.check_size(network,"MERGE_NODES");
+            }
+            else if (op->type() == typeid(OpRec::SplitMultiNode))
+            {
+                // Split multi node
+                OpRec::SplitMultiNode* opcur = std::any_cast<OpRec::SplitMultiNode>(op);
+                int i = nodemap.find(opcur->tag);
+                Vec3 p0 = opcur->p0;
+                Vec3 p1 = opcur->p1;
+                
+                SerialDisNet* network = system->get_serial_network();
+                std::vector<int> arms;
+                for (const auto& t : opcur->tagarms) {
+                    int c = nodemap.find_arm(network, opcur->tag, t);
+                    arms.push_back(c);
+                }
+                int inew = Topology::execute_split(system, network, i, arms, p0, p1);
+                
+                NodeTag tagnew = network->nodes[inew].tag;
+                if (!(tagnew == opcur->tagnew))
+                    ExaDiS_fatal("Error: inconsistent new node tag after SplitMultiNode\n");
+                nodemap.add(tagnew, inew);
+                nodemap.check_size(network,"SPLIT_MULTI_NODE");
+            }
+            else if (op->type() == typeid(OpRec::UpdateSegPlane))
+            {
+                // Udpate segment plane
+                OpRec::UpdateSegPlane* opcur = std::any_cast<OpRec::UpdateSegPlane>(op);
+                
+                SerialDisNet* network = system->get_serial_network();
+                int s = nodemap.find_seg(network, opcur->tag1, opcur->tag2);
+                network->segs[s].plane = opcur->plane;
+            }
+            else if (op->type() == typeid(OpRec::PurgeNetwork))
+            {
+                // Purge network
+                SerialDisNet* network = system->get_serial_network();
+                network->purge_network();
+                nodemap.reset(network);
+                nodemap.check_size(network,"PURGE_NETWORK");
+            }
+            else if (op->type() == typeid(OpRec::UpdateOutput))
+            {
+                // Stepping
+                istep++;
+                // Update stress
+                update_mechanics(ctrl);
+                // Output
+                output(ctrl);
+            }
+            
         } // end loop over op
     
     } // end loop over files

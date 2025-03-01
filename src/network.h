@@ -13,10 +13,11 @@
 
 #include <Kokkos_Core.hpp>
 #include "vec.h"
-#include "oprec.h"
 #include <stack>
 
 namespace ExaDiS {
+    
+class OpRec; // forward declaration
     
 enum {FREE_BOUND, PBC_BOUND};
 enum NodeConstraints {UNCONSTRAINED = 0, PINNED_NODE = 7, CORNER_NODE = 1};
@@ -35,6 +36,11 @@ struct NodeTag
     
     KOKKOS_FORCEINLINE_FUNCTION
     NodeTag(int _domain, int _index) : domain(_domain), index(_index) {}
+    
+    KOKKOS_INLINE_FUNCTION
+    bool operator==(const NodeTag& t) const {
+        return (domain == t.domain && index == t.index);
+    }
     
     KOKKOS_INLINE_FUNCTION
     bool operator<(const NodeTag& t) const {
@@ -410,18 +416,12 @@ public:
     bool discretization_node(int i);
     
     void update_node_plastic_strain(int i, const Vec3& pold, const Vec3& pnew, Mat33& dEp);
+    void move_node(int i, const Vec3& pos, Mat33& dEp);
     
-    inline void move_node(int i, const Vec3& pos, Mat33& dEp)
-    {
-        if (oprec) oprec->add_op(OpRec::MoveNode(), i, pos);
-        update_node_plastic_strain(i, nodes[i].pos, pos, dEp);
-        nodes[i].pos = cell.pbc_fold(pos);
-    }
-    
-    int split_seg(int i, const Vec3 &pos, bool update_conn=true);
-    int split_node(int i, std::vector<int> arms);
+    int split_seg(int i, const Vec3& pos, bool update_conn=true);
+    int split_node(int i, std::vector<int>& arms);
     bool merge_nodes(int n1, int n2, Mat33& dEp);
-    bool merge_nodes_position(int n1, int n2, const Vec3 &pos, Mat33& dEp);
+    bool merge_nodes_position(int n1, int n2, const Vec3& pos, Mat33& dEp);
     
     void remove_segs(std::vector<int> seglist);
     void remove_nodes(std::vector<int> nodelist);

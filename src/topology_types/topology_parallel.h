@@ -757,7 +757,7 @@ public:
                         nodeflag[network->conn[i].node[l]] = 1;
                     }
                 }
-                execute_split(system, network, i, kmax, arms, p0, p1);
+                execute_split(system, network, i, arms, p0, p1);
             }
         }
         

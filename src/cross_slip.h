@@ -35,10 +35,13 @@ public:
      *---------------------------------------------------------------------*/
     inline void update_seg_plane(SerialDisNet* network, int i, const Vec3& newplane)
     {
-        if (network->oprec)
-            network->oprec->add_op(OpRec::UpdateSegPlane(), i, newplane);
-        
         network->segs[i].plane = newplane;
+        
+        if (network->oprec) {
+            NodeTag& tag1 = network->nodes[network->segs[i].n1].tag;
+            NodeTag& tag2 = network->nodes[network->segs[i].n2].tag;
+            network->oprec->add_op(OpRec::UpdateSegPlane(tag1, tag2, newplane));
+        }
     }
 };
 

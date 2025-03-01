@@ -323,7 +323,7 @@ public:
                     if (armsets[kmax][l] == 1) 
                         arms.push_back(network->find_connection(i, nei[l]));
                 }
-                execute_split(system, network, i, kmax, arms, p0, p1);
+                execute_split(system, network, i, arms, p0, p1);
             }
             
             for (int k = 0; k < numsets; k++) free(armsets[k]);

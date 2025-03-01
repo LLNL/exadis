@@ -136,11 +136,14 @@ public:
      *    Function:     execute_split()
      *                  Execute the favorable node splitting
      *---------------------------------------------------------------------*/
-    static void execute_split(System* system, SerialDisNet* network, int i, int kmax,
-                              std::vector<int>& arms, Vec3& p0, Vec3& p1)
+    static int execute_split(System* system, SerialDisNet* network, int i,
+                             std::vector<int>& arms, Vec3& p0, Vec3& p1)
     {
-        if (system->oprec)
-            system->oprec->add_op(OpRec::SplitMultiNode(), i, kmax, p0, p1);
+        std::vector<NodeTag> tagarms;
+        if (system->oprec) {
+            for (const auto& c : arms)
+                tagarms.push_back(network->nodes[network->conn[i].node[c]].tag);
+        }
         
         int nconn = network->conn[i].num;
         int inew = network->split_node(i, arms);
@@ -167,6 +170,14 @@ public:
                 pnew = system->crystal.pick_screw_glide_plane(network, bnew);
             network->segs[snew].plane = pnew;
         }
+        
+        if (system->oprec) {
+            NodeTag& tag = network->nodes[i].tag;
+            NodeTag& tagnew = network->nodes[inew].tag;
+            system->oprec->add_op(OpRec::SplitMultiNode(tag, tagarms, p0, p1, tagnew));
+        }
+        
+        return inew;
     }
 };
 

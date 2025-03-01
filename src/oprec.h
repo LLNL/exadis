@@ -30,7 +30,9 @@
 #ifndef EXADIS_OPREC_H
 #define EXADIS_OPREC_H
 
-#include "vec.h"
+#include "network.h"
+#include <any>
+#include <sstream>
 
 #define OPREC_VERSION "1.0"
 
@@ -55,108 +57,170 @@ struct OpRec {
         UPDATE_OUTPUT
     };
     
-    struct TimeIntegrate {};
-    struct PlasticStrain {};
-    struct MoveNode {};
-    struct SplitSeg {};
-    struct MergeNodes {};
-    struct SplitMultiNode {};
-    struct UpdateSegPlane {};
-    struct PurgeNetwork {};
-    struct UpdateOutput {};
+    typedef std::any OpAny;
     
-    struct Op {
-        int optype = -1;
-        int i1, i2;
-        double d1;
-        Vec3 v1, v2;
-        
-        inline Op(int _optype) : optype(_optype) {}
-        Op(int _optype, char* line);
-        void write(FILE* fp);
+    struct TimeIntegrate {
+        int rec_pos; double dt;
+        TimeIntegrate(int _rec_pos, double _dt) : rec_pos(_rec_pos), dt(_dt) {}
+        TimeIntegrate(char* line) {
+            int type;
+            sscanf(line, "%d %d %lf",
+                   &type, &rec_pos, &dt);
+        }
+        inline void write(FILE* fp) {
+            fprintf(fp, "%d %d %e\n",
+                    TIME_INTEGRATE, rec_pos, dt);
+        }
     };
     
-    bool record = false;
-    std::vector<Op> ops;
+    struct PlasticStrain {
+        double density; Mat33 dEp; Mat33 dWp;
+        PlasticStrain(const Mat33& _dEp, const Mat33& _dWp, double _density) :
+        dEp(_dEp), dWp(_dWp), density(_density) {}
+        PlasticStrain(char* line) {
+            int type;
+            sscanf(line, "%d %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf",
+                   &type, &density,
+                   &dEp[0][0], &dEp[0][1], &dEp[0][2],
+                   &dEp[1][0], &dEp[1][1], &dEp[1][2],
+                   &dEp[2][0], &dEp[2][1], &dEp[2][2],
+                   &dWp[0][0], &dWp[0][1], &dWp[0][2],
+                   &dWp[1][0], &dWp[1][1], &dWp[1][2],
+                   &dWp[2][0], &dWp[2][1], &dEp[2][2]);
+        }
+        inline void write(FILE* fp) {
+            fprintf(fp, "%d %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e\n",
+                    PLASTIC_STRAIN, density,
+                    dEp.xx(), dEp.xy(), dEp.xz(),
+                    dEp.yx(), dEp.yy(), dEp.yz(),
+                    dEp.zx(), dEp.zy(), dEp.zz(),
+                    dWp.xx(), dWp.xy(), dWp.xz(),
+                    dWp.yx(), dWp.yy(), dWp.yz(),
+                    dWp.zx(), dWp.zy(), dWp.zz());
+        }
+    };
+    
+    struct MoveNode {
+        NodeTag tag; Vec3 pos;
+        MoveNode(const NodeTag& _tag, const Vec3& _pos) : tag(_tag), pos(_pos) {}
+        MoveNode(char* line) {
+            int type;
+            sscanf(line, "%d %d %d %lf %lf %lf",
+                   &type, &tag.domain, &tag.index, &pos.x, &pos.y, &pos.z);
+        }
+        inline void write(FILE* fp) {
+            fprintf(fp, "%d %d %d %e %e %e\n",
+                    MOVE_NODE, tag.domain, tag.index, pos.x, pos.y, pos.z);
+        }
+    };
+    
+    struct SplitSeg {
+        NodeTag tag1; NodeTag tag2; Vec3 pos; NodeTag tagnew;
+        SplitSeg(const NodeTag& _tag1, const NodeTag& _tag2, const Vec3& _pos, const NodeTag& _tagnew) :
+        tag1(_tag1), tag2(_tag2), pos(_pos), tagnew(_tagnew) {}
+        SplitSeg(char* line) {
+            int type;
+            sscanf(line, "%d %d %d %d %d %lf %lf %lf %d %d",
+                   &type, &tag1.domain, &tag1.index, &tag2.domain, &tag2.index,
+                   &pos.x, &pos.y, &pos.z, &tagnew.domain, &tagnew.index);
+        }
+        inline void write(FILE* fp) {
+            fprintf(fp, "%d %d %d %d %d %e %e %e %d %d\n",
+                    SPLIT_SEG, tag1.domain, tag1.index, tag2.domain, tag2.index,
+                    pos.x, pos.y, pos.z, tagnew.domain, tagnew.index);
+        }
+    };
+    
+    struct MergeNodes {
+        NodeTag tag1; NodeTag tag2; Vec3 pos;
+        MergeNodes(const NodeTag& _tag1, const NodeTag& _tag2, const Vec3& _pos) :
+        tag1(_tag1), tag2(_tag2), pos(_pos) {}
+        MergeNodes(char* line) {
+            int type;
+            sscanf(line, "%d %d %d %d %d %lf %lf %lf",
+                   &type, &tag1.domain, &tag1.index, &tag2.domain, &tag2.index,
+                   &pos.x, &pos.y, &pos.z);
+        }
+        inline void write(FILE* fp) {
+            fprintf(fp, "%d %d %d %d %d %e %e %e\n",
+                    MERGE_NODES, tag1.domain, tag1.index, tag2.domain, tag2.index,
+                    pos.x, pos.y, pos.z);
+        }
+    };
+    
+    struct SplitMultiNode {
+        NodeTag tag; std::vector<NodeTag> tagarms; Vec3 p0; Vec3 p1; NodeTag tagnew;
+        SplitMultiNode(const NodeTag& _tag, const std::vector<NodeTag>& _tagarms,
+                       const Vec3& _p0, const Vec3& _p1, const NodeTag& _tagnew) :
+        tag(_tag), tagarms(_tagarms), p0(_p0), p1(_p1), tagnew(_tagnew) {}
+        SplitMultiNode(char* line) {
+            int type, size;
+            std::istringstream sline(line);
+            sline >> type >> tag.domain >> tag.index >> size;
+            for (int i = 0; i < size; i++) {
+                NodeTag t;
+                sline >> t.domain >> t.index;
+                tagarms.push_back(t);
+            }
+            sline >> p0.x >> p0.y >> p0.z >> p1.x >> p1.y >> p1.z >> tagnew.domain >> tagnew.index;
+        }
+        inline void write(FILE* fp) {
+            fprintf(fp, "%d %d %d %d",
+                    SPLIT_MULTI_NODE, tag.domain, tag.index, (int)tagarms.size());
+            for (const auto& t : tagarms)
+                fprintf(fp, " %d %d", t.domain, t.index);
+            fprintf(fp, " %e %e %e %e %e %e %d %d\n",
+                    p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, tagnew.domain, tagnew.index);
+        }
+    };
+    
+    struct UpdateSegPlane {
+        NodeTag tag1; NodeTag tag2; Vec3 plane;
+        UpdateSegPlane(const NodeTag& _tag1, const NodeTag& _tag2, const Vec3& _plane) :
+        tag1(_tag1), tag2(_tag2), plane(_plane) {}
+        UpdateSegPlane(char* line) {
+            int type;
+            sscanf(line, "%d %d %d %d %d %lf %lf %lf",
+                   &type, &tag1.domain, &tag1.index, &tag2.domain, &tag2.index,
+                   &plane.x, &plane.y, &plane.z);
+        }
+        inline void write(FILE* fp) {
+            fprintf(fp, "%d %d %d %d %d %e %e %e\n",
+                    UPDATE_SEG_PLANE, tag1.domain, tag1.index, tag2.domain, tag2.index,
+                    plane.x, plane.y, plane.z);
+        }
+    };
+    
+    struct PurgeNetwork {
+        PurgeNetwork() {}
+        PurgeNetwork(char* line) {}
+        inline void write(FILE* fp) {
+            fprintf(fp, "%d\n",
+                    PURGE_NETWORK);
+        }
+    };
+    
+    struct UpdateOutput {
+        UpdateOutput() {}
+        UpdateOutput(char* line) {}
+        inline void write(FILE* fp) {
+            fprintf(fp, "%d\n",
+                    UPDATE_OUTPUT);
+        }
+    };
+    
+    
+    std::vector<OpAny> ops;
     int iop = -1;
     int filecounter = 0;
+    bool record = false;
     
     void activate() { record = true; }
     void deactivate() { record = false; }
     
-    inline void add_op(const TimeIntegrate, bool rec_pos, double dt) {
+    template<typename T>
+    inline void add_op(const T& op) {
         if (!record) return;
-        Op op(TIME_INTEGRATE);
-        op.i1 = (int)rec_pos;
-        op.d1 = dt;
-        ops.push_back(op);
-    }
-    
-    inline void add_op(const PlasticStrain, const Mat33& dEp, const Mat33& dWp, double density) {
-        if (!record) return;
-        Op op(PLASTIC_STRAIN);
-        op.d1 = density;
-        op.v1 = Vec3(dEp.xx(), dEp.yy(), dEp.zz());
-        op.v2 = Vec3(dEp.xy(), dEp.xz(), dEp.yz());
-        ops.push_back(op);
-        op.d1 = 0.0;
-        op.v1 = Vec3(dWp.xx(), dWp.yy(), dWp.zz());
-        op.v2 = Vec3(dWp.xy(), dWp.xz(), dWp.yz());
-        ops.push_back(op);
-    }
-    
-    inline void add_op(const MoveNode, int i, const Vec3& pos) {
-        if (!record) return;
-        Op op(MOVE_NODE);
-        op.i1 = i;
-        op.v1 = pos;
-        ops.push_back(op);
-    }
-    
-    inline void add_op(const SplitSeg, int i, const Vec3& pos) {
-        if (!record) return;
-        Op op(SPLIT_SEG);
-        op.i1 = i;
-        op.v1 = pos;
-        ops.push_back(op);
-    }
-    
-    inline void add_op(const MergeNodes, int n1, int n2, const Vec3& pos) {
-        if (!record) return;
-        Op op(MERGE_NODES);
-        op.i1 = n1;
-        op.i2 = n2;
-        op.v1 = pos;
-        ops.push_back(op);
-    }
-    
-    inline void add_op(const SplitMultiNode, int i, int kmax, const Vec3& p0, const Vec3& p1) {
-        if (!record) return;
-        Op op(SPLIT_MULTI_NODE);
-        op.i1 = i;
-        op.i2 = kmax;
-        op.v1 = p0;
-        op.v2 = p1;
-        ops.push_back(op);
-    }
-    
-    inline void add_op(const UpdateSegPlane, int i, const Vec3& plane) {
-        if (!record) return;
-        Op op(UPDATE_SEG_PLANE);
-        op.i1 = i;
-        op.v1 = plane;
-        ops.push_back(op);
-    }
-    
-    inline void add_op(const PurgeNetwork) {
-        if (!record) return;
-        Op op(PURGE_NETWORK);
-        ops.push_back(op);
-    }
-    
-    inline void add_op(const UpdateOutput) {
-        if (!record) return;
-        Op op(UPDATE_OUTPUT);
         ops.push_back(op);
     }
     
@@ -169,11 +233,11 @@ struct OpRec {
         return (++iop < ops.size());
     }
     
-    Op* current() {
+    OpAny* current() {
         return &ops[iop];
     }
     
-    Op* iterate() {
+    OpAny* iterate() {
         if (!step()) {
             printf("Error: oprec reached end of op list\n");
             exit(1);

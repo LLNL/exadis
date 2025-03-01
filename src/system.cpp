@@ -170,7 +170,7 @@ void System::plastic_strain()
     Kokkos::fence();
     
     if (oprec)
-        oprec->add_op(OpRec::PlasticStrain(), dEp, dWp, density);
+        oprec->add_op(OpRec::PlasticStrain(dEp, dWp, density));
 }
 
 /*---------------------------------------------------------------------------
@@ -207,10 +207,12 @@ void System::reset_glide_planes()
     if (use_oprec) use_oprec = oprec->record;
     Kokkos::DualView<int*> flag;
     Kokkos::DualView<Vec3*> val;
+    Kokkos::DualView<NodeTag*[2]> tags;
     if (use_oprec) {
         int N_local = MAX(net->Nnodes_local, net->Nsegs_local);
         flag = Kokkos::DualView<int*>("flag", N_local);
         val = Kokkos::DualView<Vec3*>("val", N_local);
+        tags = Kokkos::DualView<NodeTag*[2]>("tags", N_local);
     }
     
     // Fix glide plane violations
@@ -259,6 +261,7 @@ void System::reset_glide_planes()
                 if (use_oprec) {
                     flag.d_view(i) = 1;
                     val.d_view(i) = p;
+                    tags.d_view(i,0) = nodes[i].tag;
                 }
             }
         });
@@ -267,9 +270,10 @@ void System::reset_glide_planes()
         if (use_oprec) {
             Kokkos::deep_copy(flag.h_view, flag.d_view);
             Kokkos::deep_copy(val.h_view, val.d_view);
+            Kokkos::deep_copy(tags.h_view, tags.d_view);
             for (int i = 0; i < net->Nnodes_local; i++) {
                 if (!flag.h_view(i)) continue;
-                oprec->add_op(OpRec::MoveNode(), i, val.h_view(i));
+                oprec->add_op(OpRec::MoveNode(tags.h_view(i,0), val.h_view(i)));
             }
         }
     }
@@ -278,6 +282,7 @@ void System::reset_glide_planes()
     Crystal* cryst = &crystal;
     if (use_oprec) Kokkos::deep_copy(flag.d_view, 0);
     Kokkos::parallel_for(net->Nsegs_local, KOKKOS_LAMBDA(const int& i) {
+        auto nodes = net->get_nodes();
         auto segs = net->get_segs();
         Vec3 pold = segs[i].plane;
         Vec3 pnew = cryst->find_seg_glide_plane(net, i);
@@ -286,6 +291,8 @@ void System::reset_glide_planes()
             if (use_oprec) {
                 flag.d_view(i) = 1;
                 val.d_view(i) = pnew;
+                tags.d_view(i,0) = nodes[segs[i].n1].tag;
+                tags.d_view(i,1) = nodes[segs[i].n2].tag;
             }
         }
     });
@@ -294,9 +301,10 @@ void System::reset_glide_planes()
     if (use_oprec) {
         Kokkos::deep_copy(flag.h_view, flag.d_view);
         Kokkos::deep_copy(val.h_view, val.d_view);
+        Kokkos::deep_copy(tags.h_view, tags.d_view);
         for (int i = 0; i < net->Nsegs_local; i++) {
             if (!flag.h_view(i)) continue;
-            oprec->add_op(OpRec::UpdateSegPlane(), i, val.h_view(i));
+            oprec->add_op(OpRec::UpdateSegPlane(tags.h_view(i,0), tags.h_view(i,1), val.h_view(i)));
         }
     }
 }

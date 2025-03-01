@@ -8,6 +8,7 @@
  *-------------------------------------------------------------------------*/
 
 #include "types.h"
+#include "oprec.h"
 
 namespace ExaDiS {
 
@@ -38,6 +39,20 @@ bool SerialDisNet::discretization_node(int i)
     // Must be a 2-node with same planes on both sides if planes are defined
     // 2-node if planes are not defined
     return !constrained_node(i);
+}
+
+/*---------------------------------------------------------------------------
+ *
+ *    Function:     SerialDisNet::move_node()
+ *
+ *-------------------------------------------------------------------------*/
+void SerialDisNet::move_node(int i, const Vec3& pos, Mat33& dEp)
+{
+    update_node_plastic_strain(i, nodes[i].pos, pos, dEp);
+    nodes[i].pos = cell.pbc_fold(pos);
+    
+    if (oprec)
+        oprec->add_op(OpRec::MoveNode(nodes[i].tag, pos));
 }
 
 /*---------------------------------------------------------------------------
@@ -77,11 +92,8 @@ void SerialDisNet::update_node_plastic_strain(int i, const Vec3& pold, const Vec
  *                  Split a dislocation segment by bisection at the middle.
  *
  *-------------------------------------------------------------------------*/
-int SerialDisNet::split_seg(int i, const Vec3 &pos, bool update_conn)
+int SerialDisNet::split_seg(int i, const Vec3& pos, bool update_conn)
 {
-    if (oprec)
-        oprec->add_op(OpRec::SplitSeg(), i, pos);
-    
     int n1 = segs[i].n1;
     int n2 = segs[i].n2;
     
@@ -109,6 +121,9 @@ int SerialDisNet::split_seg(int i, const Vec3 &pos, bool update_conn)
     // triggered a realloc under the hood
     update_ptr();
     
+    if (oprec)
+        oprec->add_op(OpRec::SplitSeg(nodes[n1].tag, nodes[n2].tag, pos, nodes[nnew].tag));
+    
     return nnew;
 }
 
@@ -119,7 +134,7 @@ int SerialDisNet::split_seg(int i, const Vec3 &pos, bool update_conn)
  *                  to be transferred to the new node.
  *
  *-------------------------------------------------------------------------*/
-int SerialDisNet::split_node(int i, std::vector<int> arms)
+int SerialDisNet::split_node(int i, std::vector<int>& arms)
 {
     if (arms.size() == 0) return i;
     
@@ -184,11 +199,8 @@ int SerialDisNet::split_node(int i, std::vector<int> arms)
  *                  lying at a specified position.
  *
  *-------------------------------------------------------------------------*/
-bool SerialDisNet::merge_nodes_position(int n1, int n2, const Vec3 &pos, Mat33& dEp)
-{    
-    if (oprec)
-        oprec->add_op(OpRec::MergeNodes(), n1, n2, pos);
-    
+bool SerialDisNet::merge_nodes_position(int n1, int n2, const Vec3& pos, Mat33& dEp)
+{
     // Save original nodes in case we need to revert the merge
     SaveNode saved_node1 = save_node(n1);
     SaveNode saved_node2 = save_node(n2);
@@ -244,6 +256,9 @@ bool SerialDisNet::merge_nodes_position(int n1, int n2, const Vec3 &pos, Mat33& 
     // Update network pointers in case std::vector
     // triggered a realloc under the hood
     update_ptr();
+    
+    if (oprec)
+        oprec->add_op(OpRec::MergeNodes(nodes[n1].tag, nodes[n2].tag, pos));
     
     return error;
 }
@@ -360,6 +375,10 @@ void SerialDisNet::remove_nodes(std::vector<int> nodelist)
             conn[i].node[j] = offset[conn[i].node[j]];
 
     remove_segs(remlinks);
+    
+    // Update network pointers in case std::vector
+    // triggered a realloc under the hood
+    update_ptr();
 }
 
 /*---------------------------------------------------------------------------
@@ -372,9 +391,6 @@ void SerialDisNet::remove_nodes(std::vector<int> nodelist)
  *-------------------------------------------------------------------------*/
 void SerialDisNet::purge_network()
 {
-    if (oprec)
-        oprec->add_op(OpRec::PurgeNetwork());
-    
     // Remove links with zero Burgers vector
     std::vector<int> remlinks;
     for (int i = 0; i < number_of_segs(); i++)
@@ -386,6 +402,9 @@ void SerialDisNet::purge_network()
     for (int i = 0; i < number_of_nodes(); i++)
         if (conn[i].num == 0) remnodes.push_back(i);
     remove_nodes(remnodes);
+    
+    if (oprec)
+        oprec->add_op(OpRec::PurgeNetwork());
 }
 
 /*---------------------------------------------------------------------------
