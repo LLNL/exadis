@@ -863,7 +863,11 @@ void handle_cross_slip(ExaDisNet& disnet, CrossSlipBind& crossslipbind)
  *-------------------------------------------------------------------------*/
 class Driver : public ExaDiSApp {
 public:
+    Driver() : ExaDiSApp() {}
     Driver(const SystemBind& sysbind) : ExaDiSApp() {
+        set_system_driver(sysbind);
+    }
+    void set_system_driver(const SystemBind& sysbind) {
         system = sysbind.system;
     }
     void set_modules_driver(ForceBind& forcebind, MobilityBind& mobbind,
@@ -877,6 +881,33 @@ public:
         topology = topolbind.topology;
         remesh = remeshbind.remesh_class;
         crossslip = crossslipbind.crossslip;
+    }
+    py::dict update_state(py::dict& state) {
+        double* ptr;
+        // edir
+        py::array_t<double> pyedir(3);
+        ptr = static_cast<double*>(pyedir.request().ptr);
+        ptr[0] = edir.x; ptr[1] = edir.y; ptr[2] = edir.z;
+        state["edir"] = pyedir;
+        // applied_stress
+        py::array_t<double> pystress(6);
+        ptr = static_cast<double*>(pystress.request().ptr);
+        ptr[0] = system->extstress.xx(); ptr[1] = system->extstress.yy(); ptr[2] = system->extstress.zz();
+        ptr[3] = system->extstress.yz(); ptr[4] = system->extstress.xz(); ptr[5] = system->extstress.xy();
+        state["applied_stress"] = pystress;
+        // stress / strain / density
+        state["strain"] = strain;
+        state["stress"] = stress;
+        state["density"] = system->density;
+        py::array_t<double> pyEtot(6);
+        ptr = static_cast<double*>(pyEtot.request().ptr);
+        ptr[0] = Etot.xx(); ptr[1] = Etot.yy(); ptr[2] = Etot.zz();
+        ptr[3] = Etot.yz(); ptr[4] = Etot.xz(); ptr[5] = Etot.xy();
+        state["Etot"] = pyEtot;
+        // time
+        state["dt"] = system->realdt;
+        state["time"] = tottime;
+        return state;
     }
     void read_restart_driver(std::string restartfile) {
         ExaDiSApp::read_restart(restartfile);
@@ -1154,9 +1185,12 @@ PYBIND11_MODULE(pyexadis, m) {
     // Driver
     py::class_<ExaDiSApp>(m, "ExaDiSApp");
     py::class_<Driver, ExaDiSApp> driver(m, "Driver");
-    driver.def(py::init<const SystemBind&>(), py::arg("system"))
+    driver.def(py::init<>())
+          .def(py::init<const SystemBind&>(), py::arg("system"))
           .def_readwrite("outputdir", &Driver::outputdir, "Output directory path for the simulation")
+          .def("update_state", &Driver::update_state, "Update the state dictionary with simualtion state")
           .def("read_restart", &Driver::read_restart_driver, "Read restart file")
+          .def("set_system", &Driver::set_system_driver, "Set system for the simulation", py::arg("system"))
           .def("set_modules", &Driver::set_modules_driver, "Set modules for the simulation",
                py::arg("force"), py::arg("mobility"), py::arg("integrator"), py::arg("collision"),
                py::arg("topology"), py::arg("remesh"), py::arg("cross_slip")=CrossSlipBind())

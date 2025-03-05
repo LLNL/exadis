@@ -659,7 +659,6 @@ class SimulateNetwork:
         self.loading_mode = loading_mode
         self.srate = srate
         self.erate = erate
-        self.edir = np.array(edir)
         self.rotation = kwargs.get('rotation', None)
         self.max_step = max_step
         self.print_freq = print_freq
@@ -672,14 +671,14 @@ class SimulateNetwork:
         self.restart = kwargs.get("restart", None)
         
         self.exadis_plastic_strain = exadis_plastic_strain
-        self.Etot = np.zeros(6)
-        self.strain = 0.0
-        self.stress = 0.0
-        self.density = 0.0
+        state["Etot"] = np.zeros(6)
+        state["strain"] = 0.0
+        state["stress"] = 0.0
+        state["density"] = 0.0
         self.results = []
         
         state["applied_stress"] = np.array(applied_stress)
-        self.edir = self.edir / np.linalg.norm(self.edir)
+        state["edir"] = np.array(edir) / np.linalg.norm(np.array(edir))
     
     def write_results(self):
         """write_results: write simulation results into a file
@@ -731,8 +730,7 @@ class SimulateNetwork:
             P = np.multiply(n[:,[0,0,0,1,1,1,2,2,2]], burgs[:,[0,1,2,0,1,2,0,1,2]]) # xx,yy,zz,yz,xz,xy
             dEp = 0.5/vol*np.sum(P[:,[0,4,8,5,2,1]] + P[:,[0,4,8,7,6,3]], axis=0) # yz,xz,xy
             dWp = 0.5/vol*np.sum(P[:,[5,2,1]] - P[:,[7,6,3]], axis=0)
-            density = np.linalg.norm(r2-r1, axis=1).sum()/vol/self.burgmag**2
-            self.density = density
+            state["density"] = np.linalg.norm(r2-r1, axis=1).sum()/vol/self.burgmag**2
             
         state["dEp"] = dEp
         state["dWp"] = dWp
@@ -778,7 +776,7 @@ class SimulateNetwork:
         """
         if self.exadis_plastic_strain:
             # get values of plastic strain computed internally in exadis
-            dEp, dWp, self.density = N.get_disnet(ExaDisNet).net.get_plastic_strain()
+            dEp, dWp, state["density"] = N.get_disnet(ExaDisNet).net.get_plastic_strain()
             dEp = np.array(dEp).ravel()[[0,4,8,5,2,1]] # xx,yy,zz,yz,xz,xy
             dWp = np.array(dWp).ravel()[[5,2,1]] # yz,xz,xy
             state["dEp"] = dEp
@@ -789,11 +787,11 @@ class SimulateNetwork:
         if self.rotation:
             from scipy.spatial.transform import Rotation
             R = Rotation.from_euler('xyz', np.array([1.,-1.,1.])*dWp).as_matrix()
-            self.edir = np.matmul(R, self.edir)
-            self.edir = self.edir / np.linalg.norm(self.edir)
+            edir = np.matmul(R, state["edir"])
+            state["edir"] = edir / np.linalg.norm(edir)
         
         if self.loading_mode == 'strain_rate':
-            A0 = np.outer(self.edir, self.edir)
+            A0 = np.outer(state["edir"], state["edir"])
             A = np.hstack([np.diag(A0), A0.ravel()[[5,2,1]]])
             A2 = np.hstack([np.diag(A0), 2.0*A0.ravel()[[5,2,1]]])
             dpstrain = np.dot(dEp, A2)
@@ -801,17 +799,17 @@ class SimulateNetwork:
             Eyoung = 2.0 * state["mu"] * (1.0 + state["nu"])
             dstress = Eyoung * (dstrain - dpstrain)
             state["applied_stress"] += dstress * A
-            self.Etot += dstrain * A
-            self.strain = np.dot(self.Etot, A2)
-            self.stress = np.dot(state["applied_stress"], A2)
+            state["Etot"] += dstrain * A
+            state["strain"] = np.dot(state["Etot"], A2)
+            state["stress"] = np.dot(state["applied_stress"], A2)
             
         elif self.loading_mode in ['stress', 'stress_rate']:
             if self.loading_mode == 'stress_rate':
                 state["applied_stress"] += self.srate * state["dt"]
-            self.strain = 0.0
+            state["strain"] = 0.0
             S = np.array(state["applied_stress"][[0,5,4,5,1,3,4,3,2]]).reshape(3,3)
             Sdev = S - np.trace(S)/3.0*np.eye(3)
-            self.stress = np.sqrt(3.0/2.0*np.dot(Sdev.ravel(), Sdev.ravel())) # von Mises
+            state["stress"] = np.sqrt(3.0/2.0*np.dot(Sdev.ravel(), Sdev.ravel())) # von Mises
             
         return state
         
@@ -866,10 +864,10 @@ class SimulateNetwork:
                     Nnodes = N.num_nodes()
                     elapsed = time.perf_counter()-t0
                     if self.loading_mode == 'strain_rate':
-                        print("step = %d, nodes = %d, dt = %e, strain = %e, elapsed = %.1f sec"%(tstep+1, Nnodes, dt, self.strain, elapsed))
+                        print("step = %d, nodes = %d, dt = %e, strain = %e, elapsed = %.1f sec"%(tstep+1, Nnodes, dt, state["strain"], elapsed))
                     else:
                         print("step = %d, nodes = %d, dt = %e, time = %e, elapsed = %.1f sec"%(tstep+1, Nnodes, dt, state["time"], elapsed))
-                    self.results.append([tstep+1, self.strain, self.stress, self.density, elapsed])
+                    self.results.append([tstep+1, state["strain"], state["stress"], state["density"], elapsed])
 
             if self.vis != None and self.plot_freq != None:
                 if (tstep+1) % self.plot_freq == 0:
@@ -911,6 +909,8 @@ class SimulateNetworkPerf(SimulateNetwork):
         self.oprecwritefreq = kwargs.get('oprecwritefreq', 0)
         self.oprecfilefreq = kwargs.get('oprecfilefreq', 0)
         self.oprecposfreq = kwargs.get('oprecposfreq', 0)
+        
+        self.driver = pyexadis.Driver()
     
     def get_exadis_ctrl(self, state: dict):
         """get_exadis_ctrl: instantiate an exadis simulation control object
@@ -923,7 +923,7 @@ class SimulateNetworkPerf(SimulateNetwork):
         ctrl.loading = loading[self.loading_mode]
         if self.loading_mode == 'strain_rate':
             ctrl.erate = self.erate
-            ctrl.edir = self.edir
+            ctrl.edir = np.array(state["edir"])
         ctrl.appstress = np.array(state["applied_stress"][[0,5,4,5,1,3,4,3,2]]).reshape(3,3)
         if self.rotation is not None: ctrl.rotation = self.rotation
         ctrl.printfreq = self.print_freq
@@ -963,7 +963,8 @@ class SimulateNetworkPerf(SimulateNetwork):
         system.set_neighbor_cutoff(self.calforce.force.neighbor_cutoff)
         
         # set driver
-        driver = pyexadis.Driver(system)
+        driver = self.driver
+        driver.set_system(system)
         modules = [
             self.calforce.force,
             self.mobility.mobility,
@@ -999,6 +1000,9 @@ class SimulateNetworkPerf(SimulateNetwork):
         while stepper.iterate(driver):
             driver.step(ctrl)
         
+        # update state dictionary
+        state = driver.update_state(state)
+        
         t1 = time.perf_counter()
         system.print_timers()
         print('RUN TIME: %f sec' % (t1-t0))
@@ -1023,6 +1027,11 @@ class SimulateNetworkPerf(SimulateNetwork):
         
         # replay simulation
         driver.oprec_replay(ctrl, oprec_files)
+        
+        # update state dictionary
+        state = driver.update_state(state)
+        
+        return state
 
 
 def read_restart(state: dict, restart_file: str):

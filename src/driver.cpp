@@ -120,7 +120,7 @@ void ExaDiSApp::set_simulation(std::string restartfile)
 void ExaDiSApp::set_directory()
 {
     if (system->proc_rank == 0) {
-        if (!restart) remove_directory(outputdir);
+        if (!restart && !setup) remove_directory(outputdir);
         create_directory(outputdir);
     }
     
@@ -455,25 +455,25 @@ void ExaDiSApp::output(Control& ctrl)
         FILE *fp = fopen(filename.c_str(), "a");
         if (fp == NULL)
             ExaDiS_fatal("Error: cannot open output file %s\n", filename.c_str());
-        int init = (istep == 0);
-        if (init) fprintf(fp, "#");
+        bool header = (istep == 0);
+        if (header) fprintf(fp, "#");
         for (auto field : ctrl.props) {
-            if (field == Prop::STEP) if (init) { fprintf(fp, " Step"); } else { fprintf(fp, "%d ", istep); }
-            else if (field == Prop::STRAIN) if (init) { fprintf(fp, " Strain"); } else { fprintf(fp, "%e ", strain); }
-            else if (field == Prop::STRESS) if (init) { fprintf(fp, " Stress"); } else { fprintf(fp, "%e ", stress); }
-            else if (field == Prop::DENSITY) if (init) { fprintf(fp, " Density"); } else { fprintf(fp, "%e ", system->density); }
-            else if (field == Prop::NNODES) if (init) { fprintf(fp, " Nnodes"); } else { fprintf(fp, "%d ", system->Nnodes_total()); }
-            else if (field == Prop::NSEGS) if (init) { fprintf(fp, " Nsegs"); } else { fprintf(fp, "%d ", system->Nsegs_total()); }
-            else if (field == Prop::DT) if (init) { fprintf(fp, " dt"); } else { fprintf(fp, "%e ", system->realdt); }
-            else if (field == Prop::TIME) if (init) { fprintf(fp, " Time"); } else { fprintf(fp, "%e ", tottime); }
-            else if (field == Prop::WALLTIME) if (init) { fprintf(fp, " Walltime"); } else { fprintf(fp, "%e ", timer.seconds()); }
-            else if (field == Prop::EDIR) if (init) { fprintf(fp, " edirx ediry edirz"); } else { fprintf(fp, "%e %e %e ", edir.x, edir.y, edir.z); }
+            if (field == Prop::STEP) if (header) { fprintf(fp, " Step"); } else { fprintf(fp, "%d ", istep); }
+            else if (field == Prop::STRAIN) if (header) { fprintf(fp, " Strain"); } else { fprintf(fp, "%e ", strain); }
+            else if (field == Prop::STRESS) if (header) { fprintf(fp, " Stress"); } else { fprintf(fp, "%e ", stress); }
+            else if (field == Prop::DENSITY) if (header) { fprintf(fp, " Density"); } else { fprintf(fp, "%e ", system->density); }
+            else if (field == Prop::NNODES) if (header) { fprintf(fp, " Nnodes"); } else { fprintf(fp, "%d ", system->Nnodes_total()); }
+            else if (field == Prop::NSEGS) if (header) { fprintf(fp, " Nsegs"); } else { fprintf(fp, "%d ", system->Nsegs_total()); }
+            else if (field == Prop::DT) if (header) { fprintf(fp, " dt"); } else { fprintf(fp, "%e ", system->realdt); }
+            else if (field == Prop::TIME) if (header) { fprintf(fp, " Time"); } else { fprintf(fp, "%e ", tottime); }
+            else if (field == Prop::WALLTIME) if (header) { fprintf(fp, " Walltime"); } else { fprintf(fp, "%e ", timer.seconds()); }
+            else if (field == Prop::EDIR) if (header) { fprintf(fp, " edirx ediry edirz"); } else { fprintf(fp, "%e %e %e ", edir.x, edir.y, edir.z); }
             else if (field == Prop::RORIENT) {
                 Mat33 R = system->crystal.R;
-                if (init) fprintf(fp, " Rxx Rxy Rxz Ryx Ryy Ryz Rzx Rzy Rzz"); 
+                if (header) fprintf(fp, " Rxx Rxy Rxz Ryx Ryy Ryz Rzx Rzy Rzz"); 
                 else fprintf(fp, "%e %e %e %e %e %e %e %e %e ", R.xx(), R.xy(), R.xz(), R.yx(), R.yy(), R.yz(), R.zx(), R.zy(), R.zz());
             } else if (field == Prop::ALLSTRESS) {
-                if (init) fprintf(fp, " Sxx Syy Szz Sxy Sxz Syz"); 
+                if (header) fprintf(fp, " Sxx Syy Szz Sxy Sxz Syz"); 
                 else fprintf(fp, "%e %e %e %e %e %e ", system->extstress.xx(), system->extstress.yy(), system->extstress.zz(), 
                                                        system->extstress.xy(), system->extstress.xz(), system->extstress.yz());
             }
@@ -549,16 +549,17 @@ bool ExaDiSApp::Stepper::iterate(ExaDiSApp* exadis)
         exadis->init = false;
     }
     
-    exadis->istep++;
+    bool iterate = false;
     if (exadis->system->Nnodes_total() == 0 || exadis->system->Nsegs_total() == 0) {
         ExaDiS_log("No dislocation in the system. Stopping.\n");
-        return false;
+        iterate = false;
     }
-    if (type == NUM_STEPS || type == MAX_STEPS) return (exadis->istep <= maxsteps);
-    if (type == MAX_STRAIN) return (fabs(exadis->strain) < stopval);
-    if (type == MAX_TIME) return (exadis->tottime < stopval);
-    if (type == MAX_WALLTIME) return (exadis->timer.seconds() < stopval);
-    return false;
+    else if (type == NUM_STEPS || type == MAX_STEPS) iterate = (exadis->istep < maxsteps);
+    else if (type == MAX_STRAIN) iterate = (fabs(exadis->strain) < stopval);
+    else if (type == MAX_TIME) iterate = (exadis->tottime < stopval);
+    else if (type == MAX_WALLTIME) iterate = (exadis->timer.seconds() < stopval);
+    if (iterate) exadis->istep++;
+    return iterate;
 }
 
 /*---------------------------------------------------------------------------
@@ -596,6 +597,7 @@ void ExaDiSApp::initialize(Control& ctrl, bool check_modules)
     }
     
     init = true;
+    restart = false;
     
     // Initial output at step 0
     output(ctrl);
