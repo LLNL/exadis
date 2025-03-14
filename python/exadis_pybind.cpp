@@ -1139,7 +1139,7 @@ PYBIND11_MODULE(pyexadis, m) {
           py::arg("params"), py::arg("intparams"), py::arg("force"), py::arg("mobility"));
     m.def("make_integrator_rkf_multi", &make_integrator<IntegratorMulti<IntegratorRKF> >, "Instantiate a multi-step RKF integrator",
           py::arg("params"), py::arg("intparams"), py::arg("force"), py::arg("mobility"));
-    m.def("make_integrator_subclycing", &make_integrator<IntegratorSubcycling>, "Instantiate a subcycling integrator",
+    m.def("make_integrator_subcycling", &make_integrator<IntegratorSubcycling>, "Instantiate a subcycling integrator",
           py::arg("params"), py::arg("intparams"), py::arg("force"), py::arg("mobility"));
     m.def("integrate", &integrate, "Wrapper to perform a time-integration step",
           py::arg("net"), py::arg("integrator"), py::arg("nodevels"), py::arg("applied_stress"), py::arg("nodetags")=std::vector<NodeTag>());

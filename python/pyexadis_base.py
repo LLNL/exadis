@@ -502,8 +502,8 @@ class TimeIntegration:
             mobility, self.mobility_python = get_exadis_mobility(mobility_module, state, params)
             
             intparams = pyexadis.Integrator_Subcycling_Params(rgroups, rtolth, rtolrel, fstats)
-            self.integrator = pyexadis.make_integrator_subclycing(params=params, intparams=intparams, 
-                                                                 force=force, mobility=mobility)
+            self.integrator = pyexadis.make_integrator_subcycling(params=params, intparams=intparams, 
+                                                                  force=force, mobility=mobility)
         else:
             raise ValueError('Unknown integrator %s' % integrator)
         
