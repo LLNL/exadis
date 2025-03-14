@@ -120,6 +120,7 @@ std::vector<int> map_node_tags(DeviceDisNet* net, std::vector<NodeTag>& tags);
 void set_positions(System* system, std::vector<Vec3>& pos);
 void set_forces(System* system, std::vector<Vec3>& forces, std::vector<NodeTag>& tags);
 void set_velocities(System* system, std::vector<Vec3>& vels, std::vector<NodeTag>& tags);
+std::vector<Vec3> get_positions(System* system);
 std::vector<Vec3> get_forces(System* system);
 std::vector<Vec3> get_velocities(System* system);
 
@@ -179,14 +180,15 @@ struct ExaDisNet {
     std::vector<std::vector<double> > get_segs_array() { return system->get_serial_network()->get_segs_array(); }
     std::vector<Vec3> get_forces() { return ::get_forces(system); }
     std::vector<Vec3> get_velocities() { return ::get_velocities(system); }
+    py::tuple get_plastic_strain() { return py::make_tuple(system->dEp, system->dWp, system->density); }
     
     void set_positions(std::vector<Vec3>& pos) { ::set_positions(system, pos); }
     void set_forces(std::vector<Vec3>& forces, std::vector<NodeTag>& tags) { ::set_forces(system, forces, tags); }
     void set_velocities(std::vector<Vec3>& vels, std::vector<NodeTag>& tags) { ::set_velocities(system, vels, tags); }
     
-    void write_data(std::string filename) { system->get_serial_network()->write_data(filename); }
+    std::vector<std::vector<int> > physical_links() { return system->get_serial_network()->physical_links(); }
     
-    py::tuple get_plastic_strain() { return py::make_tuple(system->dEp, system->dWp, system->density); }
+    void write_data(std::string filename) { system->get_serial_network()->write_data(filename); }
 };
 
 struct SystemBind : ExaDisNet {

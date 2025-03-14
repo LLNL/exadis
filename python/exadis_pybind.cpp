@@ -1007,7 +1007,8 @@ PYBIND11_MODULE(pyexadis, m) {
         .def("set_forces", &ExaDisNet::set_forces, "Set the list of node forces (fx,fy,fz) of the network")
         .def("set_velocities", &ExaDisNet::set_velocities, "Set the list of node velocities (vx,vy,vz) of the network")
         .def("write_data", &ExaDisNet::write_data, "Write network in ParaDiS format")
-        .def("get_plastic_strain", &ExaDisNet::get_plastic_strain, "Returns plastic strain as computed since the last integration step");
+        .def("get_plastic_strain", &ExaDisNet::get_plastic_strain, "Returns plastic strain as computed since the last integration step")
+        .def("physical_links", &ExaDisNet::physical_links, "Returns the list of segments for each physical dislocation link");
         
     py::class_<SystemBind, ExaDisNet>(m, "System")
         .def(py::init<ExaDisNet, Params>())
