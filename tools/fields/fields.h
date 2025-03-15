@@ -80,12 +80,13 @@ struct FieldGrid {
     typedef typename F::T_val T_val;
     Kokkos::View<T_val***, Kokkos::LayoutRight, Kokkos::SharedSpace> gridval;
     int Ng[3];
+    bool reg_conv;
     
     typedef typename F::Params Params;
     FieldParams<F> params;
     Cell cell;
     
-    FieldGrid(N* net, Params p, std::vector<int> _Ng, std::vector<int> Nimg={1,1,1})
+    FieldGrid(N* net, Params p, std::vector<int> _Ng, std::vector<int> Nimg={1,1,1}, bool _reg_conv=true)
     {
         if (_Ng.size() != 3)
             ExaDiS_fatal("Error: number of grid points must be a list of 3 integers\n");
@@ -96,6 +97,8 @@ struct FieldGrid {
             Ng[i] = _Ng[i];
             
         Kokkos::resize(gridval, Ng[0], Ng[1], Ng[2]);
+        
+        reg_conv = _reg_conv;
         
         params.Nimg[0] = (net->cell.xpbc == PBC_BOUND) ? Nimg[0] : 0;
         params.Nimg[1] = (net->cell.ypbc == PBC_BOUND) ? Nimg[1] : 0;
@@ -137,7 +140,8 @@ struct FieldGrid {
         Kokkos::parallel_for(policy({0, 0, 0}, {Ng[0], Ng[1], Ng[2]}), ComputeGrid(*this, net));
         Kokkos::fence();
         
-        regularize_convergence(net);
+        if (reg_conv)
+            regularize_convergence(net);
     }
     
     struct RegularizeConvergence {

@@ -21,10 +21,10 @@ using namespace ExaDiS::tools;
  *
  *-------------------------------------------------------------------------*/
 template<class N>
-std::vector<Mat33> stress_field_grid(N* net, StressIso::Params params,
-                                     std::vector<int> Ndim, std::vector<int> Nimg={1,1,1})
+std::vector<Mat33> stress_field_grid(N* net, StressIso::Params params, std::vector<int> Ndim,
+                                     std::vector<int> Nimg={1,1,1}, bool reg_conv=true)
 {
-    StressFieldGrid<N> stress_field(net, params, Ndim, Nimg);
+    StressFieldGrid<N> stress_field(net, params, Ndim, Nimg, reg_conv);
     
     std::vector<Mat33> stressgrid(Ndim[0]*Ndim[1]*Ndim[2]);
     for (int kx = 0; kx < Ndim[0]; kx++) {
@@ -53,9 +53,10 @@ std::vector<Mat33> stress_field_grid(N* net, StressIso::Params params, int Ngrid
  *
  *-------------------------------------------------------------------------*/
 template<class N>
-std::vector<Mat33> stress_field_points(N* net, StressIso::Params params, std::vector<Vec3>& p)
+std::vector<Mat33> stress_field_points(N* net, StressIso::Params params, std::vector<Vec3>& p,
+                                       std::vector<int> Nimg={1,1,1})
 {
-    FieldPoints<StressIso, N> stress_field(net, params, p);
+    FieldPoints<StressIso, N> stress_field(net, params, p, Nimg);
     
     std::vector<Mat33> stresspoints(p.size());
     for (int i = 0; i < p.size(); i++) {
@@ -71,9 +72,9 @@ std::vector<Mat33> stress_field_points(N* net, StressIso::Params params, std::ve
  *
  *-------------------------------------------------------------------------*/
 template<class N>
-Mat33 stress_field_point(N* net, StressIso::Params params, Vec3& p)
+Mat33 stress_field_point(N* net, StressIso::Params params, Vec3& p, std::vector<int> Nimg={1,1,1})
 {
-    return field_point<StressIso, N>(net, params, p);
+    return field_point<StressIso, N>(net, params, p, Nimg);
 }
 
 /*---------------------------------------------------------------------------
@@ -136,6 +137,8 @@ int main(int argc, char* argv[])
     double NU = 0.3;
     double a = 1.0;
     int Nim = 1;
+    bool pbc[3] = {1,1,1};
+    bool reg_conv = 1;
     std::string outname = "stress.dat";
     
     cliParser parser(argc, argv);
@@ -160,7 +163,7 @@ int main(int argc, char* argv[])
         "Grid resolution [N,N,N] to compute the stress field"
     );
     parser.add_option(cliParser::OPTIONAL, 
-        cliParser::INT, &Nxyz, 3, "-Nxyz", "--ngridxyz", 
+        cliParser::INT, &Nxyz[0], 3, "-Nxyz", "--ngridxyz", 
         "Grid resolution [Nx,Ny,Nz] to compute the stress field"
     );
     parser.add_option(cliParser::OPTIONAL, 
@@ -171,9 +174,21 @@ int main(int argc, char* argv[])
         cliParser::INT, &Nim, 1, "-Nimg", "--nimages", 
         "Number of periodic images to compute the stress field"
     );
+    parser.add_option(cliParser::OPTIONAL, 
+        cliParser::BOOL, &pbc[0], 3, "-pbc", "--pbc_flags", 
+        "Periodic boundary conditions along the 3 directions"
+    );
+    parser.add_option(cliParser::OPTIONAL, 
+        cliParser::BOOL, &reg_conv, 1, "-reg", "--regularize_convergence", 
+        "Apply regularization of the conditional convergence"
+    );
     parser.parse(cliParser::VERBOSE);
     
     SerialDisNet* net = read_paradis(datafile.c_str());
+    if (!pbc[0]) net->cell.xpbc = FREE_BOUND;
+    if (!pbc[1]) net->cell.ypbc = FREE_BOUND;
+    if (!pbc[2]) net->cell.zpbc = FREE_BOUND;
+    
     DisNetManager* net_mngr = make_network_manager(net);
     DeviceDisNet* d_net = net_mngr->get_device_network();
     
@@ -188,11 +203,11 @@ int main(int argc, char* argv[])
         
     std::vector<int> Nimg = {Nim,Nim,Nim};
     
-    printf("Compute field on Ngrid = [%d x %d x %d] (Nimg = [%d x %d x %d])...\n",
-    Ngrid[0], Ngrid[1], Ngrid[2], Nimg[0], Nimg[1], Nimg[2]);
+    printf("Compute field on Ngrid = [%d x %d x %d] (Nimg = %d, reg = %d)...\n",
+    Ngrid[0], Ngrid[1], Ngrid[2], Nim, reg_conv);
     
     StressIso::Params params(MU, NU, a);
-    std::vector<Mat33> stressgrid = stress_field_grid(d_net, params, Ngrid, Nimg);
+    std::vector<Mat33> stressgrid = stress_field_grid(d_net, params, Ngrid, Nimg, reg_conv);
     
     Kokkos::fence();
     printf(" Compute time: %e sec\n", timer.seconds());
