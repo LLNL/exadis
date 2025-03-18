@@ -1052,8 +1052,10 @@ PYBIND11_MODULE(pyexadis, m) {
         .def(py::init<int>(), py::arg("multi"))
         .def(py::init<IntegratorRKF::Params, int>(), py::arg("intparams"), py::arg("multi"));
     py::class_<IntegratorSubcycling::Params>(m, "Integrator_Subcycling_Params")
-        .def(py::init<std::vector<double>, double, double, std::string>(),
-        py::arg("rgroups"), py::arg("rtolth")=1.0, py::arg("rtolrel")=0.1, py::arg("fstats")="");
+        .def(py::init([](std::vector<double> rgroups, double rtolth, double rtolrel, std::string fstats) {
+            IntegratorSubcycling::Params* p = new IntegratorSubcycling::Params(rgroups, IntegratorRKFSubcycling::Params(rtolth, rtolrel));
+            p->fstats = fstats; return p;
+        }), py::arg("rgroups"), py::arg("rtolth")=1.0, py::arg("rtolrel")=0.1, py::arg("fstats")="");
         
     py::class_<Topology::Params>(m, "Topology_Params")
         .def(py::init<double>(), py::arg("splitMultiNodeAlpha"));

@@ -22,18 +22,19 @@ namespace ExaDiS {
  *-------------------------------------------------------------------------*/
 class IntegratorRKF : public Integrator {
 protected:
-    Force *force;
-    Mobility *mobility;
+    Force* force;
+    Mobility* mobility;
     
     double newdt, maxdt;
     double rtol, rtolth, rtolrel;
     double dtIncrementFact, dtDecrementFact, dtVariableAdjustment, dtExponent;
     
-    System *s;
-    DeviceDisNet *network;
+    System* s;
+    DeviceDisNet* network;
     T_v rkf[6];
     T_v vcurr;
-    Kokkos::View<double*> errmax;
+    double errmax[2];
+    int incrDelta, iTry;
     int step;
     
     // Coefficients for error calculation
@@ -99,7 +100,7 @@ public:
     }
     
     KOKKOS_INLINE_FUNCTION
-    void operator() (TagErrorNodes, const int &i) const {
+    void operator() (TagErrorNodes, const int& i, double& emax0, double& emax1) const {
         auto nodes = network->get_nodes();
         auto cell = network->cell;
         
@@ -110,7 +111,7 @@ public:
             err += er[j] * rkf[j](i);
         err = newdt * err;
         double errnet = err.norm();
-        Kokkos::atomic_max(&errmax(0), errnet);
+        if (errnet > emax0) emax0 = errnet;
         
         Vec3 xold = s->xold(i);
         xold = cell.pbc_position(nodes[i].pos, xold);
@@ -124,7 +125,7 @@ public:
                 relerr = 2*rtolrel;
             }
         }
-        Kokkos::atomic_max(&errmax(1), relerr);
+        if (relerr > emax1) emax1 = relerr;
     }
     
     KOKKOS_INLINE_FUNCTION
@@ -133,16 +134,47 @@ public:
         nodes[i].v = vcurr(i);
     }
     
-    void rkf_step(int i)
+    virtual inline void rkf_step(int i)
     {
         step = i;
         Kokkos::parallel_for("IntegratorRKF::RKFStep",
             Kokkos::RangePolicy<TagRKFStep>(0, network->Nnodes_local), *this
         );
         Kokkos::fence();
+        
+        if (i < 5) {
+            force->compute(s);
+            mobility->compute(s);
+        }
     }
     
-    virtual void integrate(System *system)
+    virtual inline void compute_error()
+    {
+        Kokkos::parallel_reduce("IntegratorRKF::ErrorNodes",
+            Kokkos::RangePolicy<TagErrorNodes>(0, network->Nnodes_local), *this,
+            Kokkos::Max<double>(errmax[0]), Kokkos::Max<double>(errmax[1])
+        );
+        Kokkos::fence();
+    }
+    
+    virtual inline void non_convergent()
+    {
+        // We need to start from the old velocities. So, first,
+        // substitute them with the old ones.
+        Kokkos::parallel_for("IntegratorRKF::RestoreVels",
+            Kokkos::RangePolicy<TagRestoreVels>(0, network->Nnodes_local), *this
+        );
+        Kokkos::fence();
+        
+        incrDelta = 0;
+        newdt *= dtDecrementFact;
+        
+        if ((newdt < 1.0e-20) /*&& (system->proc_rank == 0)*/)
+            ExaDiS_fatal("IntegratorRKF(): Timestep has dropped below\n"
+                         "minimal threshold to %e. Aborting!\n", newdt);
+    }
+    
+    virtual void integrate(System* system)
     {
         Kokkos::fence();
         system->timer[system->TIMER_INTEGRATION].start();
@@ -165,10 +197,8 @@ public:
         Kokkos::fence();
 
         int convergent = 0;
-        int incrDelta = 1;
-        int iTry = -1;
-        errmax = Kokkos::View<double*>("IntegratorRKF:errmax", 2);
-        auto h_errmax = Kokkos::create_mirror_view(errmax);
+        incrDelta = 1;
+        iTry = -1;
         
         while (!convergent) {
             iTry++;
@@ -176,41 +206,22 @@ public:
             // Apply the Runge-Kutta-Fehlberg integrator one step at a time
             for (int i = 0; i < 5; i++) {
                 rkf_step(i);
-                force->compute(system);
-                mobility->compute(system);
             }
             
             // Calculate the error
-            Kokkos::deep_copy(errmax, 0.0);
-            Kokkos::parallel_for("IntegratorRKF::ErrorNodes",
-                Kokkos::RangePolicy<TagErrorNodes>(0, network->Nnodes_local), *this
-            );
-            Kokkos::fence();
-            Kokkos::deep_copy(h_errmax, errmax);
+            compute_error();
             
             // If the error is within the tolerance, we've reached
             // convergence so we can accept this dt. Otherwise
             // reposition the nodes and try again.
-            if (h_errmax(0) < rtol && h_errmax(1) < rtolrel) {
+            if (errmax[0] < rtol && errmax[1] < rtolrel) {
                 // Calculate final positions
                 rkf_step(5);
                 convergent = 1;
             }
             
             if (!convergent) {
-                // We need to start from the old velocities. So, first,
-                // substitute them with the old ones.
-                Kokkos::parallel_for("IntegratorRKF::RestoreVels",
-                    Kokkos::RangePolicy<TagRestoreVels>(0, network->Nnodes_local), *this
-                );
-                Kokkos::fence();
-                
-                incrDelta = 0;
-                newdt *= dtDecrementFact;
-                
-                if ((newdt < 1.0e-20) /*&& (system->proc_rank == 0)*/)
-                    ExaDiS_fatal("IntegratorRKF(): Timestep has dropped below\n"
-                                 "minimal threshold to %e. Aborting!\n", newdt);
+                non_convergent();
             }
             
         } // while (!convergent)
@@ -221,7 +232,7 @@ public:
             if (dtVariableAdjustment) {
                 double tmp1, tmp2, tmp3, tmp4, factor;
                 tmp1 = pow(dtIncrementFact, dtExponent);
-                tmp2 = h_errmax(0)/rtol;
+                tmp2 = errmax[0]/rtol;
                 tmp3 = 1.0 / dtExponent;
                 tmp4 = pow(1.0/(1.0+(tmp1-1.0)*tmp2), tmp3);
                 factor = dtIncrementFact * tmp4;

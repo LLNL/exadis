@@ -21,18 +21,19 @@ namespace ExaDiS {
  *
  *-------------------------------------------------------------------------*/
 class IntegratorTrapezoid : public Integrator {
-private:
-    Force *force;
-    Mobility *mobility;
+protected:
+    Force* force;
+    Mobility* mobility;
     
     double newdt, currdt, maxdt;
     double rtol;
     double dtIncrementFact, dtDecrementFact, dtVariableAdjustment, dtExponent;
     
-    System *s;
-    DeviceDisNet *network;
+    System* s;
+    DeviceDisNet* network;
     T_v vcurr;
-    Kokkos::View<double*> errmax;
+    double errmax;
+    int incrDelta, iTry;
     
 public:
     struct Params {};
@@ -72,7 +73,7 @@ public:
     }
     
     KOKKOS_INLINE_FUNCTION
-    void operator() (TagErrorNodes, const int &i) const {
+    void operator() (TagErrorNodes, const int& i, double& emax) const {
         auto nodes = network->get_nodes();
         auto cell = network->cell;
         
@@ -84,7 +85,7 @@ public:
         err = fmax(err, fabs(verr.x));
         err = fmax(err, fabs(verr.y));
         err = fmax(err, fabs(verr.z));
-        Kokkos::atomic_max(&errmax(0), err);
+        if (err > emax) emax = err;
     }
     
     KOKKOS_INLINE_FUNCTION
@@ -98,6 +99,24 @@ public:
         Vec3 dx = x - xold - (0.5 * newdt * (nodes[i].v + vcurr(i)));
         Vec3 pos = x - dx;
         nodes[i].pos = cell.pbc_fold(pos);
+    }
+    
+    virtual inline void compute_error()
+    {
+        Kokkos::parallel_reduce("IntegratorTrapezoid::ErrorNodes",
+            Kokkos::RangePolicy<TagErrorNodes>(0, network->Nnodes_local), *this,
+            Kokkos::Max<double>(errmax)
+        );
+        Kokkos::fence();
+    }
+    
+    virtual inline void non_convergent()
+    {
+        newdt *= dtDecrementFact;
+        
+        if ((newdt < 1.0e-20) /*&& (system->proc_rank == 0)*/)
+            ExaDiS_fatal("IntegratorTrapezoid(): Timestep has dropped below\n"
+                         "minimal threshold to %e. Aborting!\n", newdt);
     }
     
     void integrate(System *system)
@@ -121,11 +140,11 @@ public:
 
         int convergent = 0;
         int maxIterations = 2;
-        int incrDelta = 1;
-        errmax = Kokkos::View<double*>("IntegratorTrapezoid:errmax", 1);
-        auto h_errmax = Kokkos::create_mirror_view(errmax);
+        incrDelta = 1;
+        iTry = -1;
         
         while (!convergent) {
+            iTry++;
             
             // Advance nodes
             currdt = newdt;
@@ -139,14 +158,9 @@ public:
                 force->compute(system);
                 mobility->compute(system);
                 
-                Kokkos::deep_copy(errmax, 0.0);
-                Kokkos::parallel_for("IntegratorTrapezoid::ErrorNodes",
-                    Kokkos::RangePolicy<TagErrorNodes>(0, network->Nnodes_local), *this
-                );
-                Kokkos::fence();
-                Kokkos::deep_copy(h_errmax, errmax);
+                compute_error();
                 
-                if (h_errmax(0) < rtol) {
+                if (errmax < rtol) {
                     convergent = 1;
                     break;
                 } else {
@@ -162,11 +176,7 @@ public:
             } // for (iter = 0; ...)
             
             if (!convergent) {
-                newdt *= dtDecrementFact;
-                
-                if ((newdt < 1.0e-20) /*&& (system->proc_rank == 0)*/)
-                    ExaDiS_fatal("IntegratorTrapezoid(): Timestep has dropped below\n"
-                                 "minimal threshold to %e. Aborting!\n", newdt);
+                non_convergent();
             }
             
         } // while (!convergent)
@@ -177,7 +187,7 @@ public:
             if (dtVariableAdjustment) {
                 double tmp1, tmp2, tmp3, tmp4, factor;
                 tmp1 = pow(dtIncrementFact, dtExponent);
-                tmp2 = h_errmax(0)/rtol;
+                tmp2 = errmax/rtol;
                 tmp3 = 1.0 / dtExponent;
                 tmp4 = pow(1.0/(1.0+(tmp1-1.0)*tmp2), tmp3);
                 factor = dtIncrementFact * tmp4;

@@ -30,8 +30,8 @@ namespace ExaDiS {
  *                  are stored for groups > 0 and summed up when group 0 is
  *                  selected. This allows to integrate nodes under the total
  *                  force during each subcycle, and makes it compatible with
- *                  arbitrary mobility laws. The original subcycling scheme
- *                  is used when drift=0 (default).
+ *                  arbitrary (non-linear) mobility laws. The original
+ *                  subcycling scheme is used when drift=0 (default).
  *                  
  *                  Eventually this class could be templated to be
  *                  more generic and offer more flexibility on the type of
@@ -50,7 +50,6 @@ public:
     FSegSeg* fsegseg;
     int group;
     
-    // Should template this eventually...
     static const int Ngroups = NGROUPS;
     Kokkos::View<Vec3*> fgroup[Ngroups-1];
     
@@ -283,17 +282,17 @@ struct SegSegGroups
             int n4 = segs[s.s2].n2;
             // Flag the interaction to be moved to the lower group
             // if any of its nodes is flagged 2
-            if ((ssg->nflag[n1]-2)*(ssg->nflag[n2]-2)*(ssg->nflag[n3]-2)*(ssg->nflag[n4]-2) == 0) {
-                if (ssg->gdist2[i] <= rgs && ssg->ssl->segsegflag[i] == 1) {
-                    ssg->ssl->segsegflag[i] = 0;
-                    Kokkos::atomic_increment(&ssg->countmove(0));
+            if ((ssg->nflag(n1)-2)*(ssg->nflag(n2)-2)*(ssg->nflag(n3)-2)*(ssg->nflag(n4)-2) == 0) {
+                if (ssg->gdist2(i) <= rgs && ssg->ssl->segsegflag(i) == 1) {
+                    ssg->ssl->segsegflag(i) = 0;
+                    Kokkos::atomic_inc(&ssg->countmove(0));
                 }
             }
         }
         
         KOKKOS_INLINE_FUNCTION
         void operator() (TagMove, const int& i) const {
-            if (!ssg->ssl->segsegflag[i]) {
+            if (!ssg->ssl->segsegflag(i)) {
                 int idx = Kokkos::atomic_fetch_add(&ssg->gcount(Ngroups-2), 1);
                 ssg->segseglist[Ngroups-2].d_view(idx) = ssg->segseglist[Ngroups-1].d_view(i);
             }
@@ -311,11 +310,13 @@ struct SegSegGroups
     void update_interactions() {
         auto h_countmove = Kokkos::create_mirror_view(countmove);
         Kokkos::deep_copy(h_countmove, countmove);
-        Nsegseg[Ngroups-2] += h_countmove(0);
-        Kokkos::resize(segseglist[Ngroups-2], Nsegseg[Ngroups-2]);
-        using policy = Kokkos::RangePolicy<typename MoveInteractions::TagMove>;
-        Kokkos::parallel_for(policy(0, Nsegseg[Ngroups-1]), MoveInteractions(this));
-        Kokkos::fence();
+        if (h_countmove(0) > 0) {
+            Nsegseg[Ngroups-2] += h_countmove(0);
+            Kokkos::resize(segseglist[Ngroups-2], Nsegseg[Ngroups-2]);
+            using policy = Kokkos::RangePolicy<typename MoveInteractions::TagMove>;
+            Kokkos::parallel_for(policy(0, Nsegseg[Ngroups-1]), MoveInteractions(this));
+            Kokkos::fence();
+        }
     }
 };
 
@@ -356,15 +357,89 @@ struct BuildSegSegGroups {
                 if (dist2 >= 0.0 && dist2 < cutoff2) {
                     int groupid = groups->find_group(dist2);
                     if (count_only) {
-                        Kokkos::atomic_increment(&groups->gcount(groupid));
+                        Kokkos::atomic_inc(&groups->gcount(groupid));
                     } else {
                         int idx = Kokkos::atomic_fetch_add(&groups->gcount(groupid), 1);
                         groups->segseglist[groupid].d_view(idx) = SegSeg(i, j);
-                        if (groupid == groups->Ngroups-1) groups->gdist2[idx] = dist2;
+                        if (groupid == groups->Ngroups-1) groups->gdist2(idx) = dist2;
                     }
                 }
             }
         }
+    }
+};
+
+/*---------------------------------------------------------------------------
+ *
+ *    Class:        IntegratorSubcyclingBase
+ *                  Base class of a subcycling-enabled base integrator
+ *
+ *-------------------------------------------------------------------------*/
+class IntegratorSubcyclingBase {
+protected:
+    bool subcycling;
+    static const int Ngroups = NGROUPS;
+    SegSegGroups<Ngroups>* subgroups;
+
+public:
+    double nextdtsub[Ngroups], realdtsub[Ngroups];
+    int group = -1;
+    
+    IntegratorSubcyclingBase(System* system) : subcycling(false), group(0) {}
+    
+    IntegratorSubcyclingBase(System* system, SegSegGroups<Ngroups>* _subgroups) :
+    subcycling(true) {
+        subgroups = _subgroups;
+        for (int i = 0; i < Ngroups; i++)
+            nextdtsub[i] = system->params.nextdt;
+    }
+    
+    virtual void init_subcycling_step(System* system) {}
+    virtual void finish_subcycling_step(System* system) {}
+    
+    template<class I>
+    void integrate(System* system, I* integrator) {
+        double realdt = system->realdt;
+        integrator->nextdt = nextdtsub[group];
+        if (group < Ngroups-1)
+            integrator->nextdt = fmin(realdt, integrator->nextdt);
+        
+        integrator->I::Base::integrate(system);
+        
+        realdtsub[group] = system->realdt;
+        nextdtsub[group] = integrator->nextdt;
+        if (group < Ngroups-1) system->realdt = realdt;
+    }
+    
+    void flag_oscillating_nodes(DeviceDisNet* net) {
+        if (group != Ngroups-1) {
+            Kokkos::View<int*>& nflag = subgroups->nflag;
+            Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int& i) {
+                auto nodes = net->get_nodes();
+                if (nflag(i) <= 0) nodes[i].v = Vec3(0.0);
+            });
+            Kokkos::fence();
+        }
+    }
+    
+    void forward_progress_check(DeviceDisNet* net, T_v& vold) {
+        Kokkos::View<int*>& nflag = subgroups->nflag;
+        Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int& i) {
+            auto nodes = net->get_nodes();
+            if (nflag(i) <= 0) return;
+            if (dot(vold(i), nodes[i].v) < 0.0) nflag(i) = 0;
+        });
+        Kokkos::fence();
+    }
+    
+    void write_restart_sub(FILE* fp) { 
+        for (int i = 0; i < Ngroups; i++)
+            fprintf(fp, "nextdtsub%d %.17g\n", i, nextdtsub[i]);
+    }
+    void read_restart_sub(FILE* fp) {
+        int j;
+        for (int i = 0; i < Ngroups; i++)
+            fscanf(fp, "nextdtsub%d %lf\n", &j, &nextdtsub[i]);
     }
 };
 
@@ -375,47 +450,40 @@ struct BuildSegSegGroups {
  *                  required during integration of subgroups.
  *
  *-------------------------------------------------------------------------*/
-template<int Ng>
-class IntegratorRKFSubcycling : public IntegratorRKF {
+class IntegratorRKFSubcycling : public IntegratorRKF,
+                                public IntegratorSubcyclingBase {
 private:
-    int Ngroups = Ng;
-    SegSegGroups<Ng>* subgroups;
     int nTry = 3;
     
 public:
-    double nextdtsub[Ng-1], realdtsub[Ng-1];
-    int group = -1;
+    typedef IntegratorRKF Base;
+    typedef IntegratorSubcyclingBase Subcycl;
     
     struct Params {
         double rtolth, rtolrel;
-        int Ngroups;
-        SegSegGroups<Ng>* subgroups;
-        Params(double _rtolth, double _rtolrel, SegSegGroups<Ng>* _subgroups) : 
-        rtolth(_rtolth), rtolrel(_rtolrel), subgroups(_subgroups) {}
+        Params() { rtolth = 1.0; rtolrel = 0.1; }
+        Params(double _rtolth, double _rtolrel) : rtolth(_rtolth), rtolrel(_rtolrel) {}
     };
     
-    IntegratorRKFSubcycling(System* system, Force* _force, Mobility* _mobility, Params params) : 
-    IntegratorRKF(system, _force, _mobility) {
+    IntegratorRKFSubcycling(System* system, Force* _force, Mobility* _mobility,
+                            SegSegGroups<Ngroups>* _subgroups, Params params) : 
+    IntegratorRKF(system, _force, _mobility), Subcycl(system, _subgroups) {
         rtolth = params.rtolth;
         rtolrel = params.rtolrel;
-        subgroups = params.subgroups;
-        Ngroups = subgroups->Ngroups;
-        for (int i = 0; i < Ng-1; i++)
-            nextdtsub[i] = nextdt;
     }
     
     struct ErrorFlagNodes {
         System* s;
         DeviceDisNet* net;
-        IntegratorRKFSubcycling<Ng>* itgr;
+        IntegratorRKFSubcycling* itgr;
         bool flagnodes;
         
         ErrorFlagNodes(System* _s, DeviceDisNet* _net, 
-                       IntegratorRKFSubcycling<Ng>* _itgr, bool _flagnodes) :
+                       IntegratorRKFSubcycling* _itgr, bool _flagnodes) :
         s(_s), net(_net), itgr(_itgr), flagnodes(_flagnodes) {}
         
         KOKKOS_INLINE_FUNCTION
-        void operator() (const int& i) const {
+        void operator() (const int& i, double& emax0, double& emax1) const {
             auto nodes = net->get_nodes();
             auto cell = net->cell;
             
@@ -426,7 +494,7 @@ public:
                 err += itgr->er[j] * itgr->rkf[j](i);
             err = itgr->newdt * err;
             double errnet = err.norm();
-            Kokkos::atomic_max(&itgr->errmax(0), errnet);
+            if (errnet > emax0) emax0 = errnet;
             
             Vec3 xold = s->xold(i);
             xold = cell.pbc_position(nodes[i].pos, xold);
@@ -440,166 +508,66 @@ public:
                     relerr = 2*itgr->rtolrel;
                 }
             }
-            Kokkos::atomic_max(&itgr->errmax(1), relerr);
+            if (relerr > emax1) emax1 = relerr;
             
             if (flagnodes) {
-                if (errnet < itgr->rtol && (errnet < itgr->rtolth || errnet/drn < itgr->rtolrel)) {
-                    itgr->subgroups->nflag[i] = 1; // unflag node
-                } else {
-                    itgr->subgroups->nflag[i] = 2; // flag node
+                if (itgr->subgroups->nflag(i) > 0) {
+                    if (errnet < itgr->rtol && (errnet < itgr->rtolth || errnet/drn < itgr->rtolrel)) {
+                        itgr->subgroups->nflag(i) = 1; // unflag node
+                    } else {
+                        itgr->subgroups->nflag(i) = 2; // flag node
+                    }
                 }
             }
         }
     };
     
-    void integrate(System* system)
+    inline void rkf_step(int i)
     {
-        Kokkos::fence();
-        system->timer[system->TIMER_INTEGRATION].start();
+        Base::rkf_step(i);
         
-        if (group == Ngroups-1) newdt = fmin(maxdt, nextdt);
-        else newdt = fmin(maxdt, nextdtsub[group]);
-        
-        if (newdt <= 0.0) {
-            if (group == Ngroups-1) newdt = maxdt;
-            else newdt = system->realdt;
+        if (i < 5) {
+            // Zero-out velocity of oscillating nodes
+            Subcycl::flag_oscillating_nodes(network);
         }
-        
-        s = system;
-        network = system->get_device_network();
-        
-        for (int i = 0; i < 6; i++)
-            Kokkos::resize(rkf[i], network->Nnodes_local);
-        
-        // Save nodal data
-        Kokkos::resize(system->xold, network->Nnodes_local);
-        Kokkos::resize(vcurr, network->Nnodes_local);
-        Kokkos::parallel_for("IntegratorRKFSubcycling::PreserveData",
-            Kokkos::RangePolicy<TagPreserveData>(0, network->Nnodes_local), *this
+    }
+    
+    inline void compute_error()
+    {
+        Kokkos::parallel_reduce("IntegratorRKFSubcycling::ErrorFlagNodes", network->Nnodes_local,
+            ErrorFlagNodes(s, network, this, (Subcycl::group == Subcycl::Ngroups-1 && iTry < nTry)),
+            Kokkos::Max<double>(errmax[0]), Kokkos::Max<double>(errmax[1])
         );
         Kokkos::fence();
-
-        int convergent = 0;
-        int incrDelta = 1;
-        int iTry = -1;
-        errmax = Kokkos::View<double*>("IntegratorRKFSubcycling:errmax", 2);
-        auto h_errmax = Kokkos::create_mirror_view(errmax);
+    }
+    
+    inline void non_convergent()
+    {
+        if (iTry < nTry && Subcycl::group == Subcycl::Ngroups-1)
+            Subcycl::subgroups->move_interactions(network, iTry);
         
-        if (group > 0 && subgroups->Nsegseg[group] == 0)
-            convergent = 1;
-        
-        while (!convergent) {
-            iTry++;
-            
-            // Apply the Runge-Kutta-Fehlberg integrator one step at a time
-            for (int i = 0; i < 5; i++) {
-                rkf_step(i);
-                force->compute(system);
-                mobility->compute(system);
-                
-                // Zero-out velocity of oscillating nodes
-                if (group != Ngroups-1) {
-                    DeviceDisNet* net = network;
-                    Kokkos::View<int*>& nflag = subgroups->nflag;
-                    Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int& i) {
-                        auto nodes = net->get_nodes();
-                        if (nflag[i] == 0) nodes[i].v = Vec3(0.0);
-                    });
-                    Kokkos::fence();
-                }
-            }
-            
-            // Calculate the error
-            Kokkos::deep_copy(errmax, 0.0);
-            Kokkos::parallel_for("IntegratorRKFSubcycling::ErrorFlagNodes", network->Nnodes_local,
-                ErrorFlagNodes(system, network, this, (group == Ngroups-1 && iTry < nTry))
-            );
-            Kokkos::fence();
-            Kokkos::deep_copy(h_errmax, errmax);
-            
-            // If the error is within the tolerance, we've reached
-            // convergence so we can accept this dt. Otherwise
-            // reposition the nodes and try again.
-            if (h_errmax(0) < rtol && h_errmax(1) < rtolrel) {
-                // Calculate final positions
-                rkf_step(5);
-                convergent = 1;
-            }
-            
-            if (!convergent) {
-                // We may want to move interactions between groups
-                // to maximize subcycling performance.
-                if (iTry < nTry && group == Ngroups-1)
-                    subgroups->move_interactions(network, iTry);
-                
-                // We need to start from the old velocities. So, first,
-                // substitute them with the old ones.
-                Kokkos::parallel_for("IntegratorRKFSubcycling::RestoreVels",
-                    Kokkos::RangePolicy<TagRestoreVels>(0, network->Nnodes_local), *this
-                );
-                Kokkos::fence();
-                
-                incrDelta = 0;
-                newdt *= dtDecrementFact;
-                
-                if ((newdt < 1.0e-20) /*&& (system->proc_rank == 0)*/)
-                    ExaDiS_fatal("IntegratorRKFSubcycling(): Timestep has dropped below\n"
-                                 "minimal threshold to %e. Aborting!\n", newdt);
-            }
-            
-        } // while (!convergent)
-        
-        if (group == Ngroups-1) system->realdt = newdt;
-        else realdtsub[group] = newdt;
-        
-        if (incrDelta) {
-            if (dtVariableAdjustment) {
-                double tmp1, tmp2, tmp3, tmp4, factor;
-                tmp1 = pow(dtIncrementFact, dtExponent);
-                tmp2 = h_errmax(0)/rtol;
-                tmp3 = 1.0 / dtExponent;
-                tmp4 = pow(1.0/(1.0+(tmp1-1.0)*tmp2), tmp3);
-                factor = dtIncrementFact * tmp4;
-                newdt = fmin(maxdt, newdt*factor);
-            } else {
-                newdt = fmin(maxdt, newdt*dtIncrementFact);
-            }
-        }
-        
-        if (group == Ngroups-1) nextdt = newdt;
-        else nextdtsub[group] = newdt;
-        
-        Kokkos::fence();
-        system->timer[system->TIMER_INTEGRATION].stop();
+        Base::non_convergent();
+    }
+    
+    void integrate(System* system) {
+        Subcycl::integrate(system, this);
     }
     
     void forward_progress_check(DeviceDisNet* net) {
-        T_v& vold = vcurr;
-        Kokkos::View<int*>& nflag = subgroups->nflag;
-        
-        Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int& i) {
-            auto nodes = net->get_nodes();
-            if (dot(vold(i), nodes[i].v) < 0.0) nflag[i] = 0;
-        });
-        Kokkos::fence();
+        Subcycl::forward_progress_check(net, vcurr);
     }
     
-    void write_restart(FILE* fp) { 
-        fprintf(fp, "nextdt %.17g\n", nextdt);
-        for (int i = 0; i < Ng-1; i++)
-            fprintf(fp, "nextdtsub%d %.17g\n", i, nextdtsub[i]);
+    void write_restart(FILE* fp) {
+        Subcycl::write_restart_sub(fp);
     }
     void read_restart(FILE* fp) {
-        fscanf(fp, "nextdt %lf\n", &nextdt);
-        int j;
-        for (int i = 0; i < Ng-1; i++)
-            fscanf(fp, "nextdtsub%d %lf\n", &j, &nextdtsub[i]);
-    }
+        Subcycl::read_restart_sub(fp);
+    } 
 };
 
 /*---------------------------------------------------------------------------
  *
- *    Class:        IntegratorSubcycling
+ *    Class:        IntegratorSubcyclingDriver
  *                  Subcycling integrator that drives the integration of
  *                  subgroups in turn and does all the bookkeeping.
  *                  It must be initialized by passing the list of group
@@ -615,7 +583,8 @@ public:
  *                  this scheme allows for the use of non-linear mobilities.
  *
  *-------------------------------------------------------------------------*/
-class IntegratorSubcycling : public Integrator {
+template<class I>
+class IntegratorSubcyclingDriver : public Integrator {
 private:
     ForceSubcycling* force;
     Mobility* mobility;
@@ -625,7 +594,7 @@ private:
     static const int Ngroups = NGROUPS;
     typedef SegSegGroups<Ngroups> G;
     G* subgroups;
-    IntegratorRKFSubcycling<Ngroups>* integrator;
+    I* integrator;
     SegSegList* segseglist;
     int numsubcyc[Ngroups];
     int totsubcyc;
@@ -637,20 +606,16 @@ private:
     
 public:
     struct Params {
+        typedef typename I::Params IP;
         std::vector<double> rgroups;
-        double rtolth, rtolrel;
+        IP Iparams;
         std::string fstats = "";
-        Params() { rtolth = 1.0; rtolrel = 0.1; }
-        Params(std::vector<double> _rgroups) : rgroups(_rgroups) { 
-            rtolth = 1.0; rtolrel = 0.1;
-        }
-        Params(std::vector<double> _rgroups, double _rtolth, double _rtolrel) : 
-        rgroups(_rgroups), rtolth(_rtolth), rtolrel(_rtolrel) {}
-        Params(std::vector<double> _rgroups, double _rtolth, double _rtolrel, std::string _fstats) : 
-        rgroups(_rgroups), rtolth(_rtolth), rtolrel(_rtolrel), fstats(_fstats) {}
+        Params() { Iparams = IP(); }
+        Params(std::vector<double> _rgroups) : rgroups(_rgroups) { Iparams = IP(); }
+        Params(std::vector<double> _rgroups, IP _Iparams) : rgroups(_rgroups), Iparams(_Iparams) {}
     };
     
-    IntegratorSubcycling(System* system, Force* _force, Mobility* _mobility, Params params=Params()) : 
+    IntegratorSubcyclingDriver(System* system, Force* _force, Mobility* _mobility, Params params=Params()) : 
     mobility(_mobility)
     {
         force = dynamic_cast<ForceSubcycling*>(_force);
@@ -671,8 +636,7 @@ public:
         if (force->drift)
             subgroups->r2groups[0] = fmax(subgroups->r2groups[0], 1.0);
         
-        IntegratorRKFSubcycling<Ngroups>::Params IParams(params.rtolth, params.rtolrel, subgroups);
-        integrator = exadis_new<IntegratorRKFSubcycling<Ngroups> >(system, force, mobility, IParams);
+        integrator = exadis_new<I>(system, force, mobility, subgroups, params.Iparams);
         
         TIMER_BUILDGROUPS = system->add_timer("IntegratorSubcycling build groups");
         TIMER_GROUPN = system->add_timer("IntegratorSubcycling integrate group N");
@@ -921,13 +885,15 @@ public:
     void write_restart(FILE* fp) { integrator->write_restart(fp); }
     void read_restart(FILE* fp) { integrator->read_restart(fp); }
     
-    ~IntegratorSubcycling() {
+    ~IntegratorSubcyclingDriver() {
         exadis_delete(integrator);
         exadis_delete(subgroups);
     }
     
     const char* name() { return "IntegratorSubcycling"; }
 };
+
+typedef IntegratorSubcyclingDriver<IntegratorRKFSubcycling> IntegratorSubcycling;
 
 } // namespace ExaDiS
 

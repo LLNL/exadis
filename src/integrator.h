@@ -21,7 +21,7 @@ namespace ExaDiS {
  *
  *-------------------------------------------------------------------------*/
 class Integrator {
-protected:
+public:
     double nextdt;
 public:
     Integrator() {}
