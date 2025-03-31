@@ -7,7 +7,7 @@
 BUILD_DIR=$1
 
 # Check if the directory argument starts with "-D"
-if [[ $BUILD_DIR == "-D"* ]]; then
+if [[ -z $BUILD_DIR || $BUILD_DIR == "-D"* ]]; then
     BUILD_DIR=build
 fi
 
