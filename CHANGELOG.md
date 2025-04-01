@@ -3,7 +3,40 @@
 All notable changes to ExaDiS will be documented in this file.
 
 
-## Global update 3 - Aug 19, 2024
+## Version 0.1.4 - Mar 31, 2025
+
+### Added
+- Added FCC_0_FRIC mobility law with spatial field option
+- Added cross-slip module for FCC and BCC crystals
+- Added ExaDisNet utility method generate_line_config()
+- Added crystal orientation option to ExaDisNet generate methods
+- Extended ForceFFT to work with triclinic boxes
+- Added mobility law FCC_0B
+- Added optional friction stress to BCC_0B mobility law
+- Added option to use glide planes for BCC crystals
+- Added the OpRec module
+- Added ExaDiS tools to compute dislocation fields
+- Added helper function to manage resizing of large Kokkos views
+
+
+### Changed
+- Split the build of the python module to reduce compilation times on devices
+- Refactored TopologyParallel to make the SplitDisNet class more widely available
+- Refactored crystal options and added parameter enforce_glide_planes
+- Optimized implementation of FCC_0 mobilities
+- Refactored the implementation of the integrators
+- Refactored the implementation of the ForceSegSegList/SegSegList classes
+- Optimized the neighbor list classes
+- Optimized various kernels and launch bounds for AMD GPUs
+- Upgraded to Kokkos 4.6.00
+
+
+### Fixed
+- Fixed bug for resetting matrices at restart
+- Fixed memory leak in ExaDisNet binding class
+
+
+## Version 0.1.3 - Aug 19, 2024
 
 ### Added
 - Added force cutoff model and corresponding bindings
@@ -13,6 +46,8 @@ All notable changes to ExaDiS will be documented in this file.
 - Added binding to the simulation restart option
 - Added option to automatically select the minseg param
 - Added option strict to NeighborBox class
+- Added binding to enable calling python-based modules from within ExaDiS
+- Added benchmark tests
 - Added CHANGELOG file
 
 
@@ -26,18 +61,7 @@ All notable changes to ExaDiS will be documented in this file.
 - Checking for positive pair distances when building seg/seg lists
 
 
-## Update Aug 9, 2024
-### Added
-- Added binding to enable calling python-based modules from within ExaDiS
-
-
-## Update Jul 6, 2024
-
-### Added
-- Added benchmark tests
-
-
-## Global update 2 - Jun 22, 2024
+## Version 0.1.2 - Jun 22, 2024
 
 ### Changed
 - Made modifications to allow for hybrid use of unified memory
@@ -47,7 +71,7 @@ All notable changes to ExaDiS will be documented in this file.
 - Fixed bugs with the use of triclinic cells and modified Cell to use origin instead of min-max coords
 
 
-## Global update 1 - Jun 4, 2024
+## Version 0.1.1 - Jun 4, 2024
 
 ### Added
 - Added use of node tags internally and in python binding
