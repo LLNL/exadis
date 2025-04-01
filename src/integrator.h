@@ -27,7 +27,7 @@ public:
     Integrator() {}
     Integrator(System *system) {}
     virtual void integrate(System *system) {}
-    virtual ~Integrator() {}
+    virtual KOKKOS_FUNCTION ~Integrator() {}
     virtual const char* name() { return "IntegratorNone"; }
     
     // Restart

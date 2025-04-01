@@ -104,7 +104,7 @@ void test_force(int Nmult)
         System* s = (i == 0) ? system0 : system1;
         forces.emplace_back(s, exadis_new<ForceType::LINE_TENSION_MODEL>(s), Nmult*100, "line tension model");
         forces.emplace_back(s, exadis_new<ForceType::BRUTE_FORCE_N2>(s), Nmult*((i==0)?10:1), "ForceN2");
-        forces.emplace_back(s, exadis_new<ForceSegSegList<SegSegIso,false> >(s, 5000.0), Nmult*10, "ForceSegSegList");
+        forces.emplace_back(s, exadis_new<ForceSegSegList<SegSegIso>>(s, 5000.0), Nmult*10, "ForceSegSegList");
         forces.emplace_back(s, exadis_new<ForceFFT>(s, ForceFFT::Params(64)), Nmult*10, "ForceFFT-64");
     }
     

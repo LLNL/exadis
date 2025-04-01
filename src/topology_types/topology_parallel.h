@@ -313,6 +313,7 @@ private:
     
     SplitMultiNode* smn;
     double splitMultiNodeAlpha;
+    NeighborList* neilist;
 
     static const int MAX_SPLITTABLE_DEGREE = MAX_CONN;
     T_armset armsets[MAX_SPLITTABLE_DEGREE+1];
@@ -349,6 +350,8 @@ public:
         if (mobility == nullptr)
             ExaDiS_fatal("Error: inconsistent mobility type in TopologyParallel\n");
         mob = mobility->mob;
+        
+        neilist = exadis_new<NeighborList>();
     }
     
     /*-----------------------------------------------------------------------
@@ -673,11 +676,10 @@ public:
         // one for only the subset of split nodes so that access 
         // on device will be much faster.
         double cutoff = system->neighbor_cutoff;
-        NeighborList* neilist;
         if (cutoff > 0.0) {
             NeighborBox* neighbox = exadis_new<NeighborBox>(system, cutoff, Neighbor::NeiSeg);
             // Build a neighbor list of the nodes wrt to the segs
-            neilist = neighbox->build_neighbor_list(system, net, Neighbor::NeiNode, splitnodes);
+            NeighborBox::BuildNeighborList<DeviceDisNet>(system, net, neighbox, neilist, Neighbor::NeiNode, splitnodes);
             smn->neilist = neilist;
             exadis_delete(neighbox);
         }
@@ -761,9 +763,6 @@ public:
             }
         }
         
-        if (cutoff > 0.0)
-            exadis_delete(neilist);
-        
         delete smn;
     }
     
@@ -779,6 +778,10 @@ public:
         
         Kokkos::fence();
         system->timer[system->TIMER_TOPOLOGY].stop();
+    }
+    
+    ~TopologyParallel() {
+        exadis_delete(neilist);
     }
     
     const char* name() { return "TopologyParallel"; }

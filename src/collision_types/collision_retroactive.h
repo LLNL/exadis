@@ -12,6 +12,7 @@
 #define EXADIS_COLLISION_RETROACTIVE_H
 
 #include "collision.h"
+#include "neighbor.h"
 
 namespace ExaDiS {
 
@@ -21,8 +22,13 @@ namespace ExaDiS {
  *
  *-------------------------------------------------------------------------*/
 class CollisionRetroactive : public Collision {
+private:
+    NeighborList* neilist;
+    
 public:
-    CollisionRetroactive(System *system) {}
+    CollisionRetroactive(System *system) {
+        neilist = exadis_new<NeighborList>();
+    }
     
     void retroactive_collision(System* system);
     void retroactive_collision_parallel(System* system);
@@ -37,6 +43,10 @@ public:
         
         Kokkos::fence();
         system->timer[system->TIMER_COLLISION].stop();
+    }
+    
+    ~CollisionRetroactive() {
+        exadis_delete(neilist);
     }
     
     const char* name() { return "CollisionRetroactive"; }

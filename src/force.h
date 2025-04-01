@@ -148,7 +148,7 @@ public:
         Params(F1params _f1params, F2params _f2params) : f1params(_f1params), f2params(_f2params) {}
     };
     
-    ForceCollection2(System* system, Params params=Params()) {
+    ForceCollection2(System* system, Params params) {
         force1 = exadis_new<F1>(system, params.f1params);
         force2 = exadis_new<F2>(system, params.f2params);
     }
@@ -350,7 +350,8 @@ public:
                 AddSegmentForce<DeviceDisNet>(system, force, net)
             );
         } else {
-            Kokkos::parallel_for(net->Nsegs_local, AddSegmentForce<DeviceDisNet>(system, force, net));
+            using policy = Kokkos::RangePolicy<Kokkos::LaunchBounds<64,1>>;
+            Kokkos::parallel_for(policy(0, net->Nsegs_local), AddSegmentForce<DeviceDisNet>(system, force, net));
         }
         
         Kokkos::fence();

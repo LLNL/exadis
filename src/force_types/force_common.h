@@ -21,7 +21,7 @@ namespace ExaDiS {
  *                  Self-force coming from the non-singular self-stress
  *
  *-------------------------------------------------------------------------*/
-KOKKOS_INLINE_FUNCTION
+KOKKOS_FORCEINLINE_FUNCTION
 Vec3 self_force(const Vec3 &b, const Vec3 &t, const double L, 
                 double MU, double NU, double a)
 {
@@ -54,7 +54,7 @@ Vec3 pk_force(const Vec3 &b, const Vec3 &r1, const Vec3 &r2, const Mat33 &stress
  *    Function:     SegSegForceIsotropicCorr
  *
  *-----------------------------------------------------------------------*/
-KOKKOS_INLINE_FUNCTION
+KOKKOS_FORCEINLINE_FUNCTION
 void SegSegForceIsotropicCorr(const Vec3 &r1, const Vec3 &r2, const Vec3 &r3, const Vec3 &r4, 
                               const Vec3 &b1, const Vec3 &b2, double a, double MU, double NU,
                               Vec3 &fn1, Vec3 &fn2, Vec3 &fn3, Vec3 &fn4)
@@ -578,7 +578,7 @@ void SegSegForceIsotropicCorr(const Vec3 &r1, const Vec3 &r2, const Vec3 &r3, co
  *    Function:     SpecialSegSegForceHalf
  *
  *-----------------------------------------------------------------------*/
-KOKKOS_INLINE_FUNCTION
+KOKKOS_FORCEINLINE_FUNCTION
 void SpecialSegSegForceHalf(const Vec3 &r1, const Vec3 &r2, const Vec3 &r3, const Vec3 &r4,
                             const Vec3 &b1, const Vec3 &b2, double a, double MU, double NU,
                             Vec3 &fn3, Vec3 &fn4)
@@ -993,7 +993,7 @@ void SpecialSegSegForceHalf(const Vec3 &r1, const Vec3 &r2, const Vec3 &r3, cons
  *    Function:     SegSegForceIsotropic
  *
  *-----------------------------------------------------------------------*/
-KOKKOS_INLINE_FUNCTION
+KOKKOS_FORCEINLINE_FUNCTION
 void SegSegForceIsotropic(const Vec3 &r1, const Vec3 &r2, const Vec3 &r3, const Vec3 &r4, 
                           const Vec3 &b1, const Vec3 &b2, double a, double MU, double NU,
                           Vec3 &fn1, Vec3 &fn2, Vec3 &fn3, Vec3 &fn4,

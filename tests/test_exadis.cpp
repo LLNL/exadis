@@ -372,11 +372,11 @@ void tests(ExaDiSApp *exadis, int test_id)
             new ForceType::CORE_SELF_PKEXT(system, CoreDefaultParams),
             //new ForceType::BRUTE_FORCE_N2(system)
             //new ForceFFT(system, ForceFFT::Params(64))
-            //new ForceSegSegList<SegSegIso,false>(system, /*50.0*/ 1000.0)
+            //new ForceSegSegList<SegSegIso>(system, /*50.0*/ 1000.0)
             new ForceType::LONG_FFT_SHORT_ISO(system, 32)
         });
     } else {
-        exadis->force = new ForceSubcycling(system, ForceSubcycling::Params(64));
+        exadis->force = exadis_new<ForceType::SUBCYCLING_MODEL>(system, ForceType::SUBCYCLING_MODEL::Params(64));
     }
     
     // Mobility
@@ -418,7 +418,7 @@ void tests(ExaDiSApp *exadis, int test_id)
         //exadis->topology = new Topology(system);
         exadis->topology = new TopologySerial(system, exadis->force, exadis->mobility);
     } else {
-        exadis->topology = new TopologyParallel<ForceSubcycling,MobilityType::FCC_0>(system, exadis->force, exadis->mobility);
+        exadis->topology = new TopologyParallel<ForceType::SUBCYCLING_MODEL,MobilityType::FCC_0>(system, exadis->force, exadis->mobility);
     }
     
     // Remesh
@@ -435,6 +435,11 @@ void tests(ExaDiSApp *exadis, int test_id)
     // Simulation
     for (auto ctrl : ctrls)
         exadis->run(ctrl);
+        
+    if (subcycling) {
+        exadis_delete(exadis->force);
+        exadis->force = nullptr;
+    }
 }
 
 /*---------------------------------------------------------------------------

@@ -43,6 +43,7 @@ struct NeighborList {
     T_list beg;
     T_list count;
     T_list list;
+    int Ntotnei = 0;
     
     struct NeiListAccessor {
         NeighborList* neilist;

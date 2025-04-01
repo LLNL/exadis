@@ -42,7 +42,7 @@ class ForceSubcycling : public Force {
 public:
     typedef ForceType::CORE_SELF_PKEXT FSeg;
     typedef ForceFFT FLong;
-    typedef ForceSegSegList<SegSegIsoFFT,false> FSegSeg;
+    typedef ForceSegSegList<SegSegIsoFFT> FSegSeg;
     
     bool drift;
     FSeg* fseg;
@@ -166,7 +166,7 @@ public:
         exadis_delete(fsegseg);
     }
     
-    virtual const char* name() { return "ForceSubcycling"; }
+    const char* name() { return "ForceSubcycling"; }
 };
 
 namespace ForceType {
@@ -196,6 +196,9 @@ struct SegSegGroups
     double rg9s;
     Kokkos::View<int*> countmove;
     Kokkos::View<int*> nflag;
+    
+    Kokkos::DualView<SegSegForce*> fsegseglist[Ng];
+    SegSegList::NodeComputeMap<DeviceDisNet> compute_map[Ng];
     
     SegSegGroups(System* system, std::vector<double> rgroups, double cutoff) {
         if (Ngroups < 2)
@@ -238,15 +241,17 @@ struct SegSegGroups
         Nsegseg_tot = 0;
         auto h_gcount = Kokkos::create_mirror_view(gcount);
         Kokkos::deep_copy(h_gcount, gcount);
+        ssl = _ssl;
         for (int i = 0; i < Ngroups; i++) {
             Nsegseg[i] = h_gcount(i);
-            Kokkos::resize(segseglist[i], Nsegseg[i]);
+            resize_view(segseglist[i], Nsegseg[i]);
+            if (ssl->use_compute_map)
+                resize_view(fsegseglist[i], Nsegseg[i]);
             Nsegseg_tot += Nsegseg[i];
         }
-        ssl = _ssl;
-        Kokkos::resize(ssl->segsegflag, Nsegseg[Ngroups-1]);
+        resize_view(ssl->segsegflag, Nsegseg[Ngroups-1]);
         Kokkos::deep_copy(ssl->segsegflag, 1);
-        Kokkos::resize(gdist2, Nsegseg[Ngroups-1]);
+        resize_view(gdist2, Nsegseg[Ngroups-1]);
         Kokkos::deep_copy(countmove, 0);
         for (int i = 0; i < Ngroups; i++)
             gfrac[i] = (Nsegseg_tot > 0) ? 1.0*Nsegseg[i]/Nsegseg_tot : 0;
@@ -307,15 +312,19 @@ struct SegSegGroups
         //printf("move_interactions iTry = %d: countmove = %d\n",iTry,countmove(0));
     }
     
-    void update_interactions() {
+    void update_interactions(DeviceDisNet* net) {
         auto h_countmove = Kokkos::create_mirror_view(countmove);
         Kokkos::deep_copy(h_countmove, countmove);
         if (h_countmove(0) > 0) {
             Nsegseg[Ngroups-2] += h_countmove(0);
-            Kokkos::resize(segseglist[Ngroups-2], Nsegseg[Ngroups-2]);
+            resize_view(segseglist[Ngroups-2], Nsegseg[Ngroups-2]);
             using policy = Kokkos::RangePolicy<typename MoveInteractions::TagMove>;
             Kokkos::parallel_for(policy(0, Nsegseg[Ngroups-1]), MoveInteractions(this));
             Kokkos::fence();
+            if (ssl->use_compute_map) {
+                resize_view(fsegseglist[Ngroups-2], Nsegseg[Ngroups-2]);
+                SegSegList::build_compute_map<DeviceDisNet>(ssl, &compute_map[Ngroups-2], net);
+            }
         }
     }
 };
@@ -596,13 +605,14 @@ private:
     G* subgroups;
     I* integrator;
     SegSegList* segseglist;
+    NeighborList* neilist;
     int numsubcyc[Ngroups];
     int totsubcyc;
     
     int TIMER_BUILDGROUPS, TIMER_GROUPN, TIMER_SUBCYCLING;
     
     bool stats = false;
-    std::string fstats;
+    std::string* fstats;
     
 public:
     struct Params {
@@ -631,6 +641,7 @@ public:
         
         double cutoff = force->fsegseg->get_cutoff();
         subgroups = exadis_new<G>(system, params.rgroups, cutoff);
+        neilist = exadis_new<NeighborList>();
         
         // Make sure we have hinges in group 0 for subcycling drift model
         if (force->drift)
@@ -644,9 +655,11 @@ public:
         
         if (!params.fstats.empty()) {
             stats = true;
-            fstats = params.fstats;
+            fstats = new std::string(params.fstats);
         }
     }
+    
+    IntegratorSubcyclingDriver(const IntegratorSubcyclingDriver&) = delete;
     
     void write_stats() {
         if (0) {
@@ -657,7 +670,7 @@ public:
                 subgroups->Nsegseg[i], subgroups->gfrac[i], numsubcyc[i]);
         }
         if (stats) {
-            FILE* fp = fopen(fstats.c_str(), "a");
+            FILE* fp = fopen(fstats->c_str(), "a");
             fprintf(fp, "%d ", totsubcyc);
             for (int i = 0; i < Ngroups; i++) fprintf(fp, "%d ", numsubcyc[i]);
             for (int i = 0; i < Ngroups; i++) fprintf(fp, "%d ", subgroups->Nsegseg[i]);
@@ -698,7 +711,7 @@ public:
         
         DeviceDisNet* net = system->get_device_network();
         double cutoff = force->fsegseg->get_cutoff();
-        NeighborList* neilist = generate_neighbor_list(system, net, cutoff, Neighbor::NeiSeg);
+        generate_neighbor_list(system, net, neilist, cutoff, Neighbor::NeiSeg);
         
         Kokkos::parallel_for("IntegratorSubcycling::BuildSegSegGroups", net->Nsegs_local, 
             BuildSegSegGroups(net, subgroups, neilist, cutoff, hinge, true)
@@ -718,7 +731,12 @@ public:
         );
         Kokkos::fence();
         
-        exadis_delete(neilist);
+        if (segseglist->use_compute_map) {
+            for (int group = 0; group < Ngroups; group++) {
+                set_group(group);
+                SegSegList::build_compute_map<DeviceDisNet>(segseglist, &subgroups->compute_map[group], net);
+            }
+        }
         
         system->devtimer[TIMER_BUILDGROUPS].stop();
     }
@@ -731,6 +749,10 @@ public:
         force->group = group;
         segseglist->Nsegseg = subgroups->Nsegseg[group];
         segseglist->segseglist = subgroups->segseglist[group];
+        if (segseglist->use_compute_map) {
+            segseglist->fsegseglist = subgroups->fsegseglist[group];
+            segseglist->d_compute_map = subgroups->compute_map[group];
+        }
         if (group == Ngroups-1) {
             segseglist->use_flag = 1;
         } else {
@@ -783,7 +805,8 @@ public:
         system->devtimer[TIMER_SUBCYCLING].start();
         // We may need to update groups as some segment pairs may
         // have been moved during integration of the highest group
-        subgroups->update_interactions();
+        set_group(Ngroups-2);
+        subgroups->update_interactions(network);
         
         
         // Time integrate groups 0,...,N-1 interactions (subcycle)
@@ -885,9 +908,13 @@ public:
     void write_restart(FILE* fp) { integrator->write_restart(fp); }
     void read_restart(FILE* fp) { integrator->read_restart(fp); }
     
-    ~IntegratorSubcyclingDriver() {
-        exadis_delete(integrator);
-        exadis_delete(subgroups);
+    KOKKOS_FUNCTION ~IntegratorSubcyclingDriver() {
+        KOKKOS_IF_ON_HOST((
+            exadis_delete(integrator);
+            exadis_delete(subgroups);
+            exadis_delete(neilist);
+            if (stats) delete fstats;
+        ))
     }
     
     const char* name() { return "IntegratorSubcycling"; }

@@ -107,8 +107,38 @@ typedef Kokkos::View<Conn*, T_memory_space> T_conn;
 typedef Kokkos::View<Vec3*, T_memory_space> T_x;
 typedef Kokkos::View<Vec3*, T_memory_space> T_v;
 
-
 typedef Kokkos::TeamPolicy<>::member_type team_handle;
+
+/*---------------------------------------------------------------------------
+ *
+ *    Functions:    Resize view
+ *                  Allocate views with a buffer factor so that resizing
+ *                  only triggers a memory reallocation infrequently
+ *
+ *-------------------------------------------------------------------------*/
+#define ALLOC_SIZE_FACT 1.5
+static const float ALLOC_MIN_FACT = (2.0-ALLOC_SIZE_FACT)/ALLOC_SIZE_FACT;
+
+template <class T, class... P>
+inline std::enable_if_t<
+    std::is_same_v<typename Kokkos::View<T, P...>::array_layout,Kokkos::LayoutLeft> ||
+    std::is_same_v<typename Kokkos::View<T, P...>::array_layout,Kokkos::LayoutRight>>
+resize_view(Kokkos::View<T, P...>& v, const size_t n) {
+    const size_t n0 = KOKKOS_IMPL_CTOR_DEFAULT_ARG;
+    if (n > v.extent(0) || n < static_cast<size_t>(v.extent(0) * ALLOC_MIN_FACT)) {
+        size_t nalloc = static_cast<size_t>(n * ALLOC_SIZE_FACT);
+        Kokkos::impl_resize(Kokkos::view_alloc(Kokkos::WithoutInitializing),
+                            v, nalloc, n0, n0, n0, n0, n0, n0, n0);
+    }
+}
+
+template <class... Properties>
+void resize_view(Kokkos::DualView<Properties...>& dv, const size_t n) {
+    if (n > dv.extent(0) || n < static_cast<size_t>(dv.extent(0) * ALLOC_MIN_FACT)) {
+        size_t nalloc = static_cast<size_t>(n * ALLOC_SIZE_FACT);
+        dv.resize(nalloc);
+    }
+}
 
 /*---------------------------------------------------------------------------
  *
@@ -154,9 +184,9 @@ public:
     
     DeviceDisNet(const Cell &_cell) : cell(_cell) {}
     
-    KOKKOS_INLINE_FUNCTION T_nodes::pointer_type get_nodes() { return nodes.data(); }
-    KOKKOS_INLINE_FUNCTION T_segs::pointer_type get_segs() { return segs.data(); }
-    KOKKOS_INLINE_FUNCTION T_conn::pointer_type get_conn() { return conn.data(); }
+    KOKKOS_FORCEINLINE_FUNCTION T_nodes::pointer_type get_nodes() { return nodes.data(); }
+    KOKKOS_FORCEINLINE_FUNCTION T_segs::pointer_type get_segs() { return segs.data(); }
+    KOKKOS_FORCEINLINE_FUNCTION T_conn::pointer_type get_conn() { return conn.data(); }
     
     inline void update_ptr() {}
 };

@@ -982,7 +982,9 @@ public:
         
         DeviceDisNet *net = system->get_device_network();
         if (zero) zero_force(net);
-        Kokkos::parallel_for(net->Nsegs_local, AddSegmentForce<DeviceDisNet>(system, this, net));
+        
+        using policy = Kokkos::RangePolicy<Kokkos::LaunchBounds<64,1>>;
+        Kokkos::parallel_for(policy(0, net->Nsegs_local), AddSegmentForce<DeviceDisNet>(system, this, net));
         
         Kokkos::fence();
         system->timer[system->TIMER_FORCE].stop();
@@ -1031,7 +1033,7 @@ public:
 };
 
 namespace ForceType {
-    typedef ForceLongShort<ForceFFT,ForceSegSegList<SegSegIsoFFT,false> > LONG_FFT_SHORT_ISO;
+    typedef ForceLongShort<ForceFFT,ForceSegSegList<SegSegIsoFFT>> LONG_FFT_SHORT_ISO;
     typedef ForceCollection2<CORE_SELF_PKEXT,LONG_FFT_SHORT_ISO> DDD_FFT_MODEL;
 }
 

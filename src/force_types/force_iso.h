@@ -34,7 +34,7 @@ struct SegSegIso
     }
 
     template<class N>
-    KOKKOS_INLINE_FUNCTION
+    KOKKOS_FORCEINLINE_FUNCTION
     SegSegForce segseg_force(System *system, N *net, const SegSeg &ss, 
                              int compute_seg12=1, int compute_seg34=1) 
     {
@@ -107,7 +107,7 @@ struct SegSegIsoFFT
     }
 
     template<class N>
-    KOKKOS_INLINE_FUNCTION
+    KOKKOS_FORCEINLINE_FUNCTION
     SegSegForce segseg_force(System *system, N *net, const SegSeg &ss,
                              int compute_seg12=1, int compute_seg34=1) 
     {

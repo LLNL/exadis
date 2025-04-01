@@ -8,7 +8,6 @@
  *-------------------------------------------------------------------------*/
 
 #include "collision_retroactive.h"
-#include "neighbor.h"
 
 namespace ExaDiS {
 
@@ -1864,8 +1863,8 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
     });
     
     double cutoff = sqrt(4.0*dr2max()+0.5*l2max()) + rann;
-    NeighborList* neilist = generate_neighbor_list(system, net, cutoff, Neighbor::NeiSeg);
-    
+    generate_neighbor_list(system, net, neilist, cutoff, Neighbor::NeiSeg);
+    NeighborList* d_neilist = neilist;
     
     // Look for collisions between segments
     int max_collisions = 2 * net->Nsegs_local;
@@ -1885,8 +1884,8 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
         Vec3 pold1 = cell.pbc_position(p1, xold(n1));
         Vec3 pold2 = cell.pbc_position(p2, xold(n2));
         
-        auto count = neilist->get_count();
-        auto nei = neilist->get_nei();
+        auto count = d_neilist->get_count();
+        auto nei = d_neilist->get_nei();
         
         int Nnei = count[i];
         for (int j = 0; j < Nnei; j++) {
@@ -1947,8 +1946,6 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
         ncollisions() = max_collisions;
         ExaDiS_log("Warning: max collisions have been reached. Some collisions have been ignored\n");
     }
-    
-    exadis_delete(neilist);
     
     
     SerialDisNet* network = system->get_serial_network();

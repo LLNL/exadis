@@ -11,8 +11,6 @@
 #ifndef EXADIS_FORCE_SEGSEGLIST_H
 #define EXADIS_FORCE_SEGSEGLIST_H
 
-#include <Kokkos_DualView.hpp>
-
 #include "force.h"
 #include "neighbor.h"
 #include "functions.h"
@@ -36,14 +34,17 @@ public:
     
     double cutoff;
     int Nsegseg;
+    bool use_compute_map;
     
-    SegSegList(System *system, double _cutoff) {
+    SegSegList(System *system, double _cutoff, bool _use_compute_map) {
         set_cutoff(system, _cutoff);
+        use_compute_map = _use_compute_map;
         initialize();
     }
     
-    SegSegList(System *system, Params params) {
+    SegSegList(System *system, Params params, bool _use_compute_map) {
         set_cutoff(system, params.cutoff);
+        use_compute_map = _use_compute_map;
         initialize();
     }
     
@@ -58,7 +59,7 @@ public:
     void initialize() {
         Nsegseg = 0;
         Kokkos::resize(gcount, 1);
-        Nnodes = Nsegs = 0;
+        neilist = exadis_new<NeighborList>();
         need_sync = false;
         map_built = false;
         a_ssl.ssl = this;
@@ -81,9 +82,11 @@ public:
         }
         
         KOKKOS_INLINE_FUNCTION
-        void operator()(const int& i) const {
-            
+        void operator() (const team_handle& team) const {
             if (cutoff2 <= 0.0) return;
+            
+            int tid = team.team_rank();
+            int i = team.league_rank();
             
             auto gcount = segseglist->get_gcount(net);
             auto list = segseglist->get_list(net);
@@ -91,53 +94,86 @@ public:
             auto count = neilist->get_count();
             auto nei = neilist->get_nei();
             
-            int Nnei = count[i];
-            for (int l = 0; l < Nnei; l++) {
-                int j = nei(i,l); // neighbor seg
-                if (i < j) { // avoid double-counting
-                    // Compute distance
-                    double dist2 = get_min_dist2_segseg(net, i, j);
-                    
-                    int groupid = 0;
-                    if (dist2 >= 0.0 && dist2 < cutoff2) {
-                        if (count_only) {
-                            Kokkos::atomic_increment(&gcount[groupid]);
-                        } else {
-                            int idx = Kokkos::atomic_fetch_add(&gcount[groupid], 1);
-                            list[idx] = SegSeg(i, j);
+            int Nnei = 0;
+            Kokkos::single(Kokkos::PerTeam(team), [=] (int& nei) {
+                nei = count[i];
+            }, Nnei);
+            
+            if (count_only) {
+                
+                int Nneitot;
+                Kokkos::parallel_reduce(Kokkos::TeamThreadRange(team, Nnei), [&] (const int& l, int& nsum) {
+                    int j = nei(i,l); // neighbor seg
+                    if (i < j) { // avoid double-counting
+                        // Compute distance
+                        double dist2 = get_min_dist2_segseg(net, i, j);
+                        if (dist2 >= 0.0 && dist2 < cutoff2) {
+                            nsum++;
                         }
                     }
-                }
+                }, Nneitot);
+                
+                Kokkos::single(Kokkos::PerTeam(team), [=] () {
+                    Kokkos::atomic_add(&gcount[0], Nneitot);
+                });
+                Kokkos::single(Kokkos::PerTeam(team), [=] () {
+                    segseglist->segneicount(i) = Nneitot;
+                });
+                
+            } else {
+                
+                int idx;
+                int* shared_count = (int*)team.team_scratch(0).get_shmem(sizeof(int));
+                Kokkos::single(Kokkos::PerTeam(team), [=] (int& tidx) {
+                    tidx = Kokkos::atomic_fetch_add(&gcount[0], segseglist->segneicount(i));
+                    shared_count[0] = 0;
+                }, idx);
+                
+                Kokkos::parallel_for(Kokkos::TeamThreadRange(team, Nnei), [&] (const int& l) {
+                    int j = nei(i,l); // neighbor seg
+                    if (i < j) { // avoid double-counting
+                        // Compute distance
+                        double dist2 = get_min_dist2_segseg(net, i, j);
+                        if (dist2 >= 0.0 && dist2 < cutoff2) {
+                            int k = Kokkos::atomic_fetch_add(&shared_count[0], 1);
+                            list[idx+k] = SegSeg(i, j);
+                        }
+                    }
+                });
             }
         }
     };
 
     template<class N>
-    void build_list(System* system, N* net, bool use_compute_map) {
+    void build_list(System* system, N* net)
+    {    
+        generate_neighbor_list(system, net, neilist, cutoff, Neighbor::NeiSeg);
         
-        NeighborList* neilist = generate_neighbor_list(system, net, cutoff, Neighbor::NeiSeg);
+        Kokkos::resize(segneicount, net->Nsegs_local);
         
-        using policy = Kokkos::RangePolicy<typename N::ExecutionSpace>;
-        Kokkos::parallel_for("ForceSegSeg::BuildSegSegList", policy(0, net->Nsegs_local), 
+        Kokkos::parallel_for("ForceSegSeg::BuildSegSegList",
+            Kokkos::TeamPolicy<typename N::ExecutionSpace>(net->Nsegs_local, Kokkos::AUTO),
             BuildSegSegList<N>(net, this, neilist, cutoff, true)
         );
         Kokkos::fence();
         
-        init_list<N>(net, use_compute_map);
+        init_list<N>(net);
         //printf("SegSegList: cutoff = %e, Nsegseg = %d\n", cutoff, Nsegseg);
         
-        Kokkos::parallel_for("ForceSegSeg::BuildSegSegList", policy(0, net->Nsegs_local), 
+        Kokkos::parallel_for("ForceSegSeg::BuildSegSegList",
+            Kokkos::TeamPolicy<typename N::ExecutionSpace>(net->Nsegs_local, Kokkos::AUTO)
+            .set_scratch_size(0, Kokkos::PerTeam(sizeof(int))),
             BuildSegSegList<N>(net, this, neilist, cutoff, false)
         );
         Kokkos::fence();
         
-        exadis_delete(neilist);
-        
-        if (use_compute_map)
-            build_compute_map<N>(net);
+        if (use_compute_map) {
+            auto compute_map = get_compute_map(net);
+            build_compute_map<N>(this, compute_map, net);
+        }
     }
     
-    KOKKOS_INLINE_FUNCTION
+    KOKKOS_FORCEINLINE_FUNCTION
     Kokkos::DualView<SegSeg*>::t_dev::pointer_type get_list(DeviceDisNet *n) { 
         return segseglist.d_view.data();
     }
@@ -148,7 +184,7 @@ public:
         return segseglist.h_view.data();
     }
     */
-    KOKKOS_INLINE_FUNCTION
+    KOKKOS_FORCEINLINE_FUNCTION
     Kokkos::DualView<SegSegForce*>::t_dev::pointer_type get_fsegseglist(DeviceDisNet *n) { 
         return fsegseglist.d_view.data();
     }
@@ -160,9 +196,11 @@ public:
     }
     */
     
+    NeighborList* neilist;
     Kokkos::DualView<int*> gcount;
     Kokkos::DualView<SegSeg*> segseglist;
     Kokkos::DualView<SegSegForce*> fsegseglist;
+    Kokkos::View<int*> segneicount;
     
     bool use_flag;
     Kokkos::View<bool*> segsegflag;
@@ -177,21 +215,15 @@ public:
     };
     SegSegFlagAccessor a_ssl;
     
-    KOKKOS_INLINE_FUNCTION SegSegFlagAccessor get_flag(DeviceDisNet *n) { return a_ssl; }
+    KOKKOS_FORCEINLINE_FUNCTION SegSegFlagAccessor get_flag(DeviceDisNet *n) { return a_ssl; }
 
 private:
-    int Nnodes, Nsegs;
     bool need_sync;
     bool map_built;
     
     template<class N>
-    void init_list(N *net, bool use_compute_map) {
-        
-        // Save number of network nodes and segments to ensure 
-        // synchronization if building a node map.
-        Nnodes = net->Nnodes_local;
-        Nsegs = net->Nsegs_local;
-        
+    void init_list(N *net)
+    {    
         if constexpr (std::is_same<N, DeviceDisNet>::value) {
             need_sync = true;
             Kokkos::deep_copy(gcount.h_view, gcount.d_view);
@@ -200,21 +232,21 @@ private:
         }
         
         Nsegseg = gcount.h_view(0);
-        Kokkos::resize(segseglist, Nsegseg);
+        resize_view(segseglist, Nsegseg);
         map_built = false;
         
         if (use_compute_map)
-            Kokkos::resize(fsegseglist, Nsegseg);
+            resize_view(fsegseglist, Nsegseg);
     };
     
     inline void reset_gcount(DeviceDisNet *n) { Kokkos::deep_copy(gcount.d_view, 0); }
     inline void reset_gcount(SerialDisNet *n) { Kokkos::deep_copy(gcount.h_view, 0); }
     
-    KOKKOS_INLINE_FUNCTION
+    KOKKOS_FORCEINLINE_FUNCTION
     Kokkos::DualView<int*>::t_dev::pointer_type get_gcount(DeviceDisNet *n) { 
         return gcount.d_view.data();
     }
-    KOKKOS_INLINE_FUNCTION
+    KOKKOS_FORCEINLINE_FUNCTION
     Kokkos::DualView<int*>::t_host::pointer_type get_gcount(SerialDisNet *n) { 
         return gcount.h_view.data();
     }
@@ -230,15 +262,15 @@ public:
         inline void resize(int Nnodes, int Nsegseg) {
             Kokkos::resize(beg, Nnodes);
             Kokkos::resize(end, Nnodes);
-            Kokkos::resize(segseg, 4*Nsegseg);
-            Kokkos::resize(fpos, 4*Nsegseg);
+            resize_view(segseg, 4*Nsegseg);
+            resize_view(fpos, 4*Nsegseg);
         }
     };
     NodeComputeMap<DeviceDisNet> d_compute_map;
     NodeComputeMap<SerialDisNet> s_compute_map;
     
-    KOKKOS_INLINE_FUNCTION NodeComputeMap<DeviceDisNet> *get_compute_map(DeviceDisNet *n) { return &d_compute_map; }
-    KOKKOS_INLINE_FUNCTION NodeComputeMap<SerialDisNet> *get_compute_map(SerialDisNet *n) { return &s_compute_map; }
+    KOKKOS_FORCEINLINE_FUNCTION NodeComputeMap<DeviceDisNet> *get_compute_map(DeviceDisNet *n) { return &d_compute_map; }
+    KOKKOS_FORCEINLINE_FUNCTION NodeComputeMap<SerialDisNet> *get_compute_map(SerialDisNet *n) { return &s_compute_map; }
     
     template<class N>
     struct BuildComputeMap {
@@ -267,10 +299,10 @@ public:
             int n2 = segs[segseg.s1].n2;
             int n3 = segs[segseg.s2].n1;
             int n4 = segs[segseg.s2].n2;
-            Kokkos::atomic_increment(&nsize(n1));
-            Kokkos::atomic_increment(&nsize(n2));
-            Kokkos::atomic_increment(&nsize(n3));
-            Kokkos::atomic_increment(&nsize(n4));
+            Kokkos::atomic_inc(&nsize(n1));
+            Kokkos::atomic_inc(&nsize(n2));
+            Kokkos::atomic_inc(&nsize(n3));
+            Kokkos::atomic_inc(&nsize(n4));
         }
         
         KOKKOS_INLINE_FUNCTION
@@ -315,34 +347,37 @@ public:
     };
     
     template<class N>
-    void build_compute_map(N *net) {
-        
-        auto compute_map = get_compute_map(net);
-        compute_map->resize(Nnodes, Nsegseg);
+    static void build_compute_map(SegSegList* ssl, NodeComputeMap<N>* compute_map, N *net)
+    {    
+        compute_map->resize(net->Nnodes_local, ssl->Nsegseg);
         
         typedef typename N::ExecutionSpace::memory_space memory_space;
-        Kokkos::View<int*, memory_space> nsize("nsize", Nnodes);
+        Kokkos::View<int*, memory_space> nsize("nsize", net->Nnodes_local);
         
-        BuildComputeMap f(net, this, nsize, compute_map);
+        BuildComputeMap f(net, ssl, nsize, compute_map);
         
         Kokkos::parallel_for("BuildComputeMap::Count",
             Kokkos::RangePolicy<typename N::ExecutionSpace,
-            typename BuildComputeMap<N>::TagCount>(0, Nsegseg), f
+            typename BuildComputeMap<N>::TagCount>(0, ssl->Nsegseg), f
         );
         Kokkos::fence();
         
         Kokkos::parallel_scan("BuildComputeMap::Scan",
             Kokkos::RangePolicy<typename N::ExecutionSpace,
-            typename BuildComputeMap<N>::TagScan>(0, Nnodes), f
+            typename BuildComputeMap<N>::TagScan>(0, net->Nnodes_local), f
         );
         Kokkos::fence();
         
         Kokkos::deep_copy(nsize, 0);
         Kokkos::parallel_for("BuildComputeMap::Fill",
             Kokkos::RangePolicy<typename N::ExecutionSpace,
-            typename BuildComputeMap<N>::TagFill>(0, Nsegseg), f
+            typename BuildComputeMap<N>::TagFill>(0, ssl->Nsegseg), f
         );
         Kokkos::fence();
+    }
+    
+    ~SegSegList() {
+        exadis_delete(neilist);
     }
 };
 
@@ -362,11 +397,17 @@ public:
  *                  which can significantly hurt performance.
  *
  *-------------------------------------------------------------------------*/
-template<class F, bool use_compute_map>
+template<class F>
 class ForceSegSegList : public Force {
 private:
-    SegSegList *segseglist;
-    F *force; // segsegforce kernel
+    SegSegList* segseglist;
+    F* force; // segsegforce kernel
+    
+#if defined(KOKKOS_ENABLE_HIP)
+    static const bool _use_compute_map = true;
+#else
+    static const bool _use_compute_map = false;
+#endif
     
     int TIMER_SEGSEGLIST;
     
@@ -376,19 +417,20 @@ public:
     
     struct Params {
         double cutoff;
+        bool use_compute_map = _use_compute_map;
         Fparams fparams = Fparams();
         Params(double _cutoff) : cutoff(_cutoff) {}
         Params(double _cutoff, Fparams _fparams) : cutoff(_cutoff), fparams(_fparams) {}
     };
     
     ForceSegSegList(System *system, Params params) {
-        segseglist = exadis_new<SegSegList>(system, params.cutoff);
+        segseglist = exadis_new<SegSegList>(system, params.cutoff, params.use_compute_map);
         force = exadis_new<F>(system, params.fparams);
         TIMER_SEGSEGLIST = system->add_timer("SegSegList build");
     }
     
     ForceSegSegList(System *system, double cutoff, Fparams fparams=Fparams()) {
-        segseglist = exadis_new<SegSegList>(system, cutoff);
+        segseglist = exadis_new<SegSegList>(system, cutoff, _use_compute_map);
         force = exadis_new<F>(system, fparams);
         TIMER_SEGSEGLIST = system->add_timer("SegSegList build");
     }
@@ -396,7 +438,7 @@ public:
     template<class FLong>
     ForceSegSegList(System *system, FLong *flong) {
         double cutoff = flong->get_neighbor_cutoff();
-        segseglist = exadis_new<SegSegList>(system, cutoff);
+        segseglist = exadis_new<SegSegList>(system, cutoff, _use_compute_map);
         force = exadis_new<F>(system, flong);
         TIMER_SEGSEGLIST = system->add_timer("SegSegList build");
     }
@@ -421,11 +463,10 @@ public:
         AddSegSegForce(System *_system, F *_force, N *_net, SegSegList *_segseglist) : 
         system(_system), force(_force), net(_net), segseglist(_segseglist) {}
         
-        KOKKOS_INLINE_FUNCTION
+        KOKKOS_FORCEINLINE_FUNCTION
         void operator()(const int &i) const {
             auto nodes = net->get_nodes();
             auto segs = net->get_segs();
-            auto cell = net->cell;
             
             auto list = segseglist->get_list(net);
             auto flag = segseglist->get_flag(net);
@@ -434,7 +475,7 @@ public:
             
             SegSegForce fsegseg = force->segseg_force(system, net, segseg);
             
-            if (use_compute_map) {
+            if (segseglist->use_compute_map) {
                 auto fsegseglist = segseglist->get_fsegseglist(net);
                 fsegseglist[i] = fsegseg;
             } else {
@@ -464,15 +505,40 @@ public:
             auto nodes = net->get_nodes();
             auto fsegseglist = segseglist->get_fsegseglist(net);
             auto map = segseglist->get_compute_map(net);
+            auto flag = segseglist->get_flag(net);
             
             Vec3 fn(0.0);
             for (int j = map->beg(i); j < map->end(i); j++) {
                 int k = map->segseg(j);
+                if (!flag[k]) continue;
                 SegSegForce fsegseg = fsegseglist[k];
                 int fpos = map->fpos(j);
                 fn += fsegseg[fpos];
             }
             nodes[i].f += fn;
+        }
+        
+        KOKKOS_INLINE_FUNCTION
+        void operator() (const team_handle& team) const {
+            int i = team.league_rank();
+            
+            auto nodes = net->get_nodes();
+            auto fsegseglist = segseglist->get_fsegseglist(net);
+            auto map = segseglist->get_compute_map(net);
+            auto flag = segseglist->get_flag(net);
+            
+            Vec3 fn(0.0);
+            Kokkos::parallel_reduce(Kokkos::TeamThreadRange(team, map->beg(i), map->end(i)), [&] (const int& j, Vec3& fsum) {
+                int k = map->segseg(j);
+                if (!flag[k]) return;
+                SegSegForce fsegseg = fsegseglist[k];
+                int fpos = map->fpos(j);
+                fsum += fsegseg[fpos];
+            }, fn);
+            
+            Kokkos::single(Kokkos::PerTeam(team), [=] () {
+                nodes[i].f += fn;
+            });
         }
     };
     
@@ -483,7 +549,7 @@ public:
         system->devtimer[TIMER_SEGSEGLIST].start();
         
         DeviceDisNet *net = system->get_device_network();
-        segseglist->build_list<DeviceDisNet>(system, net, use_compute_map);
+        segseglist->build_list<DeviceDisNet>(system, net);
         
         Kokkos::fence();
         system->timer[system->TIMER_FORCE].stop();
@@ -498,16 +564,28 @@ public:
         DeviceDisNet *net = system->get_device_network();
         if (zero) zero_force(net);
         
-        Kokkos::parallel_for("ForceSegSeg::compute", segseglist->Nsegseg,
+        using policy = Kokkos::RangePolicy<Kokkos::LaunchBounds<64,1>>;
+        Kokkos::parallel_for("ForceSegSeg::compute", policy(0, segseglist->Nsegseg),
             AddSegSegForce<DeviceDisNet>(system, force, net, segseglist)
         );
         
-        if (use_compute_map) {
+        if (segseglist->use_compute_map) {
             // Assemble at nodes using the compute map
             Kokkos::fence();
-            Kokkos::parallel_for("ForceSegSeg::AddSegSegForceMap", net->Nnodes_local,
-                AddSegSegForceMap<DeviceDisNet>(system, net, segseglist)
-            );
+            if (segseglist->Nsegseg < 20000) {
+                Kokkos::parallel_for("ForceSegSeg::AddSegSegForceMap", net->Nnodes_local,
+                    AddSegSegForceMap<DeviceDisNet>(system, net, segseglist)
+                );
+            } else {
+            #if defined(KOKKOS_ENABLE_HIP)
+                auto policy = Kokkos::TeamPolicy<>(net->Nnodes_local, 16);
+            #else
+                auto policy = Kokkos::TeamPolicy<>(net->Nnodes_local, Kokkos::AUTO);
+            #endif
+                Kokkos::parallel_for("ForceSegSeg::AddSegSegForceMap", policy,
+                    AddSegSegForceMap<DeviceDisNet>(system, net, segseglist)
+                );
+            }
         }
         
         Kokkos::fence();
@@ -582,7 +660,7 @@ public:
 };
 
 namespace ForceType {
-    typedef ForceSegSegList<SegSegIso,false> FORCE_SEGSEG_ISO;
+    typedef ForceSegSegList<SegSegIso> FORCE_SEGSEG_ISO;
     typedef ForceCollection2<CORE_SELF_PKEXT,FORCE_SEGSEG_ISO> CUTOFF_MODEL;
 }
 

@@ -61,6 +61,8 @@ public:
         integrator = exadis_new<I>(system, force, mobility, params.Iparams);
     }
     
+    IntegratorMulti(const IntegratorMulti&) = delete;
+    
     // Use a functor so that we can safely call the destructor
     // to free the base integrator at the end of the run
     struct SavePositions {
@@ -89,9 +91,11 @@ public:
         int isubcycle = 0;
         while (totdt < maxdt) {
             
-            if (isubcycle > 0) {
-                force->compute(system);
-                mobility->compute(system);
+            if constexpr(!std::is_same<I,IntegratorTrapezoid>::value) {
+                if (isubcycle > 0) {
+                    force->compute(system);
+                    mobility->compute(system);
+                }
             }
             integrator->integrate(system);
             
@@ -109,8 +113,10 @@ public:
     void write_restart(FILE* fp) { integrator->write_restart(fp); }
     void read_restart(FILE* fp) { integrator->read_restart(fp); }
     
-    ~IntegratorMulti() {
-        exadis_delete(integrator);
+    KOKKOS_FUNCTION ~IntegratorMulti() {
+        KOKKOS_IF_ON_HOST((
+            exadis_delete(integrator);
+        ))
     }
     
     const char* name() { return "IntegratorMulti"; }

@@ -121,6 +121,8 @@ NeighborBin_t<Tnode>::iterator::iterator(const NeighborBin_t& neighbor, Tnode* n
     binNode = NULL;
     center = node->pos;
     _neighborNode = NULL;
+    
+    checkAddNei = _neighbor.unique_nei && (_neighbor.binDim[0] == 1 || _neighbor.binDim[1] == 1 || _neighbor.binDim[2] == 1);
 
     // Determine the bin the central node is located in
     Vec3 reducedp = _neighbor.binHinv * (center - _neighbor.binOrigin);
@@ -186,7 +188,7 @@ Tnode* NeighborBin_t<Tnode>::iterator::next()
                 Vec3 rd = _neighbor.cellHinv * _delta;
                 addNeighbor = (fabs(rd.x) < 0.5 && fabs(rd.y) < 0.5 && fabs(rd.z) < 0.5);
             }
-            if (distsq <= _neighbor.cutoff2 && addNeighbor && (!issamebin || _neighborNode != _node))
+            if (distsq <= _neighbor.cutoff2 && addNeighbor /*&& (!issamebin || _neighborNode != _node)*/) // return self
                 return _neighborNode;
         }
         if (dir[2] == _neighbor.paddingDim[2]) {
@@ -302,7 +304,8 @@ NeighborBin* generate_neighbor_nodes(SerialDisNet* network, double cutoff)
     NeighborBin* neighbor = new NeighborBin(network->cell, cutoff, true);
     // Sort nodes into the 3d bin grid
     for (int i = 0; i < network->number_of_nodes(); i++) {
-        NeighborBinNode_t* node = new NeighborBinNode_t(i, network->nodes[i].pos);
+        Vec3 r = network->cell.pbc_fold(network->nodes[i].pos);
+        NeighborBinNode_t* node = new NeighborBinNode_t(i, r);
         neighbor->insert_node(node);
     }
     return neighbor;
@@ -325,7 +328,7 @@ NeighborBin* generate_neighbor_segs(SerialDisNet* network, double cutoff, double
         int n2 = network->segs[i].n2;
         Vec3 r1 = network->nodes[n1].pos;
         Vec3 r2 = network->cell.pbc_position(r1, network->nodes[n2].pos);
-        Vec3 rmid = 0.5 * (r1 + r2);
+        Vec3 rmid = network->cell.pbc_fold(0.5 * (r1 + r2));
         NeighborBinNode_t* node = new NeighborBinNode_t(i, rmid);
         neighbor->insert_node(node);
     }

@@ -247,6 +247,8 @@ public:
         system->timer[system->TIMER_INTEGRATION].stop();
     }
     
+    KOKKOS_FUNCTION ~IntegratorRKF() {}
+    
     const char* name() { return "IntegratorRKF"; }
 };
     

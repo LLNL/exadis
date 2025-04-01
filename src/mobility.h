@@ -71,7 +71,8 @@ public:
         system->timer[system->TIMER_MOBILITY].start();
         
         DeviceDisNet *net = system->get_device_network();
-        Kokkos::parallel_for(net->Nnodes_local, NodeMobility<DeviceDisNet>(system, mob, net));
+        using policy = Kokkos::RangePolicy<Kokkos::LaunchBounds<32,1>>;
+        Kokkos::parallel_for(policy(0, net->Nnodes_local), NodeMobility<DeviceDisNet>(system, mob, net));
         
         Kokkos::fence();
         system->timer[system->TIMER_MOBILITY].stop();
