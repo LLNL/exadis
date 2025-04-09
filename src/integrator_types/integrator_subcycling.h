@@ -16,7 +16,7 @@
 
 namespace ExaDiS {
 
-#define NGROUPS 5
+#define MAXGROUPS 5
 
 /*---------------------------------------------------------------------------
  *
@@ -48,10 +48,11 @@ public:
     FSeg* fseg;
     FLong* flong;
     FSegSeg* fsegseg;
+    int Ngroups;
     int group;
     
-    static const int Ngroups = NGROUPS;
-    Kokkos::View<Vec3*> fgroup[Ngroups-1];
+    static const int Ngmax = MAXGROUPS;
+    Kokkos::View<Vec3*> fgroup[Ngmax-1];
     
 public:
     struct Params {
@@ -73,6 +74,8 @@ public:
         flong = exadis_new<FLong>(system, params.FLongParams);
         // Short-range segseg forces
         fsegseg = exadis_new<FSegSeg>(system, flong);
+        // Number of groups
+        Ngroups = 0;
         // Assign no group
         group = -1;
         // Drift scheme
@@ -120,6 +123,9 @@ public:
     }
     
     void compute(System* system, bool zero=true) {
+        if (Ngroups <= 0)
+            ExaDiS_fatal("Error: undefined number of groups in ForceSubcycling\n");
+        
         DeviceDisNet *net = system->get_device_network();
         if (zero) zero_force(net);
         
@@ -180,16 +186,16 @@ namespace ForceType {
  *                  associated with each subgroup.
  *
  *-------------------------------------------------------------------------*/
-template<int Ng>
 struct SegSegGroups
 {
-    static const int Ngroups = Ng;
-    double r2groups[Ng-1];
-    int Nsegseg[Ng];
+    static const int Ngmax = MAXGROUPS;
+    int Ngroups;
+    double r2groups[Ngmax-1];
+    int Nsegseg[Ngmax];
     Kokkos::View<int*> gcount;
-    Kokkos::DualView<SegSeg*> segseglist[Ng];
+    Kokkos::DualView<SegSeg*> segseglist[Ngmax];
     int Nsegseg_tot;
-    double gfrac[Ng];
+    double gfrac[Ngmax];
     
     SegSegList* ssl;
     Kokkos::View<double*> gdist2;
@@ -197,15 +203,13 @@ struct SegSegGroups
     Kokkos::View<int*> countmove;
     Kokkos::View<int*> nflag;
     
-    Kokkos::DualView<SegSegForce*> fsegseglist[Ng];
-    SegSegList::NodeComputeMap<DeviceDisNet> compute_map[Ng];
+    Kokkos::DualView<SegSegForce*> fsegseglist[Ngmax];
+    SegSegList::NodeComputeMap<DeviceDisNet> compute_map[Ngmax];
     
     SegSegGroups(System* system, std::vector<double> rgroups, double cutoff) {
-        if (Ngroups < 2)
-            ExaDiS_fatal("Error: there must be at least 2 groups in SegSegGroups\n");
-            
         if (rgroups.size() == 0) {
             // No group radii were provided, let's try to select some appropriate values
+            Ngroups = MAXGROUPS;
             double rmax = fmin(system->params.maxseg, cutoff);
             double rmin = fmin(fmax(0.3*system->params.minseg, 3.0*system->params.rann), rmax);
             rgroups.resize(Ngroups-1);
@@ -215,10 +219,14 @@ struct SegSegGroups
                 f = 0.5*(sin(f)+1.0);
                 rgroups[i] = rmin + f*(rmax-rmin);
             }
+        } else {
+            Ngroups = (int)rgroups.size()+1;
         }
         
-        if (rgroups.size() != Ngroups-1)
-            ExaDiS_fatal("Error: subcycling rgroups array must be of length Ngroups-1\n");
+        if (Ngroups < 2)
+            ExaDiS_fatal("Error: there must be at least 2 groups in SegSegGroups\n");
+        if (Ngroups > MAXGROUPS)
+            ExaDiS_fatal("Error: there must be at most %d groups in SegSegGroups\n", MAXGROUPS);
         
         for (int i = 0; i < Ngroups-1; i++) {
             r2groups[i] = rgroups[i] * rgroups[i];
@@ -266,13 +274,13 @@ struct SegSegGroups
     
     struct MoveInteractions {
         DeviceDisNet* net;
-        SegSegGroups<Ng>* ssg;
+        SegSegGroups* ssg;
         double rgs;
         
-        MoveInteractions(DeviceDisNet* _net, SegSegGroups<Ng>* _ssg, double _rgs) :
+        MoveInteractions(DeviceDisNet* _net, SegSegGroups* _ssg, double _rgs) :
         net(_net), ssg(_ssg), rgs(_rgs) {}
         
-        MoveInteractions(SegSegGroups<Ng>* _ssg) : ssg(_ssg) {}
+        MoveInteractions(SegSegGroups* _ssg) : ssg(_ssg) {}
         
         struct TagFlag {};
         struct TagMove {};
@@ -280,7 +288,7 @@ struct SegSegGroups
         KOKKOS_INLINE_FUNCTION
         void operator() (TagFlag, const int& i) const {
             auto segs = net->get_segs();
-            SegSeg s = ssg->segseglist[Ngroups-1].d_view(i);
+            SegSeg s = ssg->segseglist[ssg->Ngroups-1].d_view(i);
             int n1 = segs[s.s1].n1;
             int n2 = segs[s.s1].n2;
             int n3 = segs[s.s2].n1;
@@ -298,8 +306,8 @@ struct SegSegGroups
         KOKKOS_INLINE_FUNCTION
         void operator() (TagMove, const int& i) const {
             if (!ssg->ssl->segsegflag(i)) {
-                int idx = Kokkos::atomic_fetch_add(&ssg->gcount(Ngroups-2), 1);
-                ssg->segseglist[Ngroups-2].d_view(idx) = ssg->segseglist[Ngroups-1].d_view(i);
+                int idx = Kokkos::atomic_fetch_add(&ssg->gcount(ssg->Ngroups-2), 1);
+                ssg->segseglist[ssg->Ngroups-2].d_view(idx) = ssg->segseglist[ssg->Ngroups-1].d_view(i);
             }
         }
     };
@@ -387,19 +395,19 @@ struct BuildSegSegGroups {
 class IntegratorSubcyclingBase {
 protected:
     bool subcycling;
-    static const int Ngroups = NGROUPS;
-    SegSegGroups<Ngroups>* subgroups;
+    static const int Ngmax = MAXGROUPS;
+    SegSegGroups* subgroups;
 
 public:
-    double nextdtsub[Ngroups], realdtsub[Ngroups];
+    double nextdtsub[Ngmax], realdtsub[Ngmax];
     int group = -1;
     
     IntegratorSubcyclingBase(System* system) : subcycling(false), group(0) {}
     
-    IntegratorSubcyclingBase(System* system, SegSegGroups<Ngroups>* _subgroups) :
+    IntegratorSubcyclingBase(System* system, SegSegGroups* _subgroups) :
     subcycling(true) {
         subgroups = _subgroups;
-        for (int i = 0; i < Ngroups; i++)
+        for (int i = 0; i < subgroups->Ngroups; i++)
             nextdtsub[i] = system->params.nextdt;
     }
     
@@ -410,18 +418,18 @@ public:
     void integrate(System* system, I* integrator) {
         double realdt = system->realdt;
         integrator->nextdt = nextdtsub[group];
-        if (group < Ngroups-1)
+        if (group < subgroups->Ngroups-1)
             integrator->nextdt = fmin(realdt, integrator->nextdt);
         
         integrator->I::Base::integrate(system);
         
         realdtsub[group] = system->realdt;
         nextdtsub[group] = integrator->nextdt;
-        if (group < Ngroups-1) system->realdt = realdt;
+        if (group < subgroups->Ngroups-1) system->realdt = realdt;
     }
     
     void flag_oscillating_nodes(DeviceDisNet* net) {
-        if (group != Ngroups-1) {
+        if (group != subgroups->Ngroups-1) {
             Kokkos::View<int*>& nflag = subgroups->nflag;
             Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int& i) {
                 auto nodes = net->get_nodes();
@@ -442,12 +450,12 @@ public:
     }
     
     void write_restart_sub(FILE* fp) { 
-        for (int i = 0; i < Ngroups; i++)
+        for (int i = 0; i < subgroups->Ngroups; i++)
             fprintf(fp, "nextdtsub%d %.17g\n", i, nextdtsub[i]);
     }
     void read_restart_sub(FILE* fp) {
         int j;
-        for (int i = 0; i < Ngroups; i++)
+        for (int i = 0; i < subgroups->Ngroups; i++)
             fscanf(fp, "nextdtsub%d %lf\n", &j, &nextdtsub[i]);
     }
 };
@@ -475,7 +483,7 @@ public:
     };
     
     IntegratorRKFSubcycling(System* system, Force* _force, Mobility* _mobility,
-                            SegSegGroups<Ngroups>* _subgroups, Params params) : 
+                            SegSegGroups* _subgroups, Params params) : 
     IntegratorRKF(system, _force, _mobility), Subcycl(system, _subgroups) {
         rtolth = params.rtolth;
         rtolrel = params.rtolrel;
@@ -544,7 +552,7 @@ public:
     inline void compute_error()
     {
         Kokkos::parallel_reduce("IntegratorRKFSubcycling::ErrorFlagNodes", network->Nnodes_local,
-            ErrorFlagNodes(s, network, this, (Subcycl::group == Subcycl::Ngroups-1 && iTry < nTry)),
+            ErrorFlagNodes(s, network, this, (group == subgroups->Ngroups-1 && iTry < nTry)),
             Kokkos::Max<double>(errmax[0]), Kokkos::Max<double>(errmax[1])
         );
         Kokkos::fence();
@@ -552,8 +560,8 @@ public:
     
     inline void non_convergent()
     {
-        if (iTry < nTry && Subcycl::group == Subcycl::Ngroups-1)
-            Subcycl::subgroups->move_interactions(network, iTry);
+        if (iTry < nTry && group == subgroups->Ngroups-1)
+            subgroups->move_interactions(network, iTry);
         
         Base::non_convergent();
     }
@@ -600,13 +608,12 @@ private:
     
     T_x xold;
     
-    static const int Ngroups = NGROUPS;
-    typedef SegSegGroups<Ngroups> G;
-    G* subgroups;
+    static const int Ngmax = MAXGROUPS;
+    SegSegGroups* subgroups;
     I* integrator;
     SegSegList* segseglist;
     NeighborList* neilist;
-    int numsubcyc[Ngroups];
+    int numsubcyc[Ngmax];
     int totsubcyc;
     
     int TIMER_BUILDGROUPS, TIMER_GROUPN, TIMER_SUBCYCLING;
@@ -640,7 +647,8 @@ public:
         }
         
         double cutoff = force->fsegseg->get_cutoff();
-        subgroups = exadis_new<G>(system, params.rgroups, cutoff);
+        subgroups = exadis_new<SegSegGroups>(system, params.rgroups, cutoff);
+        force->Ngroups = subgroups->Ngroups;
         neilist = exadis_new<NeighborList>();
         
         // Make sure we have hinges in group 0 for subcycling drift model
@@ -664,16 +672,16 @@ public:
     void write_stats() {
         if (0) {
             printf("Subcycling\n");
-            for (int i = 0; i < Ngroups; i++)
+            for (int i = 0; i < subgroups->Ngroups; i++)
                 printf("  Group %d: cutoff = %e, Nsegseg = %d, fraction = %f, numsubcyc = %d\n", i, 
-                (i == Ngroups-1) ? force->fsegseg->get_cutoff() : sqrt(subgroups->r2groups[i]), 
+                (i == subgroups->Ngroups-1) ? force->fsegseg->get_cutoff() : sqrt(subgroups->r2groups[i]), 
                 subgroups->Nsegseg[i], subgroups->gfrac[i], numsubcyc[i]);
         }
         if (stats) {
             FILE* fp = fopen(fstats->c_str(), "a");
             fprintf(fp, "%d ", totsubcyc);
-            for (int i = 0; i < Ngroups; i++) fprintf(fp, "%d ", numsubcyc[i]);
-            for (int i = 0; i < Ngroups; i++) fprintf(fp, "%d ", subgroups->Nsegseg[i]);
+            for (int i = 0; i < subgroups->Ngroups; i++) fprintf(fp, "%d ", numsubcyc[i]);
+            for (int i = 0; i < subgroups->Ngroups; i++) fprintf(fp, "%d ", subgroups->Nsegseg[i]);
             fprintf(fp, "\n");
             fclose(fp);
         }
@@ -721,9 +729,9 @@ public:
         subgroups->init_groups(segseglist);
         /*
         printf("SegSegGroups: cutoff = %e, Nsegseg = %d\n", cutoff, subgroups->Nsegseg_tot);
-        for (int i = 0; i < Ngroups; i++)
+        for (int i = 0; i < subgroups->Ngroups; i++)
             printf("  Group %d: cutoff = %e, Nsegseg = %d, fraction = %f\n", i,
-            (i == Ngroups-1) ? cutoff : sqrt(subgroups->r2groups[i]), subgroups->Nsegseg[i], subgroups->gfrac[i]);
+            (i == subgroups->Ngroups-1) ? cutoff : sqrt(subgroups->r2groups[i]), subgroups->Nsegseg[i], subgroups->gfrac[i]);
         */
         
         Kokkos::parallel_for("IntegratorSubcycling::BuildSegSegGroups", net->Nsegs_local, 
@@ -732,7 +740,7 @@ public:
         Kokkos::fence();
         
         if (segseglist->use_compute_map) {
-            for (int group = 0; group < Ngroups; group++) {
+            for (int group = 0; group < subgroups->Ngroups; group++) {
                 set_group(group);
                 SegSegList::build_compute_map<DeviceDisNet>(segseglist, &subgroups->compute_map[group], net);
             }
@@ -753,7 +761,7 @@ public:
             segseglist->fsegseglist = subgroups->fsegseglist[group];
             segseglist->d_compute_map = subgroups->compute_map[group];
         }
-        if (group == Ngroups-1) {
+        if (group == subgroups->Ngroups-1) {
             segseglist->use_flag = 1;
         } else {
             segseglist->use_flag = 0;
@@ -776,7 +784,7 @@ public:
         build_groups_lists(system, hinge);
         if (force->drift) {
             // Resize subforce arrays
-            force->init_subforce(system, Ngroups);
+            force->init_subforce(system, subgroups->Ngroups);
         }
         
         // Reset nodes flag
@@ -785,7 +793,7 @@ public:
         
         // Time integrate highest group forces to set global time step
         system->devtimer[TIMER_GROUPN].start();
-        int group = Ngroups-1;
+        int group = subgroups->Ngroups-1;
         set_group(group);
         force->compute(system);
         if (force->drift) {
@@ -805,18 +813,18 @@ public:
         system->devtimer[TIMER_SUBCYCLING].start();
         // We may need to update groups as some segment pairs may
         // have been moved during integration of the highest group
-        set_group(Ngroups-2);
+        set_group(subgroups->Ngroups-2);
         subgroups->update_interactions(network);
         
         
         // Time integrate groups 0,...,N-1 interactions (subcycle)
         // Initialize the time for each group based on whether it has any forces in it
-        double subtime[Ngroups-1];
-        for (int i = 0; i < Ngroups-1; i++) {
+        double subtime[subgroups->Ngroups-1];
+        for (int i = 0; i < subgroups->Ngroups-1; i++) {
             subtime[i] = (i == 0 || subgroups->Nsegseg[i] > 0) ? 0.0 : system->realdt;
             numsubcyc[i] = 0;
         }
-        numsubcyc[Ngroups-1] = 1;
+        numsubcyc[subgroups->Ngroups-1] = 1;
         // Initialize some other stuff
         int oldgroup = -1;
         int nsubcyc;
@@ -826,15 +834,15 @@ public:
         // with the highest group time (realdt). Note that nodal forces
         // will reset to zero when subcycling is performed
         bool subcycle = false;
-        for (int i = 0; i < Ngroups-1; i++)
+        for (int i = 0; i < subgroups->Ngroups-1; i++)
             subcycle |= (subtime[i] < system->realdt);
         
         while (subcycle) {
             bool cutdt = 0;
 
             // The group that is furthest behind goes first
-            group = Ngroups-2;
-            for (int i = Ngroups-2; i >= 0; i--)
+            group = subgroups->Ngroups-2;
+            for (int i = subgroups->Ngroups-2; i >= 0; i--)
                 if (subtime[i] < subtime[group]) group = i;
 
             // If we switched groups, reset subcycle count
@@ -889,7 +897,7 @@ public:
             
             // Check if we should continue to subcycle
             subcycle = false;
-            for (int i = 0; i < Ngroups-1; i++)
+            for (int i = 0; i < subgroups->Ngroups-1; i++)
                 subcycle |= (subtime[i] < system->realdt);
             if (subtime[0] >= system->realdt) subcycle = false;
         }
