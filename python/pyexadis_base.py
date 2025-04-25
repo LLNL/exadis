@@ -598,7 +598,10 @@ class Remesh:
     def __init__(self, state: dict, remesh_rule: str='LengthBased', **kwargs) -> None:
         self.remesh_rule = remesh_rule
         params = get_exadis_params(state)
-        self.remesh = pyexadis.make_remesh(remesh_rule, params=params)
+        remove_small_loops = kwargs.get('remove_small_loops', 0)
+        coarsen_mode = kwargs.get('coarsen_mode', 0)
+        remeshparams = pyexadis.Remesh_Params(remove_small_loops, coarsen_mode)
+        self.remesh = pyexadis.make_remesh(remesh_rule, params=params, remeshparams=remeshparams)
         
     def Remesh(self, N: DisNetManager, state: dict) -> None:
         G = N.get_disnet(ExaDisNet)
@@ -814,7 +817,7 @@ class SimulateNetwork:
         return state
         
     def step_end(self, N: DisNetManager, state: dict):
-        """step_end: invoked at the begining of each time step
+        """step_end: invoked at the end of each time step
         """
         pass
     

@@ -775,13 +775,13 @@ void handle_topology(ExaDisNet& disnet, TopologyBind& topolbind, double dt)
  *    Remesh binding
  *
  *-------------------------------------------------------------------------*/
-RemeshBind make_remesh(std::string remesh_rule, Params& params)
+RemeshBind make_remesh(std::string remesh_rule, Params& params, RemeshSerial::Params& remeshparams)
 {
     System* system = make_system(new SerialDisNet(), Crystal(params.crystal), params);
     
     Remesh* remesh;
     if (remesh_rule == "LengthBased") {
-        remesh = new RemeshSerial(system);
+        remesh = new RemeshSerial(system, remeshparams);
     } else if (remesh_rule == "None") { 
         remesh = new Remesh(system);
     } else {
@@ -1060,6 +1060,8 @@ PYBIND11_MODULE(pyexadis, m) {
     py::class_<Topology::Params>(m, "Topology_Params")
         .def(py::init<double>(), py::arg("splitMultiNodeAlpha"));
     
+    py::class_<RemeshSerial::Params>(m, "Remesh_Params")
+        .def(py::init<bool, int>(), py::arg("remove_small_loops"), py::arg("coarsen_mode"));
     
     // Utility
     m.def("initialize", &initialize, "Initialize the python binding module",
@@ -1171,7 +1173,8 @@ PYBIND11_MODULE(pyexadis, m) {
     py::class_<RemeshBind>(m, "Remesh")
         .def(py::init<>())
         .def("remesh", &RemeshBind::remesh, "Remesh the system");
-    m.def("make_remesh", &make_remesh, "Instantiate a remesh class", py::arg("remesh_rule"), py::arg("params"));
+    m.def("make_remesh", &make_remesh, "Instantiate a remesh class",
+          py::arg("remesh_rule"), py::arg("params"), py::arg("remeshparams"));
     m.def("remesh", &remesh, "Wrapper to remesh the network",
           py::arg("net"), py::arg("remesh"));
     
