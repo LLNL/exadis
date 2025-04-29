@@ -106,6 +106,7 @@ def insert_infinite_line(cell, nodes, segs, burg, plane, origin, theta=0.0, line
     meet = 0
     maxnodes = 1000
     numnodes = 0
+    origin = np.array(origin)
     p = 1.0*origin
     originpbc = 1.0*origin
     while ((~meet) & (numnodes < maxnodes)):

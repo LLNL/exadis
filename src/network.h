@@ -180,11 +180,16 @@ struct Cell
     
     Cell() = default;
     
-    KOKKOS_FORCEINLINE_FUNCTION
-    Cell(double Lbox) {
+    Cell(double Lbox, bool centered=false) {
         xpbc = ypbc = zpbc = PBC_BOUND;
-        origin = Vec3(0.0);
+        origin = centered ? Vec3(-0.5*Lbox) : Vec3(0.0);
         set_H(Mat33().diag(Lbox));
+    }
+    
+    Cell(const Vec3& Lvecbox, bool centered=false) {
+        xpbc = ypbc = zpbc = PBC_BOUND;
+        origin = centered ? -0.5*Lvecbox : Vec3(0.0);
+        set_H(Mat33().diag(Lvecbox));
     }
     
     Cell(const Vec3& bmin, const Vec3& bmax) {

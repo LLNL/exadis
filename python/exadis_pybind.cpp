@@ -970,8 +970,9 @@ PYBIND11_MODULE(pyexadis, m) {
         
     py::class_<Cell>(m, "Cell")
         .def(py::init<>())
-        .def(py::init<double>())
-        .def(py::init<const Vec3&, const Vec3&>())
+        .def(py::init<double, bool>(), py::arg("Lbox"), py::arg("centered")=false)
+        .def(py::init<const Vec3&, bool>(), py::arg("Lvecbox"), py::arg("centered")=false)
+        .def(py::init<const Vec3&, const Vec3&>(), py::arg("bmin"), py::arg("bmax"))
         .def(py::init<const Mat33&, const Vec3&, std::vector<int> >(), py::arg("h"), py::arg("origin")=Vec3(0.0),
              py::arg("is_periodic")=std::vector<int>({PBC_BOUND,PBC_BOUND,PBC_BOUND}))
         .def(py::init([](Cell& cell) { return new Cell(cell.H, cell.origin, cell.get_pbc()); }), py::arg("cell"))
