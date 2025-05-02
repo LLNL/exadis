@@ -24,8 +24,8 @@ namespace ExaDiS {
  *                  by balancing the drag force with the driving force 
  *                  F_i^{driv}+F_i^{drag}=0.
  *
- *                  It is a direct translation in ExaDiS of ParaDiS source
- *                  file ParaDiS/src/Mobility_BCC_Fe_nl.cc.
+ *                  It is a translation in ExaDiS of ParaDiS source file
+ *                  ParaDiS/src/Mobility_BCC_Fe_nl.cc with some corrections.
  *                  It includes temperature dependent linear edge behavior 
  *                  and non-linear screw behavior.
  *                  Default parameters are fitted to atomistic simulations
@@ -36,24 +36,20 @@ struct MobilityBCC_nl
 {
     const bool non_linear = true;
     struct Params {
-        double ALPHA_SCREW      = 3.3;
-        double BETA_SCREW       = 2.0e-4;
-        double B_SCREW_PRECONST = 2.48;
-        double PEIERLS_SCREW    = 1.2e9;
-        double N_SCREW          = 10;
-        double B_EDGE           = 3.701e-4;
+        double PEIERLS_SCREW = 1.2e9; // Pa
+        double B_SCREW       = 4.6e-4; // Pa.s
+        double B0_EDGE       = 0.0; // Pa.s
+        double B1_EDGE       = 7.7e-7; // Pa.s/K
         double tempK;
         double vmax;
         Params() { tempK = 300.0; vmax = -1.0; }
         Params(double _tempK, double _vmax) : tempK(_tempK), vmax(_vmax) {}
-        Params(double _tempK, double _vmax, double _ALPHA_SCREW, double _BETA_SCREW, double _B_SCREW_PRECONST,
-               double _PEIERLS_SCREW, double _N_SCREW, double _B_EDGE) : tempK(_tempK), vmax(_vmax) {
-            ALPHA_SCREW      = _ALPHA_SCREW;
-            BETA_SCREW       = _BETA_SCREW;
-            B_SCREW_PRECONST = _B_SCREW_PRECONST;
-            PEIERLS_SCREW    = _PEIERLS_SCREW;
-            N_SCREW          = _N_SCREW;
-            B_EDGE           = _B_EDGE;
+        Params(double _tempK, double _vmax, double _PEIERLS_SCREW, double _B_SCREW,
+               double _B0_EDGE, double _B1_EDGE) : tempK(_tempK), vmax(_vmax) {
+            PEIERLS_SCREW = _PEIERLS_SCREW;
+            B_SCREW       = _B_SCREW;
+            B0_EDGE       = _B0_EDGE;
+            B1_EDGE       = _B1_EDGE;
         }
     };
     Params params;
@@ -64,24 +60,24 @@ struct MobilityBCC_nl
             ExaDiS_fatal("Error: MobilityBCC_nl() must be used with BCC crystal type\n");
         
         params = _params;
-        if (params.tempK < 0 || params.PEIERLS_SCREW < 0.0 || params.N_SCREW < 0.0 || params.B_EDGE < 0.0)
+        if (params.PEIERLS_SCREW < 0.0 || params.B_SCREW < 0.0 || params.B0_EDGE < 0.0)
             ExaDiS_fatal("Error: invalid MobilityBCC_nl() parameter values\n");
+        
+        if (params.tempK < 100 || params.tempK > 1200)
+            ExaDiS_fatal("Error: MobilityBCC_nl() only valid in range T = 100-1200 K\n");
     }
     
     KOKKOS_INLINE_FUNCTION
     void FscaleEdge(System* system, double feinit, double vin, const Vec3& burg,
                     double *fout, double *dfdv, double *dfdvlin, double *d2fdv2)
     {
-        double burgmag = system->params.burgmag;
-        double bnorm = burg.norm();
+        double bt = params.B0_EDGE + params.tempK * params.B1_EDGE;
 
-        double bt = params.tempK/params.B_EDGE;
-
-        double vmag = fabs(vin); 
+        double vmag = fabs(vin);
         double vsign = SIGN(vin);
 
-        double fdrag = bt*vmag*burgmag;
-        double dfdragdv = bt*burgmag;
+        double fdrag = bt * vmag;
+        double dfdragdv = bt;
 
         *fout = fdrag * vsign;
         *dfdv = dfdragdv;
@@ -124,21 +120,16 @@ struct MobilityBCC_nl
         taus = taus + 1.0e3; // avoid singularity around 1000K
         double v0 = 1.33318333e-10*tempK*tempK*tempK - 1.4985e-8*tempK*tempK -
                     2.3379833333e-6*tempK+2.5045e-4;
-
-        double vs = 0.0; 
         double c0 = 3710.0/sqrt(tempK);
         double c0p = c0/burgmag;
-
-        double alpha = params.ALPHA_SCREW;
-        double beta = params.BETA_SCREW*tempK;
-        double b = params.B_SCREW_PRECONST;
-        b = b/1e6; 
-        double n = params.N_SCREW;
+        double alpha = 3.3;
+        double beta = 2e-4*tempK;
+        double n = 10;
         double ninv = 1.0 / n;
-        double bzero = 1.61*1e6; 
+        double bzero = params.B_SCREW;
 
-        double vmag = fabs(vin); 
-        vmag = vmag*factor110;
+        double vmag = fabs(vin);
+        vmag = vmag * factor110;
         double vsign = SIGN(vin);
         double ratio = vmag / c0p;
         
@@ -147,16 +138,16 @@ struct MobilityBCC_nl
             // set the vmag to be zero
             // note: dfdvlin = taus * dfdragdv
             *fout = 0.0e0;
-            *dfdv = taus * alpha * beta /c0p * pow(v0,beta-1.0);
-            *dfdvlin = bzero*burgmag;  
-            *d2fdv2 = 0.0; 
+            *dfdv = taus * alpha * beta / c0p * pow(v0, beta-1.0);
+            *dfdvlin = bzero;
+            *d2fdv2 = 0.0;
             return;
         }
             
-        double ftherm = alpha * (pow(ratio+v0, beta) - pow(v0, beta)); 
-        double dfthermdv = alpha * beta / c0p * pow(ratio+v0, beta-1.0); 
-        double fdrag = bzero*(vmag*burgmag + vs)/taus; 
-        double dfdragdv = bzero*burgmag/taus;
+        double ftherm = alpha * (pow(ratio+v0, beta) - pow(v0, beta));
+        double dfthermdv = alpha * beta / c0p * pow(ratio+v0, beta-1.0);
+        double fdrag = bzero * vmag / taus;
+        double dfdragdv = bzero / taus;
         
         double fmag = taus * pow(pow(fdrag, n)+pow(ftherm, n), ninv);
         double dfmagdfdrag = taus * pow(fdrag, n-1.0) *
@@ -167,7 +158,7 @@ struct MobilityBCC_nl
         
         *fout = fmag * vsign;
         *dfdv = dfmagdv;
-        *dfdvlin = bzero*burgmag;
+        *dfdvlin = bzero;
         *d2fdv2 = 0.0;
     }
     
