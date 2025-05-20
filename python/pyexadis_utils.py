@@ -12,6 +12,7 @@ Implements utility functions for the ExaDiS python binding
 * dislocation_density()
 * dislocation_charge()
 
+* combine_networks()
 * read_paradis()
 * write_data()
 * write_vtk()
@@ -320,6 +321,38 @@ def read_paradis(datafile: str) -> DisNetManager:
     G = ExaDisNet()
     G.read_paradis(datafile)
     return DisNetManager(G)
+
+
+def combine_networks(Nlist) -> DisNetManager:
+    """ Combine several DisNetManager into a single network
+    """
+    if not isinstance(Nlist, list) or len(Nlist) == 0:
+        raise ValueError('combine_networks() argument must be a list of DisNetManager')
+    
+    # combine networks
+    for i, Ni in enumerate(Nlist):
+        if i == 0:
+            data = Ni.export_data()
+            nodes, segs = data["nodes"], data["segs"]
+            num_nodes = Ni.num_nodes()
+        else:
+            datai = Ni.export_data()
+            if not np.all(datai["cell"]["h"] == data["cell"]["h"]) or \
+               not np.all(datai["cell"]["origin"] == data["cell"]["origin"]):
+                raise ValueError('combine_networks() networks must use the same cell')
+            for k, v in nodes.items():
+                nodes[k] = np.vstack((nodes[k], datai["nodes"][k]))
+            for k, v in segs.items():
+                if k == 'nodeids':
+                    segs[k] = np.vstack((segs[k], datai["segs"][k]+num_nodes))
+                else:
+                    segs[k] = np.vstack((segs[k], datai["segs"][k]))
+            num_nodes += Ni.num_nodes()
+            
+    # reset node tags to make sure they are unique
+    nodes["tags"] = np.stack((np.zeros(num_nodes), np.arange(num_nodes))).T
+    N = DisNetManager(ExaDisNet().import_data(data))
+    return N
 
 
 def write_data(N: DisNetManager, datafile: str):
