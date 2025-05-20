@@ -991,6 +991,18 @@ PYBIND11_MODULE(pyexadis, m) {
         .def("get_bounds", &Cell::get_bounds, "Get the (orthorombic) bounds of the cell")
         .def("volume", &Cell::volume, "Returns the volume of the cell");
     
+    py::class_<DisNode>(m, "DisNode")
+        .def(py::init<const Vec3&, int>(), py::arg("pos"), py::arg("constraint"))
+        .def_readwrite("constraint", &DisNode::constraint, "Node constraint flag")
+        .def_readwrite("pos", &DisNode::pos, "Node position (x,y,z)");
+    
+    py::class_<DisSeg>(m, "DisSeg")
+        .def(py::init<int, int, const Vec3&, const Vec3&>(), py::arg("n1"), py::arg("n2"), py::arg("burg"), py::arg("plane")=Vec3(0.0))
+        .def_readwrite("n1", &DisSeg::n1, "Segment start node index")
+        .def_readwrite("n2", &DisSeg::n2, "Segment end node index")
+        .def_readwrite("burg", &DisSeg::burg, "Segment Burgers vector")
+        .def_readwrite("plane", &DisSeg::plane, "Segment plane normal");
+    
     py::class_<ExaDisNet>(m, "ExaDisNet")
         .def(py::init<>())
         .def(py::init<Cell&, std::vector<std::vector<double> >&, std::vector<std::vector<double> >&>(),
@@ -999,6 +1011,7 @@ PYBIND11_MODULE(pyexadis, m) {
              py::arg("cell"), py::arg("nodes"), py::arg("segs"))
         .def("number_of_nodes", &ExaDisNet::number_of_nodes, "Returns the number of nodes in the network")
         .def("number_of_segs", &ExaDisNet::number_of_segs, "Returns the number of segments in the network")
+        .def("is_sane", &ExaDisNet::is_sane, "Checks if the network is sane")
         .def("get_cell", &ExaDisNet::get_cell, "Get the cell containing the network")
         .def("get_nodes_array", &ExaDisNet::get_nodes_array, "Get the list of nodes (dom,id,x,y,z,constraint) of the network")
         .def("get_segs_array", &ExaDisNet::get_segs_array, "Get the list of segments (n1,n2,burg,plane) of the network")
@@ -1009,7 +1022,12 @@ PYBIND11_MODULE(pyexadis, m) {
         .def("set_velocities", &ExaDisNet::set_velocities, "Set the list of node velocities (vx,vy,vz) of the network")
         .def("write_data", &ExaDisNet::write_data, "Write network in ParaDiS format")
         .def("get_plastic_strain", &ExaDisNet::get_plastic_strain, "Returns plastic strain as computed since the last integration step")
-        .def("physical_links", &ExaDisNet::physical_links, "Returns the list of segments for each physical dislocation link");
+        .def("physical_links", &ExaDisNet::physical_links, "Returns the list of segments for each physical dislocation link")
+        .def("_get_node", &ExaDisNet::get_node, "Get node object by index")
+        .def("_get_seg", &ExaDisNet::get_seg, "Get segment object by index")
+        .def("_add_node", &ExaDisNet::add_node, "Add node (x,y,z) to the network", py::arg("pos"), py::arg("constraint")=(int)UNCONSTRAINED)
+        .def("_add_seg", &ExaDisNet::add_seg, "Add segment (n1,n2,burg,plane) to the network", py::arg("n1"), py::arg("n2"), py::arg("burg"), py::arg("plane")=Vec3(0.0))
+        .def("_update", &ExaDisNet::update, "Update network memory after modifications");
         
     py::class_<SystemBind, ExaDisNet>(m, "System")
         .def(py::init<ExaDisNet, Params>())
@@ -1210,7 +1228,7 @@ PYBIND11_MODULE(pyexadis, m) {
     // Driver control
     py::class_<Driver::Control>(driver, "Control")
         .def(py::init<>())
-        .def_readwrite("nsteps", &Driver::Control::nsteps, "nsteps")
+        .def_readwrite("nsteps", &Driver::Control::nsteps, "Number of steps or stepper object")
         .def_readwrite("loading", &Driver::Control::loading, "Loading type")
         .def_readwrite("erate", &Driver::Control::erate, "Loading rate")
         .def_readwrite("edir", &Driver::Control::edir, "Loading direction")

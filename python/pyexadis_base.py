@@ -35,6 +35,11 @@ except ImportError:
             return self.disnet.num_nodes()
         def num_segments(self):
             return self.disnet.num_segments()
+        def is_sane(self):
+            return self.disnet.is_sane()
+        def __repr__(self):
+            return f"pyexadis_base.DisNetManager(num_nodes={self.num_nodes()}, " \
+                   f"num_segments={self.num_segments()})"
     class DisNet_Base:
         pass
 
@@ -64,6 +69,8 @@ class ExaDisNet(DisNet_Base):
         
     def read_paradis(self, datafile):
         self.net = pyexadis.read_paradis(datafile)
+        return self
+    read_data = read_paradis
         
     def write_data(self, datafile):
         self.net.write_data(datafile)
@@ -78,12 +85,14 @@ class ExaDisNet(DisNet_Base):
         if Rorient is not None:
             crystal.set_orientation(Rorient)
         self.net = pyexadis.generate_prismatic_config(crystal, Lbox, numsources, radius, maxseg, seed)
+        return self
         
     def generate_line_config(self, crystal, Lbox, num_lines, theta=None, maxseg=-1, Rorient=None, seed=-1, verbose=True):
         from pyexadis_utils import generate_line_config
         G = generate_line_config(crystal, Lbox, num_lines, theta=theta, maxseg=maxseg,
                                  Rorient=Rorient, seed=seed, verbose=verbose)
         self.net = G.net
+        return self
     
     def import_data(self, data):
         cell = data.get("cell")
@@ -93,6 +102,7 @@ class ExaDisNet(DisNet_Base):
         segs = data.get("segs")
         segs_array = np.hstack((segs["nodeids"], segs["burgers"], segs["planes"]))
         self.net.import_data(cell=cell, nodes=nodes_array, segs=segs_array)
+        return self
     
     def export_data(self):
         cell = self.net.get_cell()
@@ -111,6 +121,9 @@ class ExaDisNet(DisNet_Base):
     
     def num_segments(self):
         return self.net.number_of_segs()
+        
+    def is_sane(self):
+        return self.net.is_sane()
     
     def get_nodes_data(self):
         nodes_array = np.array(self.net.get_nodes_array())

@@ -174,6 +174,7 @@ struct ExaDisNet {
     
     int number_of_nodes() { return system->Nnodes_total(); }
     int number_of_segs() { return system->Nsegs_total(); }
+    bool is_sane() { system->get_serial_network()->sanity_check(); return true; }
     
     Cell get_cell() { return system->get_serial_network()->cell; }
     std::vector<std::vector<double> > get_nodes_array() { return system->get_serial_network()->get_nodes_array(); }
@@ -185,6 +186,18 @@ struct ExaDisNet {
     void set_positions(std::vector<Vec3>& pos) { ::set_positions(system, pos); }
     void set_forces(std::vector<Vec3>& forces, std::vector<NodeTag>& tags) { ::set_forces(system, forces, tags); }
     void set_velocities(std::vector<Vec3>& vels, std::vector<NodeTag>& tags) { ::set_velocities(system, vels, tags); }
+    
+    DisNode get_node(int i) {
+        if (i < 0 || i >= number_of_nodes()) ExaDiS_fatal("Error: invalid node index %d in get_node()\n", i);
+        return system->get_serial_network()->nodes[i];
+    }
+    DisSeg get_seg(int i) {
+        if (i < 0 || i >= number_of_segs()) ExaDiS_fatal("Error: invalid seg index %d in get_seg()\n", i);
+        return system->get_serial_network()->segs[i];
+    }
+    void add_node(Vec3& pos, int constraint) { system->get_serial_network()->add_node(pos, constraint); }
+    void add_seg(int n1, int n2, const Vec3& b, const Vec3& p) { system->get_serial_network()->add_seg(n1, n2, b, p); }
+    void update() { system->get_serial_network()->generate_connectivity(); system->get_serial_network()->update_ptr(); }
     
     std::vector<std::vector<int> > physical_links() { return system->get_serial_network()->physical_links(); }
     
