@@ -274,7 +274,7 @@ SerialDisNet* generate_frs_config(Crystal crystal, double Lbox, int numsources,
  *
  *-------------------------------------------------------------------------*/
 SerialDisNet* generate_prismatic_config(Crystal crystal, Cell cell, int numsources,
-                                        double radius, double maxseg, int seed)
+                                        double radius, double maxseg, int seed, bool uniform)
 {
     printf("generate_prismatic_config()\n");
     
@@ -297,27 +297,34 @@ SerialDisNet* generate_prismatic_config(Crystal crystal, Cell cell, int numsourc
         blist.push_back(crystal.ref_burgs(i));
     
     // Sources positions
+    std::random_device rd;
+    auto rng = std::default_random_engine{rd()};
+    if (seed < 0) seed = time(NULL);
+    rng.seed((unsigned)seed);
+    
     std::vector<Vec3> pos;
-    if (numsources > 1) {
-        std::random_device rd;
-    	auto rng = std::default_random_engine{rd()};
-        if (seed < 0) seed = time(NULL);
-        rng.seed((unsigned)seed);
-        int ng = (int)ceil(cbrt(numsources));
-        std::uniform_real_distribution<double> dp(-0.5, 0.5);
-        for (int i = 0; i < ng; i++) {
-            for (int j = 0; j < ng; j++) {
-                for (int k = 0; k < ng; k++) {
-                    double px = 1.0*(i+0.5+0.5*dp(rng))/ng;
-                    double py = 1.0*(j+0.5+0.5*dp(rng))/ng;
-                    double pz = 1.0*(k+0.5+0.5*dp(rng))/ng;
-                    pos.push_back(Vec3(px, py, pz));
+    if (uniform) {
+        if (numsources > 1) {
+            int ng = (int)ceil(cbrt(numsources));
+            std::uniform_real_distribution<double> dp(-0.5, 0.5);
+            for (int i = 0; i < ng; i++) {
+                for (int j = 0; j < ng; j++) {
+                    for (int k = 0; k < ng; k++) {
+                        double px = 1.0*(i+0.5+0.5*dp(rng))/ng;
+                        double py = 1.0*(j+0.5+0.5*dp(rng))/ng;
+                        double pz = 1.0*(k+0.5+0.5*dp(rng))/ng;
+                        pos.push_back(Vec3(px, py, pz));
+                    }
                 }
             }
+            std::shuffle(pos.begin(), pos.end(), rng);
+        } else {
+            pos.push_back(Vec3(0.5, 0.5, 0.5));
         }
-        std::shuffle(pos.begin(), pos.end(), rng);
     } else {
-        pos.push_back(Vec3(0.5, 0.5, 0.5));
+        std::uniform_real_distribution<double> dp(0.0, 1.0);
+        for (int i = 0; i < numsources; i++)
+            pos.push_back(Vec3(dp(rng), dp(rng), dp(rng)));
     }
     
     for (int i = 0; i < numsources; i++) {
@@ -335,13 +342,13 @@ SerialDisNet* generate_prismatic_config(Crystal crystal, Cell cell, int numsourc
  *
  *-------------------------------------------------------------------------*/
 SerialDisNet* generate_prismatic_config(Crystal crystal, double Lbox, int numsources,
-                                        double radius, double maxseg, int seed)
+                                        double radius, double maxseg, int seed, bool uniform)
 {
     if (Lbox <= 0.0)
         ExaDiS_fatal("Error: undefined box size\n");
     
     return generate_prismatic_config(crystal, Cell(Lbox), numsources,
-                                     radius, maxseg, seed);
+                                     radius, maxseg, seed, uniform);
 }
 
 /*---------------------------------------------------------------------------

@@ -37,10 +37,10 @@ SerialDisNet* generate_frs_config(Crystal crystal, Cell cell, int numsources,
                                   double Lsource, double maxseg=-1, int seed=1234);
 SerialDisNet* generate_frs_config(Crystal crystal, double Lbox, int numsources,
                                   double Lsource, double maxseg=-1, int seed=1234);
-SerialDisNet* generate_prismatic_config(Crystal crystal, Cell cell, int numsources,
-                                        double radius, double maxseg=-1, int seed=1234);
-SerialDisNet* generate_prismatic_config(Crystal crystal, double Lbox, int numsources,
-                                        double radius, double maxseg=-1, int seed=1234);
+SerialDisNet* generate_prismatic_config(Crystal crystal, Cell cell, int numsources, double radius,
+                                        double maxseg=-1, int seed=1234, bool uniform=0);
+SerialDisNet* generate_prismatic_config(Crystal crystal, double Lbox, int numsources, double radius,
+                                        double maxseg=-1, int seed=1234, bool uniform=0);
 SerialDisNet* read_paradis(const char *file);
 
 

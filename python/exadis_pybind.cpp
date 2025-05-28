@@ -282,17 +282,17 @@ std::vector<Vec3> get_positions(System* system) {
  *
  *-------------------------------------------------------------------------*/
 ExaDisNet generate_prismatic_config_system(Crystal crystal, double Lbox, int numsources,
-                                           double radius, double maxseg=-1, int seed=1234)
+                                           double radius, double maxseg=-1, int seed=1234, bool uniform=0)
 {
-    SerialDisNet* config = generate_prismatic_config(crystal, Lbox, numsources, radius, maxseg, seed);
+    SerialDisNet* config = generate_prismatic_config(crystal, Lbox, numsources, radius, maxseg, seed, uniform);
     System* system = make_system(config, Crystal(crystal), Params());
     return ExaDisNet(system);
 }
 
 ExaDisNet generate_prismatic_config_system(Crystal crystal, Cell cell, int numsources,
-                                           double radius, double maxseg=-1, int seed=1234)
+                                           double radius, double maxseg=-1, int seed=1234, bool uniform=0)
 {
-    SerialDisNet* config = generate_prismatic_config(crystal, cell, numsources, radius, maxseg, seed);
+    SerialDisNet* config = generate_prismatic_config(crystal, cell, numsources, radius, maxseg, seed, uniform);
     System* system = make_system(config, Crystal(crystal), Params());
     return ExaDisNet(system);
 }
@@ -1090,12 +1090,12 @@ PYBIND11_MODULE(pyexadis, m) {
     
     // Read / Generate
     m.def("read_paradis", &read_paradis_system, "Read ParaDiS data file");
-    m.def("generate_prismatic_config", (ExaDisNet (*)(Crystal, double, int, double, double, int)) &generate_prismatic_config_system,
+    m.def("generate_prismatic_config", (ExaDisNet (*)(Crystal, double, int, double, double, int, bool)) &generate_prismatic_config_system,
           "Generate a configuration made of prismatic loops",
-          py::arg("crystal"), py::arg("Lbox"), py::arg("numsources"), py::arg("radius"), py::arg("maxseg")=-1, py::arg("seed")=1234);
-    m.def("generate_prismatic_config", (ExaDisNet (*)(Crystal, Cell, int, double, double, int)) &generate_prismatic_config_system,
+          py::arg("crystal"), py::arg("Lbox"), py::arg("numsources"), py::arg("radius"), py::arg("maxseg")=-1, py::arg("seed")=1234, py::arg("uniform")=false);
+    m.def("generate_prismatic_config", (ExaDisNet (*)(Crystal, Cell, int, double, double, int, bool)) &generate_prismatic_config_system,
           "Generate a configuration made of prismatic loops",
-          py::arg("crystal"), py::arg("cell"), py::arg("numsources"), py::arg("radius"), py::arg("maxseg")=-1, py::arg("seed")=1234);
+          py::arg("crystal"), py::arg("cell"), py::arg("numsources"), py::arg("radius"), py::arg("maxseg")=-1, py::arg("seed")=1234, py::arg("uniform")=false);
     
     // Force
     py::class_<ForceBind>(m, "Force")
