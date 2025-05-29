@@ -36,7 +36,7 @@ def example_bcc_Ta_100nm_2e8():
     
     Lbox = 300.0
     G = ExaDisNet()
-    G.generate_prismatic_config(state["crystal"], Lbox, 12, 0.21*Lbox, state["maxseg"])
+    G.generate_prismatic_config(state["crystal"], Lbox, 12, 0.21*Lbox, state["maxseg"], uniform=True)
     net = DisNetManager(G)
     
     vis = None
