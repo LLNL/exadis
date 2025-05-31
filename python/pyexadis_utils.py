@@ -14,6 +14,9 @@ Implements utility functions for the ExaDiS python binding
 * dislocation_charge()
 
 * combine_networks()
+* extract_segments()
+* delete_segments()
+
 * read_paradis()
 * write_data()
 * write_vtk()
@@ -472,6 +475,35 @@ def combine_networks(Nlist) -> DisNetManager:
     nodes["tags"] = np.stack((np.zeros(num_nodes), np.arange(num_nodes))).T
     N = DisNetManager(ExaDisNet().import_data(data))
     return N
+
+
+def extract_segments(N: DisNetManager, seglist) -> DisNetManager:
+    """ Return a new network that contains a subset of segments
+    from the input network
+    """
+    data = N.export_data()
+    # keep segments from the list
+    segs = data["segs"]
+    for k, v in segs.items():
+        segs[k] = v[seglist]
+    # remove unconnected nodes
+    nodelist, nind = np.unique(segs["nodeids"].ravel(), return_inverse=True)
+    nodes = data["nodes"]
+    for k, v in nodes.items():
+        nodes[k] = v[nodelist]
+    # update node indices
+    segs["nodeids"] = nind[np.arange(segs["nodeids"].size).reshape(-1,2)]
+    # create new DisNet
+    G = ExaDisNet().import_data(data)
+    return DisNetManager(G)
+
+
+def delete_segments(N: DisNetManager, seglist) -> DisNetManager:
+    """ Return a new network in which segments have been deleted
+    from the input network
+    """
+    keeplist = np.setxor1d(seglist, np.arange(N.num_segments()))
+    return extract_segments(N, keeplist)
 
 
 def write_data(N: DisNetManager, datafile: str):
