@@ -907,13 +907,24 @@ public:
         // time
         state["dt"] = system->realdt;
         state["time"] = tottime;
+        state["istep"] = istep;
         return state;
     }
-    void read_restart_driver(std::string restartfile) {
+    py::dict read_restart_driver(py::dict& state, std::string restartfile) {
+        // read restart
         ExaDiSApp::read_restart(restartfile);
+        // set crystal orientation
+        py::buffer_info buffer(
+            &system->crystal.R, sizeof(double), py::format_descriptor<double>::format(),
+            2, {3, 3}, {sizeof(double) * 3, sizeof(double)}
+        );
+        state["Rorient"] = py::array(buffer);
+        // update dictionary
+        update_state(state);
         // replace with dummy system so that we don't delete 
         // the original system object upon destruction
         system = make_system(new SerialDisNet());
+        return state;
     }
 };
 
