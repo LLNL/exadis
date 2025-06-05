@@ -685,6 +685,8 @@ class SimulateNetwork:
             os.makedirs(self.write_dir)
         self.restart = kwargs.get("restart", None)
         
+        self.num_steps = kwargs.get('num_steps', None)
+        
         self.exadis_plastic_strain = exadis_plastic_strain
         state["Etot"] = np.zeros(6)
         state["strain"] = 0.0
@@ -869,28 +871,32 @@ class SimulateNetwork:
             N.get_disnet(ExaDisNet).write_data(os.path.join(self.write_dir, 'config.0.data'))
         
         # time stepping
-        for tstep in range(self.max_step):
-            state["istep"] = tstep
+        start_step = state["istep"] if "istep" in state else 0
+        max_step = start_step + self.num_steps if self.num_steps is not None else self.max_step
+        
+        for tstep in range(start_step, max_step):
+        
+            state["istep"] = tstep+1
             self.step(N, state)
 
             if self.print_freq != None:
-                if (tstep+1) % self.print_freq == 0:
+                if state["istep"] % self.print_freq == 0:
                     dt = self.timeint.dt if self.timeint else 0.0
                     Nnodes = N.num_nodes()
                     elapsed = time.perf_counter()-t0
                     if self.loading_mode == 'strain_rate':
-                        print("step = %d, nodes = %d, dt = %e, strain = %e, elapsed = %.1f sec"%(tstep+1, Nnodes, dt, state["strain"], elapsed))
+                        print("step = %d, nodes = %d, dt = %e, strain = %e, elapsed = %.1f sec"%(state["istep"], Nnodes, dt, state["strain"], elapsed))
                     else:
-                        print("step = %d, nodes = %d, dt = %e, time = %e, elapsed = %.1f sec"%(tstep+1, Nnodes, dt, state["time"], elapsed))
-                    self.results.append([tstep+1, state["strain"], state["stress"], state["density"], elapsed])
+                        print("step = %d, nodes = %d, dt = %e, time = %e, elapsed = %.1f sec"%(state["istep"], Nnodes, dt, state["time"], elapsed))
+                    self.results.append([state["istep"], state["strain"], state["stress"], state["density"], elapsed])
 
             if self.vis != None and self.plot_freq != None:
-                if (tstep+1) % self.plot_freq == 0:
+                if state["istep"] % self.plot_freq == 0:
                     self.vis.plot_disnet(N, state=state, trim=True, block=False, pause_seconds=self.plot_pause_seconds)
             
             if self.write_freq != None:
-                if (tstep+1) % self.write_freq == 0:
-                    N.get_disnet(ExaDisNet).write_data(os.path.join(self.write_dir, 'config.%d.data'%(tstep+1)))
+                if state["istep"] % self.write_freq == 0:
+                    N.get_disnet(ExaDisNet).write_data(os.path.join(self.write_dir, 'config.%d.data'%state["istep"]))
                     # dump current results into file
                     if self.print_freq != None: self.write_results()
             
@@ -915,7 +921,6 @@ class SimulateNetworkPerf(SimulateNetwork):
     def __init__(self, *args, **kwargs) -> None:
         super(SimulateNetworkPerf, self).__init__(*args, **kwargs)
         
-        self.num_step = kwargs.get('num_step', None)
         self.max_strain = kwargs.get('max_strain', None)
         self.max_time = kwargs.get('max_time', None)
         self.max_walltime = kwargs.get('max_walltime', None)
@@ -1009,8 +1014,8 @@ class SimulateNetworkPerf(SimulateNetwork):
             stepper = pyexadis.Driver.MAX_TIME(self.max_time)
         elif self.max_strain is not None:
             stepper = pyexadis.Driver.MAX_STRAIN(self.max_strain)
-        elif self.num_step is not None:
-            stepper = pyexadis.Driver.NUM_STEPS(self.num_step)
+        elif self.num_steps is not None:
+            stepper = pyexadis.Driver.NUM_STEPS(self.num_steps)
         else:
             stepper = pyexadis.Driver.MAX_STEPS(self.max_step)
         ctrl = self.get_exadis_ctrl(state)
