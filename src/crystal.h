@@ -319,7 +319,7 @@ struct Crystal : CrystalParams
     }
     
     KOKKOS_INLINE_FUNCTION
-    int identify_closest_Burgers(const Vec3& b) {
+    int identify_closest_Burgers_index(const Vec3& b) {
         int bid = 0;
         double smax = 0.0;
         Vec3 bn = b.normalized();
@@ -336,6 +336,16 @@ struct Crystal : CrystalParams
     }
     
     KOKKOS_INLINE_FUNCTION
+    bool is_crystallographic_plane(Vec3 plane) {
+        if (use_R) plane = Rinv * plane;
+        for (int i = 0; i < num_planes; i++) {
+            Vec3 p = ref_planes(i);
+            if (fabs(fabs(dot(p, plane))-1.0) < 1e-5) return 1;
+        }
+        return 0;
+    }
+    
+    KOKKOS_INLINE_FUNCTION
     Vec3 find_precise_glide_plane(const Vec3& b, const Vec3& t)
     {
         Vec3 plane = cross(b, t).normalized();
@@ -343,7 +353,7 @@ struct Crystal : CrystalParams
             return Vec3(0.0); // screw segment
         
         if (use_glide_planes) {
-            int bid = identify_closest_Burgers(b);
+            int bid = identify_closest_Burgers_index(b);
             if (use_R) plane = Rinv * plane;
             int nid = 0;
             double smax = 0.0;
@@ -384,7 +394,7 @@ struct Crystal : CrystalParams
                     if (val < 0.5) plane.z = -plane.x;
                 }
             } else {
-                int bid = identify_closest_Burgers(b);
+                int bid = identify_closest_Burgers_index(b);
                 int nid = random_gen.rand<typename N::ExecutionSpace>(0, planes_per_burg(bid));
                 plane = ref_planes(burg_start_plane(bid)+nid);
             }

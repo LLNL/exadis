@@ -150,7 +150,7 @@ void insert_prismatic_loop(Crystal& crystal, SerialDisNet *network, Vec3 burg,
         
     } else if (crystal.type == FCC_CRYSTAL) {
         Nsides = 4;
-        int bid = crystal.identify_closest_Burgers(crystal.R * burg);
+        int bid = crystal.identify_closest_Burgers_index(crystal.R * burg);
         Vec3 p1 = crystal.ref_planes(bid*3+0);
         Vec3 p2 = crystal.ref_planes(bid*3+1);
         

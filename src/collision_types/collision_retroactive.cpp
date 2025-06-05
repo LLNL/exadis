@@ -755,7 +755,7 @@ int CollisionCriterion(real8 *dist2, real8 *L1ratio, real8 *L2ratio, const real8
  *
  ***************************************************************************/ 
 int HingeCollisionCriterion(real8 *L1ratio, const real8 *x1t,
-                            const real8 *x3t, const real8 *x4t)
+                            const real8 *x3t, const real8 *x4t, const bool tri=0)
 {
     *L1ratio = 0.0;
     int collisionConditionIsMet = 0;
@@ -764,8 +764,9 @@ int HingeCollisionCriterion(real8 *L1ratio, const real8 *x1t,
     real8 L14 [3]= { x1t[0]-x4t[0], x1t[1]-x4t[1], x1t[2]-x4t[2] };
     real8 A = V3_DOT( L13, L13);
     real8 B = V3_DOT( L14, L14);
-                               
-    if (V3_DOT( L13, L14) > 0.999 * sqrt(A) * sqrt(B)) {	
+    
+    real8 tol = tri ? 0.9 : 0.98;
+    if (V3_DOT( L13, L14) > tol * sqrt(A) * sqrt(B)) {
         collisionConditionIsMet = 1;
         //Based on the definition of hinge to have a small angle, we approximate the L1ratio as simply the ratio of length. 
         *L1ratio = sqrt( A / B );
@@ -1376,6 +1377,8 @@ bool test_collision_glide_planes(System* system, SerialDisNet* network,
         dr = 1.0/drlen * dr;
         
         Vec3 n = network->segs[s].plane;
+        if (!system->crystal.is_crystallographic_plane(n)) continue;
+        
         double dottest = fabs(dot(n, dr));
         double violen_old = dottest * drlen;
 
@@ -1579,8 +1582,7 @@ void CollisionRetroactive::retroactive_collision(System* system)
             // don't do the collision.
             Vec3 d1 = network->nodes[mergenode1].pos - network->cell.pbc_position(network->nodes[mergenode1].pos, newpos);
             Vec3 d2 = network->nodes[mergenode2].pos - network->cell.pbc_position(network->nodes[mergenode2].pos, newpos);
-            if ((d1.norm2() > 16 * mindist2) &&
-                (d2.norm2() > 16 * mindist2)) {
+            if ((d1.norm2() > 16 * mindist2) && (d2.norm2() > 16 * mindist2)) {
                 continue;
             }
             
@@ -1654,8 +1656,8 @@ void CollisionRetroactive::retroactive_collision(System* system)
         
         for (int j = 0; j < network->conn[i].num; j++) {
             int l3 = network->conn[i].seg[j];
-            if (l3 >= nsegs) continue;
-            if (skipseg[l3]) continue;
+            //if (l3 >= nsegs) continue;
+            //if (skipseg[l3]) continue;
             
             int n3 = network->conn[i].node[j];
             if (n3 >= nnodes) continue;
@@ -1665,8 +1667,8 @@ void CollisionRetroactive::retroactive_collision(System* system)
             
             for (int k = j+1; k < network->conn[i].num; k++) {
                 int l4 = network->conn[i].seg[k];
-                if (l4 >= nsegs) continue;
-                if (skipseg[l4]) continue;
+                //if (l4 >= nsegs) continue;
+                //if (skipseg[l4]) continue;
                 
                 int n4 = network->conn[i].node[k];
                 if (n4 >= nnodes) continue;
@@ -1674,9 +1676,7 @@ void CollisionRetroactive::retroactive_collision(System* system)
                 Vec3 l14 = p1-p4;
                 if (l14.norm2() < 1e-20) continue;
                 
-                Vec3 pold1 = network->cell.pbc_position(p1, xold(i));
-                Vec3 pold3 = network->cell.pbc_position(p3, xold(n3));
-                Vec3 pold4 = network->cell.pbc_position(p4, xold(n4));
+                bool tri = (network->find_connection(n3, n4) != -1);
                 
                 /* First interval considered : [t-delta t, t] */
                 //double dist2 = 0.0;
@@ -1777,7 +1777,7 @@ void CollisionRetroactive::retroactive_collision(System* system)
                 }
                 
                 // Test for glide plane violations
-                if (system->crystal.enforce_glide_planes) {
+                if (system->crystal.enforce_glide_planes && !tri) {
                     if (!test_collision_glide_planes(system, network, mergenode1, newpos, 0) ||
                         !test_collision_glide_planes(system, network, mergenode2, newpos, 0))
                         continue;
@@ -1844,25 +1844,26 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
     auto segs = net->get_segs();
     auto cell = net->cell;
     
-    Kokkos::View<double, T_memory_shared> dr2max("dr2max");
-    Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int i) {
+    double dr2max = 0.0;
+    Kokkos::parallel_reduce(net->Nnodes_local, KOKKOS_LAMBDA(const int i, double& dr2val) {
         Vec3 r = nodes[i].pos;
         Vec3 rold = cell.pbc_position(r, xold(i));
         double dr2 = (rold-r).norm2();
-        Kokkos::atomic_max(&dr2max(), dr2);
-    });
+        if (dr2 > dr2val) dr2val = dr2;
+    }, Kokkos::Max<double>(dr2max));
     
-    Kokkos::View<double, T_memory_shared> l2max("l2max");
-    Kokkos::parallel_for(net->Nsegs_local, KOKKOS_LAMBDA(const int i) {
+    double l2max = 0.0;
+    Kokkos::parallel_reduce(net->Nsegs_local, KOKKOS_LAMBDA(const int i, double& l2val) {
         int n1 = segs[i].n1;
         int n2 = segs[i].n2;
         Vec3 p1 = nodes[n1].pos;
         Vec3 p2 = cell.pbc_position(p1, nodes[n2].pos);
         double l2 = (p2-p1).norm2();
-        Kokkos::atomic_max(&l2max(), l2);
-    });
+        if (l2 > l2val) l2val = l2;
+    }, Kokkos::Max<double>(l2max));
+    Kokkos::fence();
     
-    double cutoff = sqrt(4.0*dr2max()+0.5*l2max()) + rann;
+    double cutoff = sqrt(4.0*dr2max+0.5*l2max) + rann;
     generate_neighbor_list(system, net, neilist, cutoff, Neighbor::NeiSeg);
     NeighborList* d_neilist = neilist;
     
@@ -2053,8 +2054,7 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
         // don't do the collision.
         Vec3 d1 = network->nodes[mergenode1].pos - network->cell.pbc_position(network->nodes[mergenode1].pos, newpos);
         Vec3 d2 = network->nodes[mergenode2].pos - network->cell.pbc_position(network->nodes[mergenode2].pos, newpos);
-        if ((d1.norm2() > 16 * mindist2) &&
-            (d2.norm2() > 16 * mindist2)) {
+        if ((d1.norm2() > 16 * mindist2) && (d2.norm2() > 16 * mindist2)) {
             continue;
         }
         
@@ -2115,13 +2115,14 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
         //check_node_plane_violation(network, conn, mergenode1, msg);
     }
     
-    
+/*
 #if EXADIS_FULL_UNIFIED_MEMORY
     T_x& h_xold = system->xold;
 #else
     T_x::HostMirror h_xold = Kokkos::create_mirror_view(system->xold);
     Kokkos::deep_copy(h_xold, system->xold);
-#endif     
+#endif
+*/
     
     // Now we have to loop for collisions on hinge joints (i.e zipping)
     for (int i = 0; i < nnodes; i++) {
@@ -2130,8 +2131,8 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
         
         for (int j = 0; j < network->conn[i].num; j++) {
             int l3 = network->conn[i].seg[j];
-            if (l3 >= nsegs) continue;
-            if (skipseg[l3]) continue;
+            //if (l3 >= nsegs) continue;
+            //if (skipseg[l3]) continue;
             
             int n3 = network->conn[i].node[j];
             if (n3 >= nnodes) continue;
@@ -2141,8 +2142,8 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
             
             for (int k = j+1; k < network->conn[i].num; k++) {
                 int l4 = network->conn[i].seg[k];
-                if (l4 >= nsegs) continue;
-                if (skipseg[l4]) continue;
+                //if (l4 >= nsegs) continue;
+                //if (skipseg[l4]) continue;
                 
                 int n4 = network->conn[i].node[k];
                 if (n4 >= nnodes) continue;
@@ -2150,9 +2151,7 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
                 Vec3 l14 = p1-p4;
                 if (l14.norm2() < 1e-20) continue;
                 
-                Vec3 pold1 = network->cell.pbc_position(p1, h_xold(i));
-                Vec3 pold3 = network->cell.pbc_position(p3, h_xold(n3));
-                Vec3 pold4 = network->cell.pbc_position(p4, h_xold(n4));
+                bool tri = (network->find_connection(n3, n4) != -1);
                 
                 /* First interval considered : [t-delta t, t] */
                 //double dist2 = 0.0;
@@ -2162,8 +2161,7 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
                                                                  &pold1[0],&p1[0],&pold4[0],&p4[0],
                                                                  &pold3[0],&p3[0],&pold3[0],&p3[0]);
                 */
-                int collisionConditionIsMet = HingeCollisionCriterion(&L1,&p1[0],&p3[0],&p4[0]);
-                
+                int collisionConditionIsMet = HingeCollisionCriterion(&L1,&p1[0],&p3[0],&p4[0],tri);
                 if (!collisionConditionIsMet) {
                     // No collision in the past, look for a possible collision in the future....
                     Vec3 pnext1 = p1 + dt * network->nodes[i].v;
@@ -2174,7 +2172,7 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
                                                                  &p1[0],&pnext1[0],&p4[0],&pnext4[0],
                                                                  &p3[0],&pnext3[0],&p3[0],&pnext3[0]);
                     */
-                    collisionConditionIsMet = HingeCollisionCriterion(&L1,&pnext1[0],&pnext3[0],&pnext4[0]);
+                    collisionConditionIsMet = HingeCollisionCriterion(&L1,&pnext1[0],&pnext3[0],&pnext4[0],tri);
                 }
                 if (!collisionConditionIsMet) continue;
                 
@@ -2253,7 +2251,7 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
                 }
                 
                 // Test for glide plane violations
-                if (system->crystal.enforce_glide_planes) {
+                if (system->crystal.enforce_glide_planes && !tri) {
                     if (!test_collision_glide_planes(system, network, mergenode1, newpos, 0) ||
                         !test_collision_glide_planes(system, network, mergenode2, newpos, 0))
                         continue;
