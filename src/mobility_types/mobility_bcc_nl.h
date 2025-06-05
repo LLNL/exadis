@@ -238,6 +238,10 @@ struct MobilityBCC_nl
             
             Vec3 r1 = nodes[i].pos;
             
+            Vec3 norm[3];
+            int ngc = 0;
+            Mat33 P = Mat33().eye();
+            
             int numNonZeroLenSegs = 0;
             int numscrews = 0;
             int numedges = 0;
@@ -337,6 +341,21 @@ struct MobilityBCC_nl
                             numedges++;
                         } else {
                             dfndfedge[edgeid] += 0.5 * LEdge;
+                        }
+                    }
+                }
+                
+                if (system->crystal.enforce_glide_planes) {
+                    // Find independent glide constraints
+                    Vec3 plane = segs[s].plane.normalized();
+                    if (ngc < 3) {
+                        for (int k = 0; k < ngc; k++)
+                            plane = plane.orthogonalize(norm[k]);
+                        if (plane.norm2() >= 0.05) {
+                            plane = plane.normalized();
+                            Mat33 Q = Mat33().eye() - outer(plane, plane);
+                            P = Q * P;
+                            norm[ngc++] = plane;
                         }
                     }
                 }
@@ -510,6 +529,16 @@ struct MobilityBCC_nl
                 }
             
             } /* while (notConverged) */
+            
+            if (system->crystal.enforce_glide_planes) {
+                // Zero-out tiny non-zero components due to round-off errors
+                for (int j = 0; j < 3; j++)
+                    for (int k = 0; k < 3; k++)
+                        if (fabs(P[j][k]) < 1e-10) P[j][k] = 0.0;
+                
+                // Apply glide constraints    
+                vtest = P * vtest;
+            }
             
             vi = vtest;
             if (params.vmax > 0.0) {
