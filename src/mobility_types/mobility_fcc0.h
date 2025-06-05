@@ -46,7 +46,10 @@ struct MobilityFCC0
     {
         if (system->crystal.type != FCC_CRYSTAL)
             ExaDiS_fatal("Error: MobilityFCC0 must be used with FCC crystal type\n");
-            
+        
+        if (!system->crystal.use_glide_planes)
+            ExaDiS_fatal("Error: MobilityFCC0 requires the use of glide planes\n");
+        
         if (params.Medge < 0 || params.Mscrew < 0.0)
             ExaDiS_fatal("Error: invalid MobilityFCC0 parameter values\n");
         
