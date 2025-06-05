@@ -142,7 +142,7 @@ def example2():
     print('EXAMPLE2')
     
     G = ExaDisNet()
-    G.generate_prismatic_config(crystal='bcc', Lbox=300.0, numsources=24, radius=60.0)
+    G.generate_prismatic_config(crystal='bcc', Lbox=300.0, num_loops=24, radius=60.0)
     N = DisNetManager(G)
     
     f_pydis = compute_pydis(N)
