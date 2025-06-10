@@ -8,7 +8,7 @@ Nicolas Bertin
 bertin1@llnl.gov
 """
 
-import os
+import os, time
 import numpy as np
 
 from typing import Tuple
@@ -830,6 +830,36 @@ class SimulateNetwork:
             
         return state
         
+    def step_print_info(self, N: DisNetManager, state: dict):
+        """step_print_info: invoked to print info at the end of each step
+        """
+        if self.print_freq != None:
+            if state["istep"] % self.print_freq == 0:
+                dt = self.timeint.dt if self.timeint else 0.0
+                Nnodes = N.num_nodes()
+                elapsed = time.perf_counter()-self.t0
+                if self.loading_mode == 'strain_rate':
+                    print("step = %d, nodes = %d, dt = %e, strain = %e, elapsed = %.1f sec"%(state["istep"], Nnodes, dt, state["strain"], elapsed))
+                else:
+                    print("step = %d, nodes = %d, dt = %e, time = %e, elapsed = %.1f sec"%(state["istep"], Nnodes, dt, state["time"], elapsed))
+                self.results.append([state["istep"], state["strain"], state["stress"], state["density"], elapsed])
+        
+    def step_visualize(self, N: DisNetManager, state: dict):
+        """step_visualize: invoked to visualize the configuration at the end of each step
+        """
+        if self.vis != None and self.plot_freq != None:
+            if state["istep"] % self.plot_freq == 0:
+                self.vis.plot_disnet(N, state=state, trim=True, block=False, pause_seconds=self.plot_pause_seconds)
+        
+    def step_write_files(self, N: DisNetManager, state: dict):
+        """step_write_files: invoked to write files at the end of each step
+        """
+        if self.write_freq != None:
+            if state["istep"] % self.write_freq == 0:
+                N.get_disnet(ExaDisNet).write_data(os.path.join(self.write_dir, 'config.%d.data'%state["istep"]))
+                # dump current results into file
+                if self.print_freq != None: self.write_results()
+    
     def step_end(self, N: DisNetManager, state: dict):
         """step_end: invoked at the end of each time step
         """
@@ -853,6 +883,11 @@ class SimulateNetwork:
         # Step update response
         self.step_update_response(N, state)
         
+        # Step output and visualization
+        self.step_write_files(N, state)
+        self.step_print_info(N, state)
+        self.step_visualize(N, state)
+        
         # Step end
         self.step_end(N, state)
         
@@ -861,8 +896,7 @@ class SimulateNetwork:
         if self.restart is not None:
             raise ValueError('Restart option only supported with SimulateNetworkPerf driver')
         
-        import time
-        t0 = time.perf_counter()
+        self.t0 = time.perf_counter()
         
         if self.vis != None and self.plot_freq != None:
             self.vis.plot_disnet(N, state=state, trim=True, block=False)
@@ -875,30 +909,8 @@ class SimulateNetwork:
         max_step = start_step + self.num_steps if self.num_steps is not None else self.max_step
         
         for tstep in range(start_step, max_step):
-        
             state["istep"] = tstep+1
             self.step(N, state)
-
-            if self.print_freq != None:
-                if state["istep"] % self.print_freq == 0:
-                    dt = self.timeint.dt if self.timeint else 0.0
-                    Nnodes = N.num_nodes()
-                    elapsed = time.perf_counter()-t0
-                    if self.loading_mode == 'strain_rate':
-                        print("step = %d, nodes = %d, dt = %e, strain = %e, elapsed = %.1f sec"%(state["istep"], Nnodes, dt, state["strain"], elapsed))
-                    else:
-                        print("step = %d, nodes = %d, dt = %e, time = %e, elapsed = %.1f sec"%(state["istep"], Nnodes, dt, state["time"], elapsed))
-                    self.results.append([state["istep"], state["strain"], state["stress"], state["density"], elapsed])
-
-            if self.vis != None and self.plot_freq != None:
-                if state["istep"] % self.plot_freq == 0:
-                    self.vis.plot_disnet(N, state=state, trim=True, block=False, pause_seconds=self.plot_pause_seconds)
-            
-            if self.write_freq != None:
-                if state["istep"] % self.write_freq == 0:
-                    N.get_disnet(ExaDisNet).write_data(os.path.join(self.write_dir, 'config.%d.data'%state["istep"]))
-                    # dump current results into file
-                    if self.print_freq != None: self.write_results()
             
         # write results
         if self.print_freq != None:
@@ -909,7 +921,7 @@ class SimulateNetwork:
             self.vis.plot_disnet(N, trim=True, block=False)
             
         t1 = time.perf_counter()
-        print('RUN TIME: %f sec' % (t1-t0))
+        print('RUN TIME: %f sec' % (t1-self.t0))
         
         return state
 
@@ -959,7 +971,6 @@ class SimulateNetworkPerf(SimulateNetwork):
     def run(self, N: DisNetManager, state: dict):
         """run: run DDD simulation
         """
-        import time
         t0 = time.perf_counter()
         
         # check modules are from exadis
