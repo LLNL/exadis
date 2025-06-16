@@ -378,7 +378,7 @@ struct RandomGenerator {
     
     template<class ExecutionSpace>
     KOKKOS_FORCEINLINE_FUNCTION
-    int rand(int min, int max) {
+    int rand(int min, int max) const {
         if constexpr (std::is_same<ExecutionSpace,Kokkos::Serial>::value) {
             auto generator = random_pool_serial.get_state();
             int val = generator.rand(min, max);
@@ -394,7 +394,7 @@ struct RandomGenerator {
     
     template<class ExecutionSpace>
     KOKKOS_FORCEINLINE_FUNCTION
-    double drand(double min, double max) {
+    double drand(double min, double max) const {
         if constexpr (std::is_same<ExecutionSpace,Kokkos::Serial>::value) {
             auto generator = random_pool_serial.get_state();
             double val = generator.drand(min, max);
