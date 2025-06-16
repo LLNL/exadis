@@ -895,6 +895,9 @@ class SimulateNetwork:
         
         if self.restart is not None:
             raise ValueError('Restart option only supported with SimulateNetworkPerf driver')
+            
+        if not isinstance(self.timeint, TimeIntegration):
+            self.exadis_plastic_strain = False
         
         self.t0 = time.perf_counter()
         
