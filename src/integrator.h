@@ -25,8 +25,8 @@ public:
     double nextdt;
 public:
     Integrator() {}
-    Integrator(System *system) {}
-    virtual void integrate(System *system) {}
+    Integrator(System* system) {}
+    virtual void integrate(System* system) {}
     virtual KOKKOS_FUNCTION ~Integrator() {}
     virtual const char* name() { return "IntegratorNone"; }
     
@@ -46,26 +46,28 @@ public:
  *-------------------------------------------------------------------------*/
 class IntegratorEuler : public Integrator {    
 public:
-    IntegratorEuler(System *system) {
+    IntegratorEuler(System* system) {
         nextdt = system->params.nextdt;
     }
     
-    void integrate(System *system)
+    void integrate(System* system)
     {
         Kokkos::fence();
         system->timer[system->TIMER_INTEGRATION].start();
         
         double dt = nextdt;
         
-        auto network = system->get_device_network();
+        DeviceDisNet* net = system->get_device_network();
         
-        Kokkos::resize(system->xold, network->Nnodes_local);
+        Kokkos::resize(system->xold, net->Nnodes_local);
         
-        Kokkos::parallel_for(network->Nnodes_local, KOKKOS_LAMBDA(const int i)
-        {
-            system->xold(i) = network->nodes(i).pos;
-            Vec3 rnew = network->nodes(i).pos + dt*network->nodes(i).v;
-            network->nodes(i).pos = network->cell.pbc_fold(rnew);
+        Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int i) {
+            auto nodes = net->get_nodes();
+            auto cell = net->cell;
+            
+            system->xold(i) = nodes[i].pos;
+            Vec3 rnew = nodes[i].pos + dt*nodes[i].v;
+            nodes[i].pos = cell.pbc_fold(rnew);
         });
         
         system->realdt = dt;
