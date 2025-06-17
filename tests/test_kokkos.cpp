@@ -23,6 +23,7 @@ void test_memory()
     Kokkos::parallel_for(N, KOKKOS_LAMBDA(const int& i) {
         array(i) = 2*i;
     });
+    Kokkos::fence();
     
     auto h_array = Kokkos::create_mirror_view(array);
     Kokkos::deep_copy(h_array, array);
@@ -48,6 +49,7 @@ void test_unified_memory()
     Kokkos::parallel_for(N, KOKKOS_LAMBDA(const int& i) {
         array(i) = 2*i;
     });
+    Kokkos::fence();
     
     int error = 0;
     for (int i = 0; i < N; i++)
