@@ -409,7 +409,7 @@ private:
     static const bool _use_compute_map = false;
 #endif
     
-    int TIMER_SEGSEGLIST;
+    int TIMER_SEGSEGLIST, TIMER_COMPUTE;
     
 public:
     //typedef typename SegSegList::Params Sparams;
@@ -423,33 +423,29 @@ public:
         Params(double _cutoff, Fparams _fparams) : cutoff(_cutoff), fparams(_fparams) {}
     };
     
-    ForceSegSegList(System *system, Params params) {
-        segseglist = exadis_new<SegSegList>(system, params.cutoff, params.use_compute_map);
+    ForceSegSegList(System* system, Params params) {
         force = exadis_new<F>(system, params.fparams);
-        TIMER_SEGSEGLIST = system->add_timer("SegSegList build");
+        initialize(system, params.cutoff, params.use_compute_map);
     }
     
-    ForceSegSegList(System *system, double cutoff, Fparams fparams=Fparams()) {
-        segseglist = exadis_new<SegSegList>(system, cutoff, _use_compute_map);
+    ForceSegSegList(System* system, double cutoff, Fparams fparams=Fparams()) {
         force = exadis_new<F>(system, fparams);
-        TIMER_SEGSEGLIST = system->add_timer("SegSegList build");
+        initialize(system, cutoff, _use_compute_map);
     }
     
     template<class FLong>
-    ForceSegSegList(System *system, FLong *flong) {
-        double cutoff = flong->get_neighbor_cutoff();
-        segseglist = exadis_new<SegSegList>(system, cutoff, _use_compute_map);
+    ForceSegSegList(System* system, FLong* flong) {
         force = exadis_new<F>(system, flong);
-        TIMER_SEGSEGLIST = system->add_timer("SegSegList build");
-    }
-
-    template<class FLong>
-    void initialize(FLong *flong) {
         double cutoff = flong->get_neighbor_cutoff();
-        set_cutoff(cutoff);
+        initialize(system, cutoff, _use_compute_map);
     }
     
-    void set_cutoff(System* system, double cutoff) { segseglist->set_cutoff(system, cutoff); }
+    void initialize(System* system, double cutoff, bool use_compute_map) {
+        segseglist = exadis_new<SegSegList>(system, cutoff, use_compute_map);
+        TIMER_SEGSEGLIST = system->add_timer("ForceSegSegList build list");
+        TIMER_COMPUTE = system->add_timer("ForceSegSegList compute forces");
+    }
+    
     double get_cutoff() { return segseglist->cutoff; }
     SegSegList* get_segseglist() { return segseglist; }
 
@@ -552,14 +548,15 @@ public:
         segseglist->build_list<DeviceDisNet>(system, net);
         
         Kokkos::fence();
-        system->timer[system->TIMER_FORCE].stop();
         system->devtimer[TIMER_SEGSEGLIST].stop();
+        system->timer[system->TIMER_FORCE].stop();
     }
     
     void compute(System *system, bool zero=true)
     {
         Kokkos::fence();
         system->timer[system->TIMER_FORCE].start();
+        system->devtimer[TIMER_COMPUTE].start();
         
         DeviceDisNet *net = system->get_device_network();
         if (zero) zero_force(net);
@@ -589,12 +586,13 @@ public:
         }
         
         Kokkos::fence();
+        system->devtimer[TIMER_COMPUTE].stop();
         system->timer[system->TIMER_FORCE].stop();
     }
     
-    Vec3 node_force(System *system, const int &i)
+    Vec3 node_force(System* system, const int& i)
     {
-        SerialDisNet *net = system->get_serial_network();
+        SerialDisNet* net = system->get_serial_network();
         auto nodes = net->get_nodes();
         auto conn = net->get_conn();
         
