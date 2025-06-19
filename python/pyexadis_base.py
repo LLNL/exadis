@@ -941,6 +941,7 @@ class SimulateNetworkPerf(SimulateNetwork):
         self.max_walltime = kwargs.get('max_walltime', None)
         self.out_props = kwargs.get('out_props', None)
         
+        self.write_freq_dt = kwargs.get('write_freq_dt', None)
         self.oprecwritefreq = kwargs.get('oprecwritefreq', 0)
         self.oprecfilefreq = kwargs.get('oprecfilefreq', 0)
         self.oprecposfreq = kwargs.get('oprecposfreq', 0)
@@ -955,6 +956,8 @@ class SimulateNetworkPerf(SimulateNetwork):
             "strain_rate": pyexadis.Driver.STRAIN_RATE_CONTROL,
             "stress": pyexadis.Driver.STRESS_CONTROL
         }
+        if not self.loading_mode in loading:
+            raise ValueError(f'Invalid loading mode {self.loading_mode} in SimulateNetworkPerf driver')
         ctrl.loading = loading[self.loading_mode]
         if self.loading_mode == 'strain_rate':
             ctrl.erate = self.erate
@@ -963,7 +966,10 @@ class SimulateNetworkPerf(SimulateNetwork):
         if self.rotation is not None: ctrl.rotation = self.rotation
         ctrl.printfreq = self.print_freq
         ctrl.propfreq = self.print_freq
-        ctrl.outfreq = self.write_freq
+        if self.write_freq_dt is not None:
+            ctrl.outfreqdt = self.write_freq_dt
+        else:
+            ctrl.outfreq = self.write_freq
         if self.out_props is not None:
             ctrl.set_props(self.out_props)
         ctrl.oprecwritefreq = self.oprecwritefreq

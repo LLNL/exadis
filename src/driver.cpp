@@ -165,6 +165,10 @@ void ExaDiSApp::write_restart(std::string restartfile)
     fprintf(fp, "pstrain %.17g\n", pstrain);
     fprintf(fp, "tottime %.17g\n", tottime);
     fprintf(fp, "edir %.17g %.17g %.17g\n", edir.x, edir.y, edir.z);
+    if (outfilecounter > 0 || outfiletime > 0.0) {
+        fprintf(fp, "outfiletime %.17g\n", outfiletime);
+        fprintf(fp, "outfilecounter %d\n", outfilecounter);
+    }
     if (system->oprec) fprintf(fp, "opreccounter %d\n", system->oprec->filecounter);
     fprintf(fp, "\n");
     
@@ -265,6 +269,8 @@ void ExaDiSApp::read_restart(std::string restartfile)
         else if (strncmp(line, "pstrain", 7) == 0) { sscanf(line, "pstrain %lf\n", &pstrain); }
         else if (strncmp(line, "tottime", 7) == 0) { sscanf(line, "tottime %lf\n", &tottime); }
         else if (strncmp(line, "edir", 4) == 0) { sscanf(line, "edir %lf %lf %lf\n", &edir.x, &edir.y, &edir.z); }
+        else if (strncmp(line, "outfiletime", 11) == 0) { sscanf(line, "outfiletime %lf\n", &outfiletime); }
+        else if (strncmp(line, "outfilecounter", 14) == 0) { sscanf(line, "outfilecounter %d\n", &outfilecounter); }
         else if (strncmp(line, "opreccounter", 12) == 0) {
             if (system->oprec) sscanf(line, "opreccounter %d\n", &system->oprec->filecounter);
         }
@@ -483,17 +489,24 @@ void ExaDiSApp::output(Control& ctrl)
     }
     
     // Output configuration
-    if (istep%ctrl.outfreq == 0) {
-        system->write_config(outputdir+"/config."+std::to_string(istep)+".data");
+    bool out = (ctrl.outfreqdt > 0.0) ? (tottime >= outfiletime+ctrl.outfreqdt) : (istep%ctrl.outfreq == 0);
+    if (out) {
+        int outfilenum = istep;
+        if (ctrl.outfreqdt > 0.0) {
+            outfiletime = tottime;
+            outfilenum = ++outfilecounter;
+        }
+        
+        system->write_config(outputdir+"/config."+std::to_string(outfilenum)+".data");
         
         // Restart files
-        write_restart(outputdir+"/restart."+std::to_string(istep)+".exadis");
+        write_restart(outputdir+"/restart."+std::to_string(outfilenum)+".exadis");
         
         // Timers
         if (istep > 0) {
             std::string filename;
             if (timeronefile) filename = outputdir+"/timer.dat";
-            else filename = outputdir+"/timer."+std::to_string(istep)+".dat";
+            else filename = outputdir+"/timer."+std::to_string(outfilenum)+".dat";
             FILE *fp = fopen(filename.c_str(), "a");
             if (fp == NULL)
                 ExaDiS_fatal("Error: cannot open output file %s\n", filename.c_str());

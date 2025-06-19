@@ -48,6 +48,8 @@ public:
     
     Kokkos::Timer timer;
     bool timeronefile = true;
+    double outfiletime = 0.0;
+    int outfilecounter = 0;
     
     struct Stepper {
         enum Types {NUM_STEPS, MAX_STEPS, MAX_STRAIN, MAX_TIME, MAX_WALLTIME};
@@ -96,6 +98,7 @@ public:
         int printfreq = 1;
         int propfreq = 10;
         int outfreq = 100;
+        double outfreqdt = -1.0;
         int oprecwritefreq = 0;
         int oprecfilefreq = 0;
         int oprecposfreq = 0;

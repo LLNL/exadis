@@ -1248,6 +1248,7 @@ PYBIND11_MODULE(pyexadis, m) {
         .def_readwrite("printfreq", &Driver::Control::printfreq, "Print frequency")
         .def_readwrite("propfreq", &Driver::Control::propfreq, "Properties output frequency")
         .def_readwrite("outfreq", &Driver::Control::outfreq, "Configuration and restart output frequency")
+        .def_readwrite("outfreqdt", &Driver::Control::outfreqdt, "Configuration and restart output time frequency")
         .def("set_props", &Driver::Control::set_props, "Set property fields for the output")
         .def_readwrite("oprecwritefreq", &Driver::Control::oprecwritefreq, "OpRec write frequency")
         .def_readwrite("oprecfilefreq", &Driver::Control::oprecfilefreq, "OpRec new file frequency")
