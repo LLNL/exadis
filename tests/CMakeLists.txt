@@ -7,8 +7,12 @@ target_link_libraries(test_kokkos PRIVATE Kokkos::kokkos ${EXADIS_LINK_OPTIONS})
 
 if(Kokkos_ENABLE_CUDA)
     add_executable(test_cuda test_cuda.cpp)
-    target_link_libraries(test_cuda PRIVATE cudart)
+    target_link_libraries(test_cuda PRIVATE ${EXADIS_EXTERN_LIBS})
 endif()
+
+add_executable(test_system test_system.cpp)
+target_include_directories(test_system PRIVATE ${EXADIS_INCLUDE_DIRS})
+target_link_libraries(test_system PRIVATE exadis ${EXADIS_EXTERN_LIBS})
 
 add_executable(test_exadis test_exadis.cpp)
 target_include_directories(test_exadis PRIVATE ${EXADIS_INCLUDE_DIRS})
