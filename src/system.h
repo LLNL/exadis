@@ -46,7 +46,8 @@ public:
     
     System();
     ~System();
-    void initialize(Params _params, Crystal _crystal, SerialDisNet *network);
+    System(const System&) = delete;
+    void initialize(Params _params, Crystal _crystal, SerialDisNet* network);
     void register_neighbor_cutoff(double cutoff);
     void plastic_strain();
     void reset_glide_planes();
