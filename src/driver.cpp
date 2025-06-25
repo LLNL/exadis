@@ -490,11 +490,11 @@ void ExaDiSApp::output(Control& ctrl)
     
     // Output configuration
     bool out = (ctrl.outfreqdt > 0.0) ? (tottime >= outfiletime+ctrl.outfreqdt) : (istep%ctrl.outfreq == 0);
-    if (out) {
+    if (out || istep == 0) {
         int outfilenum = istep;
         if (ctrl.outfreqdt > 0.0) {
             outfiletime = tottime;
-            outfilenum = ++outfilecounter;
+            outfilenum = outfilecounter++;
         }
         
         system->write_config(outputdir+"/config."+std::to_string(outfilenum)+".data");
