@@ -2,8 +2,9 @@ set(Kokkos_ENABLE_SERIAL On)
 set(Kokkos_ENABLE_OPENMP Off)
 
 set(PYTHON_EXECUTABLE /Users/bertin1/opt/anaconda3/bin/python)
-set(FFTW_INC_DIR /Users/bertin1/Documents/Codes/p365_bcc_nl_mob/ext/include/fftw)
-set(FFTW_LIB_DIR /Users/bertin1/Documents/Codes/p365_bcc_nl_mob/ext/lib)
+
+set(FFTW_INC_DIR /Users/bertin1/Documents/Codes/Libraries/fftw-3.3.10/install_test/include)
+set(FFTW_LIB_DIR /Users/bertin1/Documents/Codes/Libraries/fftw-3.3.10/install_test/lib)
 
 set(EXADIS_BUILD_EXAMPLES OFF)
 set(EXADIS_BUILD_TESTS ON)

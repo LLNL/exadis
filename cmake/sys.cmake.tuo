@@ -9,3 +9,5 @@ set(Kokkos_ARCH_AMD_GFX942_APU On)
 
 set(CMAKE_CXX_COMPILER hipcc)
 set(CMAKE_C_COMPILER hipcc)
+
+set(PYTHON_EXECUTABLE /usr/tce/bin/python3)
