@@ -13,6 +13,7 @@ Implements utility functions for the ExaDiS python binding
 * dislocation_density()
 * dislocation_charge()
 
+* replicate_network()
 * combine_networks()
 * extract_segments()
 * delete_segments()
@@ -443,6 +444,84 @@ def read_paradis(datafile: str) -> DisNetManager:
     G = ExaDisNet()
     G.read_paradis(datafile)
     return DisNetManager(G)
+
+
+def replicate_network(N: DisNetManager, Nrep) -> DisNetManager:
+    """ Periodically replicate a dislocation network along the three dimensions
+    """
+    import copy
+    
+    if np.isscalar(Nrep): Nrep = Nrep*np.ones(3)
+    Nrep = np.array(Nrep).astype(int)
+    if np.any(Nrep < 1):
+        raise ValueError('replicate_network(): periodic replica (%d,%d,%d) must be at least 1 in each direction' % tuple(Nrep))
+    if np.all(Nrep == 1):
+        return N
+    
+    # cell
+    data = N.export_data()
+    cell0 = pyexadis.Cell(**data["cell"])
+    h0 = np.array(cell0.h)
+    c1, c2, c3 = h0[:,0], h0[:,1], h0[:,2]
+    data["cell"]["h"] *= Nrep
+    nodes = data["nodes"]
+    nodes0 = copy.deepcopy(nodes)
+    num_nodes = nodes["positions"].shape[0]
+    
+    # periodic nodes replica
+    for i3 in range(Nrep[2]):
+        for i2 in range(Nrep[1]):
+            for i1 in range(Nrep[0]):
+                if i1 == 0 and i2 == 0 and i3 == 0: continue
+                cnodes = copy.deepcopy(nodes0)
+                cnodes["positions"] += i1*c1 + i2*c2 + i3*c3
+                for k, v in nodes.items():
+                    nodes[k] = np.vstack((nodes[k], cnodes[k]))
+    
+    # periodic link replica
+    segs = data["segs"]
+    segs0 = copy.deepcopy(segs)
+    nodeids = segs["nodeids"]
+    num_segs = nodeids.shape[0]
+    p1 = nodes0["positions"][nodeids[:,0]]
+    p2 = nodes0["positions"][nodeids[:,1]]
+    p2 = np.array(cell0.closest_image(Rref=p1, R=p2))
+    repseg = ~np.array(cell0.are_inside(p2), dtype=bool)
+    
+    nr = 1
+    for i3 in range(Nrep[2]):
+        for i2 in range(Nrep[1]):
+            for i1 in range(Nrep[0]):
+                if i1 == 0 and i2 == 0 and i3 == 0: continue
+                csegs = copy.deepcopy(segs0)
+                csegs["nodeids"] += nr * num_nodes
+                for k, v in segs.items():
+                    segs[k] = np.vstack((segs[k], csegs[k]))
+                nr += 1
+    
+    # reconnect links across PBC boundaries
+    cell = pyexadis.Cell(**data["cell"])
+    for s in range(num_segs):
+        if not repseg[s]: continue
+        for r1 in range(np.prod(Nrep)):
+            sr = s + r1 * num_segs
+            n1 = segs["nodeids"][sr,0]
+            n2 = segs["nodeids"][sr,1] % num_nodes
+            # find closest neighbor among PBC images
+            n2p = [n2 + r2 * num_nodes for r2 in range(np.prod(Nrep))]
+            p1 = nodes["positions"][n1]
+            p2 = nodes["positions"][n2p]
+            p2 = np.array(cell.closest_image(Rref=p1, R=p2))
+            dist = np.linalg.norm(p2-p1, axis=1)
+            imin = np.argmin(dist).ravel()[0]
+            segs["nodeids"][sr,1] = n2p[imin]
+    
+    # reset node tags to make sure they are unique
+    num_tot_nodes = num_nodes * np.prod(Nrep)
+    nodes["tags"] = np.stack((np.zeros(num_tot_nodes), np.arange(num_tot_nodes))).T
+    Nnew = DisNetManager(ExaDisNet().import_data(data))
+    
+    return Nnew
 
 
 def combine_networks(Nlist) -> DisNetManager:
