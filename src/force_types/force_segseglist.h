@@ -403,7 +403,7 @@ private:
     SegSegList* segseglist;
     F* force; // segsegforce kernel
     
-#if defined(KOKKOS_ENABLE_HIP)
+#if defined(EXADIS_USE_COMPUTE_MAPS)
     static const bool _use_compute_map = true;
 #else
     static const bool _use_compute_map = false;

@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.14)
 option(EXADIS_PYTHON_BINDING "Build ExaDiS python module" ON)
 option(EXADIS_FFT "Build ExaDiS ForceFFT module" ON)
 option(EXADIS_FULL_UNIFIED_MEMORY "Maximal use of unified memory" ON)
+option(EXADIS_USE_COMPUTE_MAPS "Use compute maps instead of atomics" OFF)
 
 option(EXADIS_BUILD_EXAMPLES "Build ExaDiS examples" OFF)
 option(EXADIS_BUILD_TESTS "Build ExaDiS tests" OFF)
@@ -112,6 +113,9 @@ set(EXADIS_EXTERN_LIBS
 add_definitions(-DEXADIS_ROOT_DIR=${CMAKE_CURRENT_SOURCE_DIR})
 if(NOT EXADIS_FULL_UNIFIED_MEMORY)
     add_definitions(-DEXADIS_FULL_UNIFIED_MEMORY=0)
+endif()
+if(EXADIS_USE_COMPUTE_MAPS)
+    add_definitions(-DEXADIS_USE_COMPUTE_MAPS)
 endif()
 
 add_subdirectory(src)

@@ -281,32 +281,51 @@ public:
  *-------------------------------------------------------------------------*/
 template <class F>
 class ForceSeg : public Force {
+private:
+#if defined(EXADIS_USE_COMPUTE_MAPS)
+    const bool use_map = true;
+#else
+    const bool use_map = false;
+#endif
+    Kokkos::View<SegForce*> fmap;
+    
+    int TIMER_COMP;
+    
 public:
     typedef typename F::Params Params;
     F *force; // force kernel
     
     ForceSeg(System *system, Params params=Params()) {
         force = exadis_new<F>(system, params);
+        TIMER_COMP = system->add_timer(std::string(F::name)+" compute");
     }
+    
+    struct TagComputeForce {};
+    struct TagMapForce {};
     
     template<class N>
     struct AddSegmentForce {
-        System *system;
-        F *force;
-        N *net;
-        AddSegmentForce(System *_system, F *_force, N *_net) : system(_system), force(_force), net(_net) {}
+        System* system;
+        ForceSeg<F>* f;
+        N* net;
+        AddSegmentForce(System* _system, ForceSeg<F>* _f, N* _net) :
+        system(_system), f(_f), net(_net) {}
         
         KOKKOS_INLINE_FUNCTION
-        void operator()(const int &i) const {
+        void operator()(TagComputeForce, const int& i) const {
             auto nodes = net->get_nodes();
             auto segs = net->get_segs();
             int n1 = segs[i].n1;
             int n2 = segs[i].n2;
             
-            SegForce fseg = force->segment_force(system, net, i);
+            SegForce fseg = f->force->segment_force(system, net, i);
             
-            Kokkos::atomic_add(&nodes[n1].f, fseg.f1);
-            Kokkos::atomic_add(&nodes[n2].f, fseg.f2);
+            if (f->use_map) {
+                f->fmap(i) = fseg;
+            } else {
+                Kokkos::atomic_add(&nodes[n1].f, fseg.f1);
+                Kokkos::atomic_add(&nodes[n2].f, fseg.f2);
+            }
         }
         
         KOKKOS_INLINE_FUNCTION
@@ -318,10 +337,24 @@ public:
             int n1 = segs[i].n1;
             int n2 = segs[i].n2;
             
-            SegForce fseg = force->segment_force(system, net, i, team);
+            SegForce fseg = f->force->segment_force(system, net, i, team);
             
             Kokkos::atomic_add(&nodes[n1].f, fseg.f1);
             Kokkos::atomic_add(&nodes[n2].f, fseg.f2);
+        }
+        
+        KOKKOS_INLINE_FUNCTION
+        void operator()(TagMapForce, const int& i) const {
+            auto nodes = net->get_nodes();
+            auto conn = net->get_conn();
+            
+            Vec3 fn(0.0);
+            for (int j = 0; j < conn[i].num; j++) {
+                int k = conn[i].seg[j];
+                SegForce fseg = f->fmap(k);
+                fn += ((conn[i].order[j] == 1) ? fseg.f1 : fseg.f2);
+            }
+            nodes[i].f += fn;
         }
     };
     
@@ -347,11 +380,21 @@ public:
         
         if constexpr (F::has_compute_team) {
             Kokkos::parallel_for(Kokkos::TeamPolicy<>(net->Nsegs_local, Kokkos::AUTO),
-                AddSegmentForce<DeviceDisNet>(system, force, net)
+                AddSegmentForce<DeviceDisNet>(system, this, net)
             );
         } else {
-            using policy = Kokkos::RangePolicy<Kokkos::LaunchBounds<64,1>>;
-            Kokkos::parallel_for(policy(0, net->Nsegs_local), AddSegmentForce<DeviceDisNet>(system, force, net));
+            
+            if (use_map) {
+                resize_view(fmap, net->Nsegs_local);
+            }
+            
+            using policy = Kokkos::RangePolicy<TagComputeForce,Kokkos::LaunchBounds<64,1>>;
+            Kokkos::parallel_for(policy(0, net->Nsegs_local), AddSegmentForce<DeviceDisNet>(system, this, net));
+            
+            if (use_map) {
+                using policy = Kokkos::RangePolicy<TagMapForce,Kokkos::LaunchBounds<64,1>>;
+                Kokkos::parallel_for(policy(0, net->Nnodes_local), AddSegmentForce<DeviceDisNet>(system, this, net));
+            }
         }
         
         Kokkos::fence();
