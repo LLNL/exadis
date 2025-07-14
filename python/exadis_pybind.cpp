@@ -418,14 +418,14 @@ ForceBind make_force(Params& params, typename F::Params fparams)
 
 template<bool subcycling>
 ForceBind make_force_ddd_fft(Params& params, ForceType::CORE_SELF_PKEXT::Params coreparams,
-                             std::vector<int> Ngrid, Cell& cell, bool drift)
+                             std::vector<int> Ngrid, Cell& cell, bool drift, bool flong_group0)
 {
     params.check_params();
     System* system = make_system(new SerialDisNet(cell), Crystal(params.crystal), params);
     
     Force* force;
     if (subcycling) {
-        ForceType::SUBCYCLING_MODEL::Params subcycparams(Ngrid[0], Ngrid[1], Ngrid[2], drift);
+        ForceType::SUBCYCLING_MODEL::Params subcycparams(Ngrid[0], Ngrid[1], Ngrid[2], drift, flong_group0);
         subcycparams.FSegParams = coreparams;
         force = exadis_new<ForceType::SUBCYCLING_MODEL>(system, subcycparams);
     } else {
@@ -1206,9 +1206,9 @@ PYBIND11_MODULE(pyexadis, m) {
     m.def("make_force_cutoff", &make_force<ForceType::CUTOFF_MODEL>, "Instantiate a cutoff force model",
           py::arg("params"), py::arg("cutoffparams"));
     m.def("make_force_ddd_fft", &make_force_ddd_fft<0>, "Instantiate a DDD-FFT force model",
-          py::arg("params"), py::arg("coreparams"), py::arg("Ngrid"), py::arg("cell"), py::arg("drift")=0);
+          py::arg("params"), py::arg("coreparams"), py::arg("Ngrid"), py::arg("cell"), py::arg("drift")=0, py::arg("flong_group0")=true);
     m.def("make_force_subcycling", &make_force_ddd_fft<1>, "Instantiate a subcycling force model",
-          py::arg("params"), py::arg("coreparams"), py::arg("Ngrid"), py::arg("cell"), py::arg("drift")=0);
+          py::arg("params"), py::arg("coreparams"), py::arg("Ngrid"), py::arg("cell"), py::arg("drift")=0, py::arg("flong_group0")=true);
     m.def("make_force_python", &make_force_python, "Instantiate a python-based force model",
           py::arg("params"), py::arg("force"));
     

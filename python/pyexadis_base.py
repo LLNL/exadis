@@ -247,8 +247,9 @@ class CalForce:
             if not isinstance(cell, pyexadis.Cell):
                 cell = pyexadis.Cell(h=cell.h, origin=cell.origin, is_periodic=cell.is_periodic)
             drift = kwargs.get('drift', 0)
-            self.force = pyexadis.make_force_subcycling(params=self.params, coreparams=coreparams,
-                                                        Ngrid=Ngrid, cell=cell, drift=drift)
+            flong_group0 = kwargs.get('flong_group0', 1)
+            self.force = pyexadis.make_force_subcycling(params=self.params, coreparams=coreparams, Ngrid=Ngrid,
+                                                        cell=cell, drift=drift, flong_group0=flong_group0)
             
         else:
             raise ValueError('Unknown force %s' % force_mode)

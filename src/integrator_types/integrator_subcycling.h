@@ -44,12 +44,13 @@ public:
     typedef ForceFFT FLong;
     typedef ForceSegSegList<SegSegIsoFFT> FSegSeg;
     
-    bool drift;
     FSeg* fseg;
     FLong* flong;
     FSegSeg* fsegseg;
     int Ngroups;
     int group;
+    bool drift;
+    bool flong_group0;
     
     static const int Ngmax = MAXGROUPS;
     Kokkos::View<Vec3*> fgroup[Ngmax-1];
@@ -59,10 +60,15 @@ public:
         FSeg::Params FSegParams;
         FLong::Params FLongParams;
         bool drift = false;
+        bool flong_group0 = true;
         Params(int Ngrid) { FLongParams = FLong::Params(Ngrid); }
         Params(int Nx, int Ny, int Nz) { FLongParams = FLong::Params(Nx, Ny, Nz); }
-        Params(int Ngrid, bool _drift) { FLongParams = FLong::Params(Ngrid); drift = _drift; }
-        Params(int Nx, int Ny, int Nz, bool _drift) { FLongParams = FLong::Params(Nx, Ny, Nz); drift = _drift; }
+        Params(int Ngrid, bool _drift, bool _flong_group0) {
+            FLongParams = FLong::Params(Ngrid); drift = _drift; flong_group0 = _flong_group0;
+        }
+        Params(int Nx, int Ny, int Nz, bool _drift, bool _flong_group0) {
+            FLongParams = FLong::Params(Nx, Ny, Nz); drift = _drift; flong_group0 = _flong_group0;
+        }
         Params(FSeg::Params _FSegParams, FLong::Params _FLongParams) :
         FSegParams(_FSegParams), FLongParams(_FLongParams) {}
     };
@@ -78,8 +84,9 @@ public:
         Ngroups = 0;
         // Assign no group
         group = -1;
-        // Drift scheme
+        // Options
         drift = params.drift;
+        flong_group0 = params.flong_group0;
     }
     
     void init_subforce(System* system, int _Ngroups) {
@@ -132,7 +139,8 @@ public:
         if (group == 0) {
             // This is the group containing the segment forces
             fseg->compute(system, false);
-            flong->compute(system, false);
+            if (flong_group0)
+                flong->compute(system, false);
             fsegseg->compute(system, false);
             // In the drift scheme we integrate under all forces
             // so add all other group forces
@@ -142,6 +150,8 @@ public:
             }
         } else if (group > 0) {
             // These are the groups containing the seg/seg forces
+            if (!flong_group0 && group == Ngroups-1)
+                flong->compute(system, false);
             fsegseg->compute(system, false);
         }
         // Do not compute forces if group = -1
