@@ -257,6 +257,15 @@ struct Cell
     }
     
     KOKKOS_INLINE_FUNCTION
+    bool is_inside(const Vec3& r) const {
+        Vec3 s = scaled_position(r);
+        if      (s.x < 0.0 || s.x > 1.0) return 0;
+        else if (s.y < 0.0 || s.y > 1.0) return 0;
+        else if (s.z < 0.0 || s.z > 1.0) return 0;
+        return 1;
+    }
+    
+    KOKKOS_INLINE_FUNCTION
     double volume() const {
         return fabs(H.det());
     }
@@ -307,6 +316,7 @@ struct Cell
     std::vector<Vec3> pbc_position_array(std::vector<Vec3>& r0, std::vector<Vec3>& r);
     std::vector<Vec3> pbc_position_array(Vec3& r0, std::vector<Vec3>& r);
     std::vector<Vec3> pbc_fold_array(std::vector<Vec3>& r);
+    std::vector<bool> is_inside_array(std::vector<Vec3>& r);
 };
 
 /*---------------------------------------------------------------------------
@@ -351,12 +361,18 @@ public:
     inline void free_tag(NodeTag& tag) {
         if (recycle) recycled_indices.push(tag.index);
     }
+    void refresh_tags() {
+        maxindex = -1;
+        if (recycle) recycled_indices = std::stack<int>();
+        for (int i = 0; i < number_of_nodes(); i++)
+            set_max_tag(nodes[i].tag);
+    }
     
     // We need these to avoid accessing STL functions directly from devices
     int Nnodes_local, Nsegs_local;
-    DisNode *n_ptr;
-    DisSeg *s_ptr;
-    Conn *c_ptr;
+    DisNode* n_ptr;
+    DisSeg* s_ptr;
+    Conn* c_ptr;
     
     KOKKOS_INLINE_FUNCTION DisNode* get_nodes() { return n_ptr; }
     KOKKOS_INLINE_FUNCTION DisSeg* get_segs() { return s_ptr; }
@@ -376,7 +392,7 @@ public:
         cell = Cell(Lbox);
     }
     
-    SerialDisNet(const Cell &_cell) {
+    SerialDisNet(const Cell& _cell) {
         cell = _cell;
     }
     
@@ -394,8 +410,8 @@ public:
         nodes.emplace_back(tag, pos, constraint);
     }
     
-    inline void add_seg(int n1, int n2, const Vec3 &b) { segs.emplace_back(n1, n2, b); }
-    inline void add_seg(int n1, int n2, const Vec3 &b, const Vec3 &p) { segs.emplace_back(n1, n2, b, p); }
+    inline void add_seg(int n1, int n2, const Vec3& b) { segs.emplace_back(n1, n2, b); }
+    inline void add_seg(int n1, int n2, const Vec3& b, const Vec3& p) { segs.emplace_back(n1, n2, b, p); }
     
     inline int find_connection(int n1, int n2) {
         for (int i = 0; i < conn[n1].num; i++)
@@ -431,6 +447,13 @@ public:
     void remove_segs(std::vector<int> seglist);
     void remove_nodes(std::vector<int> nodelist);
     void purge_network();
+    
+    void update() {
+        generate_connectivity();
+        update_ptr();
+        purge_network();
+        refresh_tags();
+    }
     
     std::vector<std::vector<int> > physical_links();
     

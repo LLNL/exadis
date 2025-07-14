@@ -552,8 +552,8 @@ double SerialDisNet::dislocation_density(double burgmag)
  *-------------------------------------------------------------------------*/
 void SerialDisNet::write_data(std::string filename)
 {
-    printf("Exporting configuration in ParaDiS format\n");
-    printf(" Output file: %s\n", filename.c_str());
+    ExaDiS_log("Writing configuration in legacy data format\n");
+    ExaDiS_log(" Output file: %s\n", filename.c_str());
     
     if (conn.empty())
         generate_connectivity();

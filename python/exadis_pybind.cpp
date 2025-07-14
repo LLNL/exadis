@@ -73,12 +73,44 @@ std::vector<std::vector<double> > SerialDisNet::get_segs_array() {
 }
 
 void SerialDisNet::sanity_check() {
-    int Nnodes = (int)number_of_nodes();
+    int Nnodes = number_of_nodes();
     for (int i = 0; i < number_of_segs(); i++) {
         if (segs[i].n1 < 0 || segs[i].n1 >= Nnodes ||
             segs[i].n2 < 0 || segs[i].n2 >= Nnodes)
             ExaDiS_fatal("Error: invalid segment connectivity found in network\n");
     }
+#if 1
+    // Check Burgers vector conservation
+    generate_connectivity();
+    int nb = 0; int nc = 0; int nl = 0; int nd = 0;
+    for (int i = 0; i < number_of_nodes(); i++) {
+        if (conn[i].num == 0) nc++;
+        Vec3 bsum(0.0);
+        for (int j = 0; j < conn[i].num; j++) {
+            Vec3 b = segs[conn[i].seg[j]].burg;
+            bsum += conn[i].order[j]*b;
+            if (b.norm2() < 1e-5) nl++;
+        }
+        double b2 = bsum.norm2();
+        if (b2 > 1e-5) {
+            nb++;
+            //printf("Warning: Burgers vector is not conserved for node %d (bsum = %e, conn = %lu)\n",
+            //i, sqrt(b2), conn[i].size());
+            if (conn[i].num > 1) nd++;
+        }
+    }
+
+    if (nb == 0) {
+        ExaDiS_log("Burgers vector is conserved for all nodes\n");
+    } else {
+        ExaDiS_log("Warning: Burgers vector is not conserved for %d node(s)\n", nb);
+        if (nd > 0) ExaDiS_log(" Warning: Burgers vector is not conserved for %d node(s) with more than 1 arm\n", nd);
+    }
+#if 1
+    if (nc > 0) ExaDiS_log("Warning: %d node(s) are unconnected\n", nc);
+    if (nl > 0) ExaDiS_log("Warning: %d link(s) have zero Burgers vector\n", nl);
+#endif
+#endif
 }
 
 std::vector<int> Cell::get_pbc() {
@@ -107,6 +139,13 @@ std::vector<Vec3> Cell::pbc_fold_array(std::vector<Vec3>& r) {
     for (size_t i = 0; i < r.size(); i++)
         rpbc[i] = pbc_fold(r[i]);
     return rpbc;
+}
+
+std::vector<bool> Cell::is_inside_array(std::vector<Vec3>& r) {
+    std::vector<bool> inside(r.size());
+    for (size_t i = 0; i < r.size(); i++)
+        inside[i] = is_inside(r[i]);
+    return inside;
 }
 
 
@@ -997,13 +1036,21 @@ PYBIND11_MODULE(pyexadis, m) {
         .def("closest_image", (Vec3 (Cell::*)(Vec3&, Vec3&)) &Cell::pbc_position, 
              "Returns the closest image of a position from another", py::arg("Rref"), py::arg("R"))
         .def("pbc_fold", &Cell::pbc_fold_array, "Fold an array of positions to the primary cell")
+        .def("is_inside", (bool (Cell::*)(Vec3&)) &Cell::is_inside, "Checks if a position is inside the primary cell")
+        .def("are_inside", (std::vector<bool> (Cell::*)(std::vector<Vec3>&)) &Cell::is_inside_array, "Checks if an array of positions are inside the primary cell")
         .def("is_triclinic", &Cell::is_triclinic, "Returns if the box is triclinic")
         .def("get_pbc", &Cell::get_pbc, "Get the cell pbc flags along the 3 dimensions")
         .def("get_bounds", &Cell::get_bounds, "Get the (orthorombic) bounds of the cell")
         .def("volume", &Cell::volume, "Returns the volume of the cell");
     
+    py::class_<NodeTag>(m, "NodeTag")
+        .def(py::init<int, int>(), py::arg("domain"), py::arg("index"))
+        .def_readwrite("domain", &NodeTag::domain, "Domain index")
+        .def_readwrite("index", &NodeTag::index, "Local index");
+    
     py::class_<DisNode>(m, "DisNode")
         .def(py::init<const Vec3&, int>(), py::arg("pos"), py::arg("constraint"))
+        .def_readwrite("tag", &DisNode::tag, "Node tag (domain,index)")
         .def_readwrite("constraint", &DisNode::constraint, "Node constraint flag")
         .def_readwrite("pos", &DisNode::pos, "Node position (x,y,z)");
     
@@ -1013,6 +1060,50 @@ PYBIND11_MODULE(pyexadis, m) {
         .def_readwrite("n2", &DisSeg::n2, "Segment end node index")
         .def_readwrite("burg", &DisSeg::burg, "Segment Burgers vector")
         .def_readwrite("plane", &DisSeg::plane, "Segment plane normal");
+    
+    py::class_<Conn>(m, "Conn")
+        .def(py::init<>())
+        .def_readwrite("num", &Conn::num, "Number of connections")
+        .def("node", [](Conn& conn, int i) -> int { return conn.node[i]; })
+        .def("seg", [](Conn& conn, int i) -> int { return conn.seg[i]; })
+        .def("order", [](Conn& conn, int i) -> int { return conn.order[i]; })
+        .def("add_connection", (bool (Conn::*)(int, int, int)) &Conn::add_connection, "Add a connection",
+             py::arg("node"), py::arg("seg"), py::arg("order"))
+        .def("remove_connection", &Conn::remove_connection, "Remove a connection", py::arg("i"));
+    
+    py::class_<SerialDisNet>(m, "SerialDisNet")
+        .def(py::init<const Cell&>(), py::arg("cell"))
+        .def("number_of_nodes", &SerialDisNet::number_of_nodes)
+        .def("number_of_segs", &SerialDisNet::number_of_segs)
+        .def("dislocation_density", &SerialDisNet::dislocation_density)
+        .def_readwrite("cell", &SerialDisNet::cell)
+        .def("nodes", [](SerialDisNet& net, int i) -> DisNode& {
+            if (i < 0 || i >= net.number_of_nodes()) ExaDiS_fatal("Error: invalid node index %d in nodes()\n", i);
+            return net.nodes[i];
+        }, pybind11::return_value_policy::reference_internal)
+        .def("segs", [](SerialDisNet& net, int i) -> DisSeg& {
+            if (i < 0 || i >= net.number_of_segs()) ExaDiS_fatal("Error: invalid seg index %d in segs()\n", i);
+            return net.segs[i];
+        }, pybind11::return_value_policy::reference_internal)
+        .def("conn", [](SerialDisNet& net, int i) -> Conn& {
+            if (i < 0 || i >= net.number_of_nodes()) ExaDiS_fatal("Error: invalid node index %d in conn()\n", i);
+            return net.conn[i];
+        }, pybind11::return_value_policy::reference_internal)
+        .def("find_connection", &SerialDisNet::find_connection)
+        .def("generate_connectivity", &SerialDisNet::generate_connectivity)
+        .def("_add_node", (void (SerialDisNet::*)(const Vec3&, int)) &SerialDisNet::add_node,
+             "Add node (x,y,z[,constraint]) to the network", py::arg("pos"), py::arg("constraint")=(int)UNCONSTRAINED)
+        .def("_add_seg", (void (SerialDisNet::*)(int, int, const Vec3&, const Vec3&)) &SerialDisNet::add_seg,
+             "Add segment (n1,n2,burg[,plane]) to the network", py::arg("n1"), py::arg("n2"), py::arg("burg"), py::arg("plane")=Vec3(0.0))
+        .def("move_node", &SerialDisNet::move_node)
+        .def("split_seg", &SerialDisNet::split_seg)
+        .def("split_node", &SerialDisNet::split_node)
+        .def("merge_nodes", &SerialDisNet::merge_nodes)
+        .def("merge_nodes_position", &SerialDisNet::merge_nodes_position)
+        .def("remove_segs", &SerialDisNet::remove_segs)
+        .def("remove_nodes", &SerialDisNet::remove_nodes)
+        .def("purge_network", &SerialDisNet::purge_network)
+        .def("update", &SerialDisNet::update, "Update network memory after modifications");
     
     py::class_<ExaDisNet>(m, "ExaDisNet")
         .def(py::init<>())
@@ -1034,11 +1125,7 @@ PYBIND11_MODULE(pyexadis, m) {
         .def("write_data", &ExaDisNet::write_data, "Write network in ParaDiS format")
         .def("get_plastic_strain", &ExaDisNet::get_plastic_strain, "Returns plastic strain as computed since the last integration step")
         .def("physical_links", &ExaDisNet::physical_links, "Returns the list of segments for each physical dislocation link")
-        .def("_get_node", &ExaDisNet::get_node, "Get node object by index")
-        .def("_get_seg", &ExaDisNet::get_seg, "Get segment object by index")
-        .def("_add_node", &ExaDisNet::add_node, "Add node (x,y,z) to the network", py::arg("pos"), py::arg("constraint")=(int)UNCONSTRAINED)
-        .def("_add_seg", &ExaDisNet::add_seg, "Add segment (n1,n2,burg,plane) to the network", py::arg("n1"), py::arg("n2"), py::arg("burg"), py::arg("plane")=Vec3(0.0))
-        .def("_update", &ExaDisNet::update, "Update network memory after modifications");
+        .def("_get_serial_network", &ExaDisNet::get_serial_network, "Get the SerialDisNet object");
         
     py::class_<SystemBind, ExaDisNet>(m, "System")
         .def(py::init<ExaDisNet, Params>())

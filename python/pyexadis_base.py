@@ -25,6 +25,9 @@ except ImportError:
         def __init__(self, disnet):
             self.disnet = disnet
         def get_disnet(self, disnet_type=None):
+            if not disnet_type is None and disnet_type != ExaDisNet:
+                raise TypeError(f"Cannot convert network using pyexadis_base.DisNetManager\n" \
+                                f"Use: from framework.disnet_manager import DisNetManager")
             return self.disnet
         def export_data(self):
             return self.get_disnet().export_data()
@@ -64,8 +67,10 @@ class ExaDisNet(DisNet_Base):
             self.net = pyexadis.ExaDisNet(cell=cell, nodes=nodes, segs=segs)
         elif len(args) == 1:
             self.net = args[0] # pyexadis.ExaDisNet object
-        else:
+        elif len(args) == 0:
             self.net = pyexadis.ExaDisNet()
+        else:
+            raise ValueError('Invalid number of arguments in ExaDisNet()')
         
     def read_paradis(self, datafile):
         self.net = pyexadis.read_paradis(datafile)
@@ -894,7 +899,7 @@ class SimulateNetwork:
     def run(self, N: DisNetManager, state: dict):
         
         if self.restart is not None:
-            raise ValueError('Restart option only supported with SimulateNetworkPerf driver')
+            raise TypeError('Restart option only supported with SimulateNetworkPerf driver')
             
         if not isinstance(self.timeint, TimeIntegration):
             self.exadis_plastic_strain = False
@@ -999,10 +1004,10 @@ class SimulateNetworkPerf(SimulateNetwork):
             not isinstance(self.remesh, Remesh),
             (self.cross_slip != None and not isinstance(self.cross_slip, CrossSlip))
         ]):
-            raise ValueError("SimulateNetworkPerf can only accept exadis modules.\n"
-                             "Adjust modules or use SimulateNetwork driver.")
+            raise TypeError("SimulateNetworkPerf can only accept exadis modules.\n"
+                            "Adjust modules or use SimulateNetwork driver.")
         if self.timeint.integrator_type == 'EulerForward':
-            raise ValueError("SimulateNetworkPerf cannot be used with EulerForward integrator.")
+            raise TypeError("SimulateNetworkPerf cannot be used with EulerForward integrator.")
         
         # convert DisNet to a complete exadis system object
         params = get_exadis_params(state)
