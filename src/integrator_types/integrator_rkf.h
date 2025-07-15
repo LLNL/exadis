@@ -100,7 +100,7 @@ public:
     }
     
     KOKKOS_INLINE_FUNCTION
-    void operator() (TagErrorNodes, const int& i, double& emax0, double& emax1) const {
+    void operator() (TagErrorNodes, const int& i, double& emax0, double& emax1, int& errnans) const {
         auto nodes = network->get_nodes();
         auto cell = network->cell;
         
@@ -126,6 +126,7 @@ public:
             }
         }
         if (relerr > emax1) emax1 = relerr;
+        if (std::isnan(drn)) errnans++;
     }
     
     KOKKOS_INLINE_FUNCTION
@@ -150,11 +151,15 @@ public:
     
     virtual inline void compute_error()
     {
+        int errnans = 0;
         Kokkos::parallel_reduce("IntegratorRKF::ErrorNodes",
             Kokkos::RangePolicy<TagErrorNodes>(0, network->Nnodes_local), *this,
-            Kokkos::Max<double>(errmax[0]), Kokkos::Max<double>(errmax[1])
+            Kokkos::Max<double>(errmax[0]), Kokkos::Max<double>(errmax[1]), errnans
         );
         Kokkos::fence();
+        
+        if (errnans > 0)
+            ExaDiS_fatal("Error: %d NaNs found during integration\n", errnans);
     }
     
     virtual inline void non_convergent()

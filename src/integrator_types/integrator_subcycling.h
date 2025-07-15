@@ -510,7 +510,7 @@ public:
         s(_s), net(_net), itgr(_itgr), flagnodes(_flagnodes) {}
         
         KOKKOS_INLINE_FUNCTION
-        void operator() (const int& i, double& emax0, double& emax1) const {
+        void operator() (const int& i, double& emax0, double& emax1, int& errnans) const {
             auto nodes = net->get_nodes();
             auto cell = net->cell;
             
@@ -536,6 +536,7 @@ public:
                 }
             }
             if (relerr > emax1) emax1 = relerr;
+            if (std::isnan(drn)) errnans++;
             
             if (flagnodes) {
                 if (itgr->subgroups->nflag(i) > 0) {
@@ -561,11 +562,15 @@ public:
     
     inline void compute_error()
     {
+        int errnans = 0;
         Kokkos::parallel_reduce("IntegratorRKFSubcycling::ErrorFlagNodes", network->Nnodes_local,
             ErrorFlagNodes(s, network, this, (group == subgroups->Ngroups-1 && iTry < nTry)),
-            Kokkos::Max<double>(errmax[0]), Kokkos::Max<double>(errmax[1])
+            Kokkos::Max<double>(errmax[0]), Kokkos::Max<double>(errmax[1]), errnans
         );
         Kokkos::fence();
+        
+        if (errnans > 0)
+            ExaDiS_fatal("Error: %d NaNs found during integration\n", errnans);
     }
     
     inline void non_convergent()
