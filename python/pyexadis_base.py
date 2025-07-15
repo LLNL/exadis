@@ -994,7 +994,7 @@ class SimulateNetworkPerf(SimulateNetwork):
         if self.topology is None:
             self.topology = Topology(topology_mode='None', state=state, force=self.calforce, mobility=self.mobility)
         if self.remesh is None:
-            self.remesh = Remesh(topology_mode='None', state=state)
+            self.remesh = Remesh(remesh_rule='None', state=state)
         
         if any([
             not isinstance(self.calforce, CalForce),
