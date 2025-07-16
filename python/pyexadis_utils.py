@@ -613,13 +613,15 @@ def write_vtk(N: DisNetManager, vtkfile: str, segprops={}, pbc_wrap=True):
     p = segs.get("planes")
     
     # PBC wrapping
+    if np.all(np.array(cell.is_periodic()) == 0): pbc_wrap = False
     if pbc_wrap:
         
         eps = 1e-10
         hinv = np.linalg.inv(h)
+        is_periodic = np.array(cell.is_periodic())
         def outside_box(p):
             s = np.matmul(hinv, p - cell_origin)
-            return np.any(s < -eps) or np.any(s > 1.0+eps)
+            return np.any(((s < -eps)|(s > 1.0+eps))&(is_periodic))
         
         def facet_intersection_position(r1, r2, i):
             s1 = np.matmul(hinv, r1 - cell_origin)

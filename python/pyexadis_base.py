@@ -106,7 +106,7 @@ class ExaDisNet(DisNet_Base):
     
     def export_data(self):
         cell = self.net.get_cell()
-        cell = {"h": np.array(cell.h), "origin": np.array(cell.origin), "is_periodic": cell.get_pbc()}
+        cell = {"h": np.array(cell.h), "origin": np.array(cell.origin), "is_periodic": cell.is_periodic()}
         nodes = self.get_nodes_data()
         segs = self.get_segs_data()
         data = {"cell": cell, "nodes": nodes, "segs": segs}

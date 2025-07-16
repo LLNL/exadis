@@ -1039,7 +1039,7 @@ PYBIND11_MODULE(pyexadis, m) {
         .def("is_inside", (bool (Cell::*)(Vec3&)) &Cell::is_inside, "Checks if a position is inside the primary cell")
         .def("are_inside", (std::vector<bool> (Cell::*)(std::vector<Vec3>&)) &Cell::is_inside_array, "Checks if an array of positions are inside the primary cell")
         .def("is_triclinic", &Cell::is_triclinic, "Returns if the box is triclinic")
-        .def("get_pbc", &Cell::get_pbc, "Get the cell pbc flags along the 3 dimensions")
+        .def("is_periodic", &Cell::get_pbc, "Get the cell pbc flags along the 3 dimensions")
         .def("get_bounds", &Cell::get_bounds, "Get the (orthorombic) bounds of the cell")
         .def("volume", &Cell::volume, "Returns the volume of the cell");
     
