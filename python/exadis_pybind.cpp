@@ -95,7 +95,7 @@ void SerialDisNet::sanity_check() {
         if (b2 > 1e-5) {
             nb++;
             //printf("Warning: Burgers vector is not conserved for node %d (bsum = %e, conn = %lu)\n",
-            //i, sqrt(b2), conn[i].size());
+            //i, sqrt(b2), conn[i].num);
             if (conn[i].num > 1) nd++;
         }
     }
@@ -1080,15 +1080,15 @@ PYBIND11_MODULE(pyexadis, m) {
         .def("nodes", [](SerialDisNet& net, int i) -> DisNode& {
             if (i < 0 || i >= net.number_of_nodes()) ExaDiS_fatal("Error: invalid node index %d in nodes()\n", i);
             return net.nodes[i];
-        }, pybind11::return_value_policy::reference_internal)
+        }, py::return_value_policy::reference_internal)
         .def("segs", [](SerialDisNet& net, int i) -> DisSeg& {
             if (i < 0 || i >= net.number_of_segs()) ExaDiS_fatal("Error: invalid seg index %d in segs()\n", i);
             return net.segs[i];
-        }, pybind11::return_value_policy::reference_internal)
+        }, py::return_value_policy::reference_internal)
         .def("conn", [](SerialDisNet& net, int i) -> Conn& {
             if (i < 0 || i >= net.number_of_nodes()) ExaDiS_fatal("Error: invalid node index %d in conn()\n", i);
             return net.conn[i];
-        }, pybind11::return_value_policy::reference_internal)
+        }, py::return_value_policy::reference_internal)
         .def("find_connection", &SerialDisNet::find_connection)
         .def("generate_connectivity", &SerialDisNet::generate_connectivity)
         .def("_add_node", (void (SerialDisNet::*)(const Vec3&, int)) &SerialDisNet::add_node,
@@ -1125,7 +1125,8 @@ PYBIND11_MODULE(pyexadis, m) {
         .def("write_data", &ExaDisNet::write_data, "Write network in ParaDiS format")
         .def("get_plastic_strain", &ExaDisNet::get_plastic_strain, "Returns plastic strain as computed since the last integration step")
         .def("physical_links", &ExaDisNet::physical_links, "Returns the list of segments for each physical dislocation link")
-        .def("_get_serial_network", &ExaDisNet::get_serial_network, "Get the SerialDisNet object");
+        .def("_get_serial_network", &ExaDisNet::get_serial_network, "Get the SerialDisNet object",
+             py::return_value_policy::reference_internal);
         
     py::class_<SystemBind, ExaDisNet>(m, "System")
         .def(py::init<ExaDisNet, Params>())
