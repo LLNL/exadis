@@ -173,7 +173,7 @@ struct ExaDisNet {
     
     int number_of_nodes() { return system->Nnodes_total(); }
     int number_of_segs() { return system->Nsegs_total(); }
-    bool is_sane() { system->get_serial_network()->sanity_check(); return true; }
+    bool is_sane() { return system->get_serial_network()->sanity_check(); }
     
     Cell get_cell() { return system->get_serial_network()->cell; }
     std::vector<std::vector<double> > get_nodes_array() { return system->get_serial_network()->get_nodes_array(); }

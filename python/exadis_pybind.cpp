@@ -72,7 +72,8 @@ std::vector<std::vector<double> > SerialDisNet::get_segs_array() {
     return segs_array;
 }
 
-void SerialDisNet::sanity_check() {
+bool SerialDisNet::sanity_check() {
+    bool is_sane = true;
     int Nnodes = number_of_nodes();
     for (int i = 0; i < number_of_segs(); i++) {
         if (segs[i].n1 < 0 || segs[i].n1 >= Nnodes ||
@@ -101,7 +102,7 @@ void SerialDisNet::sanity_check() {
     }
 
     if (nb == 0) {
-        ExaDiS_log("Burgers vector is conserved for all nodes\n");
+        //ExaDiS_log("Burgers vector is conserved for all nodes\n");
     } else {
         ExaDiS_log("Warning: Burgers vector is not conserved for %d node(s)\n", nb);
         if (nd > 0) ExaDiS_log(" Warning: Burgers vector is not conserved for %d node(s) with more than 1 arm\n", nd);
@@ -110,7 +111,9 @@ void SerialDisNet::sanity_check() {
     if (nc > 0) ExaDiS_log("Warning: %d node(s) are unconnected\n", nc);
     if (nl > 0) ExaDiS_log("Warning: %d link(s) have zero Burgers vector\n", nl);
 #endif
+    is_sane = (nb == 0);
 #endif
+    return is_sane;
 }
 
 std::vector<int> Cell::get_pbc() {
