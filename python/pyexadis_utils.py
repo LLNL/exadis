@@ -10,6 +10,7 @@ Implements utility functions for the ExaDiS python binding
 * generate_line_config()
 * generate_prismatic_config()
 
+* get_segments_end_points()
 * get_segments_length()
 * dislocation_density()
 * dislocation_charge()
@@ -36,6 +37,8 @@ try:
 except ImportError:
     # Use dummy DisNetManager if OpenDiS is not available
     from pyexadis_base import DisNetManager
+
+from typing import Tuple
 
 
 def insert_frank_read_src(cell, nodes, segs, burg, plane, length, center, theta=0.0, linedir=None, numnodes=10):
@@ -411,21 +414,29 @@ def generate_prismatic_config(crystal, Lbox, num_loops, radius, maxseg=-1, Rorie
     return G
 
 
-def get_segments_length(N: DisNetManager) -> np.ndarray:
-    """ Returns the list of dislocation segment lenghts of the network
+def get_segments_end_points(N: DisNetManager) -> Tuple[np.ndarray, np.ndarray]:
+    """ Returns the list of dislocation segments end points of the network
+    for which the closest image convention is applied to the second end point
     """
     data = N.export_data()
     # cell
-    cell = data.get("cell")
-    cell = pyexadis.Cell(h=cell.get("h"), origin=cell.get("origin"), is_periodic=cell.get("is_periodic"))
+    cell = pyexadis.Cell(**data["cell"])
     # nodes
     nodes = data.get("nodes")
     rn = nodes.get("positions")
     # segments
     segs = data.get("segs")
     segsnid = segs.get("nodeids")
+    # end points
     r1 = np.array(cell.closest_image(Rref=np.array(cell.center()), R=rn[segsnid[:,0]]))
     r2 = np.array(cell.closest_image(Rref=r1, R=rn[segsnid[:,1]]))
+    return r1, r2
+
+
+def get_segments_length(N: DisNetManager) -> np.ndarray:
+    """ Returns the list of dislocation segment lenghts of the network
+    """
+    r1, r2 = get_segments_end_points(N)
     Lseg = np.linalg.norm(r2-r1, axis=1)
     return Lseg
 
@@ -442,19 +453,9 @@ def dislocation_density(N: DisNetManager, burgmag: float) -> float:
 def dislocation_charge(N: DisNetManager) -> np.ndarray:
     """ Returns the dislocation charge (net Nye's tensor) of the network
     """
-    data = N.export_data()
-    cell = data.get("cell")
-    cell = pyexadis.Cell(h=cell.get("h"), origin=cell.get("origin"), is_periodic=cell.get("is_periodic"))
-    # nodes
-    nodes = data.get("nodes")
-    rn = nodes.get("positions")
-    # segments
-    segs = data.get("segs")
-    segsnid = segs.get("nodeids")
-    r1 = np.array(cell.closest_image(Rref=np.array(cell.center()), R=rn[segsnid[:,0]]))
-    r2 = np.array(cell.closest_image(Rref=r1, R=rn[segsnid[:,1]]))
+    r1, r2 = get_segments_end_points(N)
     t = r2-r1
-    b = segs.get("burgers")
+    b = N.export_data()["segs"]["burgers"]
     alpha = np.einsum('ij,ik->jk', b, t)
     return alpha
 
@@ -462,8 +463,7 @@ def dislocation_charge(N: DisNetManager) -> np.ndarray:
 def read_paradis(datafile: str) -> DisNetManager:
     """ Read dislocation network in ParaDiS format
     """
-    G = ExaDisNet()
-    G.read_paradis(datafile)
+    G = ExaDisNet().read_paradis(datafile)
     return DisNetManager(G)
 
 
@@ -617,8 +617,7 @@ def write_vtk(N: DisNetManager, vtkfile: str, segprops={}, pbc_wrap=True):
     """
     data = N.export_data()
     # cell
-    cell = data.get("cell")
-    cell = pyexadis.Cell(h=cell.get("h"), origin=cell.get("origin"), is_periodic=cell.get("is_periodic"))
+    cell = pyexadis.Cell(**data["cell"])
     cell_origin, cell_center, h = np.array(cell.origin), np.array(cell.center()), np.array(cell.h)
     c = cell_origin + np.array([np.zeros(3), h[0], h[1], h[2], h[0]+h[1],
                                 h[0]+h[2], h[1]+h[2], h[0]+h[1]+h[2]])
