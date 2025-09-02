@@ -389,18 +389,11 @@ void Params::set_crystal(std::string crystalname) {
  *    Force binding
  *
  *-------------------------------------------------------------------------*/
-ForceBind make_force_python(Params& params, py::object pyforce)
-{
-    params.check_params();
-    Force* force = exadis_new<ForcePython>(pyforce);
-    return ForceBind(force, ForceBind::PYTHON_MODEL, params);
-}
-
 template<class F>
-ForceBind make_force(Params& params, typename F::Params fparams)
+ForceBind make_force(Params& params, typename F::Params& fparams, Cell cell)
 {
     params.check_params();
-    System* system = make_system(new SerialDisNet(), Crystal(params.crystal), params);
+    System* system = make_system(new SerialDisNet(cell), Crystal(params.crystal), params);
     
     Force* force = exadis_new<F>(system, fparams);
     
@@ -409,6 +402,12 @@ ForceBind make_force(Params& params, typename F::Params fparams)
         model = ForceBind::LINE_TENSION_MODEL;
     else if (std::is_same<F, ForceType::CUTOFF_MODEL>::value)
         model = ForceBind::CUTOFF_MODEL;
+    else if (std::is_same<F, ForceType::DDD_FFT_MODEL>::value)
+        model = ForceBind::DDD_FFT_MODEL;
+    else if (std::is_same<F, ForceType::SUBCYCLING_MODEL>::value)
+        model = ForceBind::SUBCYCLING_MODEL;
+    else if (std::is_same<F, ForceFFT>::value)
+        model = ForceBind::FORCE_FFT;
     else
         ExaDiS_fatal("Error: invalid force type requested in the python binding\n");
     
@@ -417,54 +416,6 @@ ForceBind make_force(Params& params, typename F::Params fparams)
     exadis_delete(system);
     
     return ForceBind(force, model, params, cutoff);
-}
-
-template<bool subcycling>
-ForceBind make_force_ddd_fft(Params& params, ForceType::CORE_SELF_PKEXT::Params coreparams,
-                             std::vector<int> Ngrid, Cell& cell, bool drift, bool flong_group0)
-{
-    params.check_params();
-    System* system = make_system(new SerialDisNet(cell), Crystal(params.crystal), params);
-    
-    Force* force;
-    if (subcycling) {
-        ForceType::SUBCYCLING_MODEL::Params subcycparams(Ngrid[0], Ngrid[1], Ngrid[2], drift, flong_group0);
-        subcycparams.FSegParams = coreparams;
-        force = exadis_new<ForceType::SUBCYCLING_MODEL>(system, subcycparams);
-    } else {
-        force = exadis_new<ForceType::DDD_FFT_MODEL>(system, 
-            coreparams,
-            ForceType::LONG_FFT_SHORT_ISO::Params(Ngrid[0], Ngrid[1], Ngrid[2])
-        );
-    }
-    double cutoff = system->neighbor_cutoff; // needed in topology force calculations
-    
-    exadis_delete(system);
-    
-    int model = subcycling ? ForceBind::SUBCYCLING_MODEL : ForceBind::DDD_FFT_MODEL;
-    return ForceBind(force, model, params, cutoff);
-}
-
-std::vector<Vec3> compute_force(ExaDisNet& disnet, ForceBind& forcebind, 
-                                std::vector<double> applied_stress, bool pre_compute)
-{
-    System* system = disnet.system;
-    system->params = forcebind.params;
-    if (system->crystal != forcebind.params.crystal)
-        system->crystal = Crystal(forcebind.params.crystal);
-    
-    system->extstress = Mat33().voigt(applied_stress.data());
-    
-    Force* force = forcebind.force;
-    if (pre_compute) {
-        force->pre_compute(system);
-        forcebind.pre_computed = true;
-    }
-    force->compute(system);
-    
-    std::vector<Vec3> forces = get_forces(system);
-    
-    return forces;
 }
 
 std::vector<Vec3> compute_force_n2(ExaDisNet& disnet, double MU, double NU, double a)
@@ -538,38 +489,6 @@ std::vector<Vec3> compute_force_segseglist(ExaDisNet& disnet, double MU, double 
     return forces;
 }
 
-void pre_compute_force(ExaDisNet& disnet, ForceBind& forcebind)
-{
-    System* system = disnet.system;
-    system->params = forcebind.params;
-    if (system->crystal != forcebind.params.crystal)
-        system->crystal = Crystal(forcebind.params.crystal);
-    
-    Force* force = forcebind.force;
-    force->pre_compute(system);
-    forcebind.pre_computed = true;
-}
-
-Vec3 compute_node_force(ExaDisNet& disnet, int i, ForceBind& forcebind, 
-                        std::vector<double> applied_stress)
-{
-    System* system = disnet.system;
-    system->params = forcebind.params;
-    if (system->crystal != forcebind.params.crystal)
-        system->crystal = Crystal(forcebind.params.crystal);
-    
-    system->extstress = Mat33().voigt(applied_stress.data());
-    
-    Force* force = forcebind.force;
-    // Warning: the user must ensure the pre_compute is up-to-date...
-    if (!forcebind.pre_computed) {
-        force->pre_compute(system);
-        forcebind.pre_computed = true;
-    }
-    Vec3 f = force->node_force(system, i);
-    return f;
-}
-
 /*---------------------------------------------------------------------------
  *
  *    Mobility binding
@@ -599,10 +518,7 @@ std::vector<Vec3> compute_mobility(ExaDisNet& disnet, MobilityBind& mobbind,
                                    std::vector<Vec3> forces,
                                    std::vector<NodeTag> tags)
 {
-    System* system = disnet.system;
-    system->params = mobbind.params;
-    if (system->crystal != mobbind.params.crystal)
-        system->crystal = Crystal(mobbind.params.crystal);
+    System* system = disnet.adjust_system(mobbind.params);
     
     // Set forces
     set_forces(system, forces, tags);
@@ -616,10 +532,7 @@ std::vector<Vec3> compute_mobility(ExaDisNet& disnet, MobilityBind& mobbind,
 
 Vec3 compute_node_mobility(ExaDisNet& disnet, int i, MobilityBind& mobbind, Vec3 fi)
 {
-    System* system = disnet.system;
-    system->params = mobbind.params;
-    if (system->crystal != mobbind.params.crystal)
-        system->crystal = Crystal(mobbind.params.crystal);
+    System* system = disnet.adjust_system(mobbind.params);
     
     Mobility* mobility = mobbind.mobility;
     return mobility->node_velocity(system, i, fi);
@@ -650,11 +563,7 @@ double integrate(ExaDisNet& disnet, IntegratorBind& itgrbind,
                  std::vector<Vec3> vels, std::vector<double> applied_stress,
                  std::vector<NodeTag> tags)
 {
-    System* system = disnet.system;
-    system->params = itgrbind.params;
-    if (system->crystal != itgrbind.params.crystal)
-        system->crystal = Crystal(itgrbind.params.crystal);
-    
+    System* system = disnet.adjust_system(itgrbind.params);
     system->extstress = Mat33().voigt(applied_stress.data());
     
     // Set velocities
@@ -723,11 +632,7 @@ CollisionBind make_collision(std::string collision_mode, Params& params)
 void handle_collision(ExaDisNet& disnet, CollisionBind& collisionbind,
                       std::vector<Vec3> xold, double dt)
 {
-    System* system = disnet.system;
-    system->params = collisionbind.params;
-    if (system->crystal != collisionbind.params.crystal)
-        system->crystal = Crystal(collisionbind.params.crystal);
-    
+    System* system = disnet.adjust_system(collisionbind.params);
     // Make sure we have a value set for rann
     if (system->params.rann < 0.0)
         ExaDiS_fatal("Error: undefined value of rann in CollisionRetroactive\n");
@@ -800,11 +705,7 @@ TopologyBind make_topology(std::string topology_mode, Params& params,
 
 void handle_topology(ExaDisNet& disnet, TopologyBind& topolbind, double dt)
 {
-    System* system = disnet.system;
-    system->params = topolbind.params;
-    if (system->crystal != topolbind.params.crystal)
-        system->crystal = Crystal(topolbind.params.crystal);
-    
+    System* system = disnet.adjust_system(topolbind.params);
     system->neighbor_cutoff = topolbind.neighbor_cutoff; // required for topology force calculation
     system->realdt = dt; // used for determining the noise level
     
@@ -837,10 +738,7 @@ RemeshBind make_remesh(std::string remesh_rule, Params& params, RemeshSerial::Pa
 
 void remesh(ExaDisNet& disnet, RemeshBind& remeshbind)
 {
-    System* system = disnet.system;
-    system->params = remeshbind.params;
-    if (system->crystal != remeshbind.params.crystal)
-        system->crystal = Crystal(remeshbind.params.crystal);
+    System* system = disnet.adjust_system(remeshbind.params);
     
     Remesh* remesh = remeshbind.remesh_class;
     remesh->remesh(system);
@@ -886,11 +784,7 @@ CrossSlipBind make_cross_slip(std::string cross_slip_mode, Params& params, Force
 
 void handle_cross_slip(ExaDisNet& disnet, CrossSlipBind& crossslipbind)
 {
-    System* system = disnet.system;
-    system->params = crossslipbind.params;
-    if (system->crystal != crossslipbind.params.crystal)
-        system->crystal = Crystal(crossslipbind.params.crystal);
-    
+    System* system = disnet.adjust_system(crossslipbind.params);
     system->neighbor_cutoff = crossslipbind.neighbor_cutoff; // required for force calculation
     
     CrossSlip* crossslip = crossslipbind.crossslip;
@@ -1014,8 +908,8 @@ PYBIND11_MODULE(pyexadis, m) {
     
     py::class_<Crystal>(m, "Crystal")
         .def(py::init<>())
-        .def(py::init<int>())
-        .def(py::init<int, Mat33>())
+        .def(py::init<int>(), py::arg("type"))
+        .def(py::init<int, Mat33>(), py::arg("type"), py::arg("R"))
         .def_readonly("type", &Crystal::type, "Index of the crystal type")
         .def_readonly("R", &Crystal::R, "Crystal orientation matrix")
         .def("set_orientation", (void (Crystal::*)(Mat33)) &Crystal::set_orientation, "Set crystal orientation matrix")
@@ -1137,13 +1031,6 @@ PYBIND11_MODULE(pyexadis, m) {
         .def("set_applied_stress", &SystemBind::set_applied_stress, "Set applied stress of the system (xx,yy,zz,yz,xz,xy)")
         .def("print_timers", &SystemBind::print_timers, "Print simulation timers", py::arg("dev")=false);
     
-    py::class_<ForceType::CORE_SELF_PKEXT::Params>(m, "Force_CORE_Params")
-        .def(py::init<double, double>(), py::arg("Ecore")=-1.0, py::arg("Ecore_junc_fact")=1.0);
-    py::class_<ForceType::CUTOFF_MODEL::Params>(m, "Force_CUTOFF_Params")
-        .def(py::init([](ForceType::CORE_SELF_PKEXT::Params coreparams, double cutoff) {
-            return new ForceType::CUTOFF_MODEL::Params(coreparams, ForceType::FORCE_SEGSEG_ISO::Params(cutoff));
-        }), py::arg("coreparams"), py::arg("cutoff"));
-    
     py::class_<MobilityType::GLIDE::Params>(m, "Mobility_GLIDE_Params")
         .def(py::init<double>(), py::arg("Mglide"))
         .def(py::init<double, double>(), py::arg("Medge"), py::arg("Mscrew"));
@@ -1199,30 +1086,100 @@ PYBIND11_MODULE(pyexadis, m) {
           "Generate a configuration made of prismatic loops",
           py::arg("crystal"), py::arg("cell"), py::arg("numsources"), py::arg("radius"), py::arg("maxseg")=-1, py::arg("seed")=1234, py::arg("uniform")=false);
     
+    // FORCE MODULE
+    auto force_m = m.def_submodule("Force", "Force module");
+    
     // Force
-    py::class_<ForceBind>(m, "Force")
-        .def(py::init<>())
-        .def_readwrite("neighbor_cutoff", &ForceBind::neighbor_cutoff, "Neighbor cutoff")
-        .def("pre_compute", &ForceBind::pre_compute, "Pre-compute force of the system")
-        .def("compute", &ForceBind::compute, "Compute force of the system");
-    m.def("make_force_lt", &make_force<ForceType::LINE_TENSION_MODEL>, "Instantiate a line-tension force model",
-          py::arg("params"), py::arg("coreparams"));
-    m.def("make_force_cutoff", &make_force<ForceType::CUTOFF_MODEL>, "Instantiate a cutoff force model",
-          py::arg("params"), py::arg("cutoffparams"));
-    m.def("make_force_ddd_fft", &make_force_ddd_fft<0>, "Instantiate a DDD-FFT force model",
-          py::arg("params"), py::arg("coreparams"), py::arg("Ngrid"), py::arg("cell"), py::arg("drift")=0, py::arg("flong_group0")=true);
-    m.def("make_force_subcycling", &make_force_ddd_fft<1>, "Instantiate a subcycling force model",
-          py::arg("params"), py::arg("coreparams"), py::arg("Ngrid"), py::arg("cell"), py::arg("drift")=0, py::arg("flong_group0")=true);
-    m.def("make_force_python", &make_force_python, "Instantiate a python-based force model",
-          py::arg("params"), py::arg("force"));
+    py::class_<Force>(force_m, "Force")
+        .def("name", &Force::name, "Get force name");
     
-    m.def("compute_force", &compute_force, "Wrapper to compute nodal forces",
-          py::arg("net"), py::arg("force"), py::arg("applied_stress"), py::arg("pre_compute")=true);
-    m.def("pre_compute_force", &pre_compute_force, "Wrapper to perform pre-computations before compute_node_force",
-          py::arg("net"), py::arg("force"));
-    m.def("compute_node_force", &compute_node_force, "Wrapper to compute the force on a single node",
-          py::arg("net"), py::arg("i"), py::arg("force"), py::arg("applied_stress"));
+    // CORE_SELF_PKEXT
+    py::class_<ForceType::CORE_SELF_PKEXT, Force> force_core(force_m, "CORE_SELF_PKEXT");
+    py::class_<ForceType::CORE_SELF_PKEXT::Params>(force_core, "Params")
+        .def(py::init<double, double>(), py::arg("Ecore")=-1.0, py::arg("Ecore_junc_fact")=1.0);
     
+    // ForceFFT
+    py::class_<ForceFFT, Force> force_fft(force_m, "ForceFFT");
+    py::class_<ForceFFT::Params>(force_fft, "Params")
+        .def(py::init([](std::vector<int> Ngrid) {
+            return new ForceFFT::Params(Ngrid[0], Ngrid[1], Ngrid[2]);
+        }), py::arg("Ngrid"));
+    force_fft
+        .def_static("make", [](Params& params, ForceFFT::Params& fparams, Cell& cell) {
+            return make_force<ForceFFT>(params, fparams, cell);
+        }, py::arg("params"), py::arg("fparams"), py::arg("cell"))
+        .def("get_neighbor_cutoff", &ForceFFT::get_neighbor_cutoff, "Returns the neighbor cutoff used in ForceFFT")
+        .def("get_rcgrid", &ForceFFT::get_rcgrid, "Returns the grid cutoff used in ForceFFT")
+        .def("interpolate_stress", &ForceFFT::interpolate_stress_array, "Interpolates stress at query positions from FFT grid values", py::arg("R"))
+        .def("export_stress_gridval", &ForceFFT::export_stress_gridval, "Exports grid stress values");
+    
+    // LINE_TENSION_MODEL
+    py::class_<ForceType::LINE_TENSION_MODEL, Force> force_lt(force_m, "LINE_TENSION_MODEL");
+    force_lt
+        .def_static("make", [](Params& params, ForceType::CORE_SELF_PKEXT::Params& coreparams) {
+            return make_force<ForceType::LINE_TENSION_MODEL>(params, coreparams, Cell());
+        }, py::arg("params"), py::arg("coreparams"));
+    
+    // CUTOFF_MODEL
+    py::class_<ForceType::CUTOFF_MODEL, Force> force_cutoff(force_m, "CUTOFF_MODEL");
+    py::class_<ForceType::CUTOFF_MODEL::Params>(force_cutoff, "Params")
+        .def(py::init([](ForceType::CORE_SELF_PKEXT::Params coreparams, double cutoff) {
+            return new ForceType::CUTOFF_MODEL::Params(coreparams, ForceType::FORCE_SEGSEG_ISO::Params(cutoff));
+        }), py::arg("coreparams"), py::arg("cutoff"));
+    force_cutoff
+        .def_static("make", [](Params& params, ForceType::CUTOFF_MODEL::Params& fparams) {
+            return make_force<ForceType::CUTOFF_MODEL>(params, fparams, Cell());
+        }, py::arg("params"), py::arg("fparams"));
+    
+    // DDD_FFT_MODEL
+    py::class_<ForceType::DDD_FFT_MODEL, Force> force_ddd_fft(force_m, "DDD_FFT_MODEL");
+    py::class_<ForceType::DDD_FFT_MODEL::Params>(force_ddd_fft, "Params")
+        .def(py::init([](ForceType::CORE_SELF_PKEXT::Params coreparams, std::vector<int> Ngrid) {
+            return new ForceType::DDD_FFT_MODEL::Params(coreparams,
+                ForceType::LONG_FFT_SHORT_ISO::Params(Ngrid[0], Ngrid[1], Ngrid[2]));
+        }), py::arg("coreparams"), py::arg("Ngrid"));
+    force_ddd_fft
+        .def_static("make", [](Params& params, ForceType::DDD_FFT_MODEL::Params& fparams, Cell& cell) {
+            return make_force<ForceType::DDD_FFT_MODEL>(params, fparams, cell);
+        }, py::arg("params"), py::arg("fparams"), py::arg("cell"));
+    
+    // SUBCYCLING_MODEL
+    py::class_<ForceType::SUBCYCLING_MODEL, Force> force_subcycl(force_m, "SUBCYCLING_MODEL");
+    py::class_<ForceType::SUBCYCLING_MODEL::Params>(force_subcycl, "Params")
+        .def(py::init([](ForceType::CORE_SELF_PKEXT::Params coreparams, std::vector<int> Ngrid, bool drift, bool flong_group0) {
+            ForceType::SUBCYCLING_MODEL::Params* subcycparams = new ForceType::SUBCYCLING_MODEL::Params(Ngrid[0], Ngrid[1], Ngrid[2], drift, flong_group0);
+            subcycparams->FSegParams = coreparams;
+            return subcycparams;
+        }), py::arg("coreparams"), py::arg("Ngrid"), py::arg("drift")=false, py::arg("flong_group0")=true);
+    force_subcycl
+        .def_static("make", [](Params& params, ForceType::SUBCYCLING_MODEL::Params& fparams, Cell& cell) {
+            return make_force<ForceType::SUBCYCLING_MODEL>(params, fparams, cell);
+        }, py::arg("params"), py::arg("fparams"), py::arg("cell"));
+    
+    // ForcePython
+    py::class_<ForcePython, Force> force_python(force_m, "ForcePython");
+    force_python
+        .def_static("make", [](Params& params, py::object pyforce) {
+            params.check_params();
+            Force* force = exadis_new<ForcePython>(pyforce);
+            return ForceBind(force, ForceBind::PYTHON_MODEL, params);
+        }, py::arg("params"), py::arg("force"));
+    
+    // ForceBind
+    py::class_<ForceBind>(m, "ForceBind")
+        .def_readonly("force", &ForceBind::force, "Force object")
+        .def_readonly("neighbor_cutoff", &ForceBind::neighbor_cutoff, "Neighbor cutoff")
+        .def("_pre_compute", &ForceBind::pre_compute, "Pre-compute force of the system")
+        .def("_compute", &ForceBind::compute, "Compute force of the system")
+        .def("_get_force_fft", &ForceBind::get_force_fft, "Return internal ForceFFT object", py::return_value_policy::reference_internal)
+        .def("compute_force", &ForceBind::compute_force, "Wrapper to compute nodal forces of the system",
+             py::arg("net"), py::arg("applied_stress")=std::vector<double>(6, 0.0), py::arg("pre_compute")=true)
+        .def("pre_compute_force", &ForceBind::pre_compute_force, "Wrapper to perform pre-computations before compute_node_force()",
+             py::arg("net"))
+        .def("compute_node_force", &ForceBind::compute_node_force, "Wrapper to compute the force on a single node",
+             py::arg("net"), py::arg("i"), py::arg("applied_stress"));
+    
+    // Force wrappers
     m.def("compute_force_n2", &compute_force_n2, "Compute elastic forces using the brute-force N^2 calculation",
           py::arg("net"), py::arg("mu"), py::arg("nu"), py::arg("a"));
     m.def("compute_force_cutoff", &compute_force_cutoff, "Compute elastic forces using a segment pair cutoff",

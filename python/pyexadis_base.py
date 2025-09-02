@@ -195,7 +195,7 @@ def get_module_arg(module, kwargs, name, default=None):
 def get_exadis_force(force_module, state, params):
     if not isinstance(force_module, CalForce):
         force_python = CalForcePython(force_module, state)
-        force = pyexadis.make_force_python(params=params, force=force_python)
+        force = pyexadis.Force.ForcePython.make(params=params, force=force_python)
     else:
         force_python = None
         force = force_module.force
@@ -221,15 +221,15 @@ class CalForce:
         self.nu = self.params.nu
         Ec = kwargs.get('Ec', -1.0)
         Ecore_junc_fact = kwargs.get('Ec_junc_fact', 1.0)
-        coreparams = pyexadis.Force_CORE_Params(Ec, Ecore_junc_fact)
+        coreparams = pyexadis.Force.CORE_SELF_PKEXT.Params(Ec, Ecore_junc_fact)
         
         if self.force_mode in ['LineTension', 'LINE_TENSION_MODEL']:
-            self.force = pyexadis.make_force_lt(params=self.params, coreparams=coreparams)
+            self.force = pyexadis.Force.LINE_TENSION_MODEL.make(params=self.params, coreparams=coreparams)
         
         elif self.force_mode == 'CUTOFF_MODEL':
             cutoff = get_module_arg('CalForce::'+self.force_mode, kwargs, 'cutoff')
-            cutoffparams = pyexadis.Force_CUTOFF_Params(coreparams=coreparams, cutoff=cutoff)
-            self.force = pyexadis.make_force_cutoff(params=self.params, cutoffparams=cutoffparams)
+            cutoffparams = pyexadis.Force.CUTOFF_MODEL.Params(coreparams=coreparams, cutoff=cutoff)
+            self.force = pyexadis.Force.CUTOFF_MODEL.make(params=self.params, fparams=cutoffparams)
         
         elif self.force_mode == 'DDD_FFT_MODEL':
             Ngrid = get_module_arg('CalForce::'+self.force_mode, kwargs, 'Ngrid')
@@ -237,8 +237,8 @@ class CalForce:
             cell = get_module_arg('CalForce::'+self.force_mode, kwargs, 'cell')
             if not isinstance(cell, pyexadis.Cell):
                 cell = pyexadis.Cell(h=cell.h, origin=cell.origin, is_periodic=cell.is_periodic)
-            self.force = pyexadis.make_force_ddd_fft(params=self.params, coreparams=coreparams, 
-                                                     Ngrid=Ngrid, cell=cell)
+            dddfftparams = pyexadis.Force.DDD_FFT_MODEL.Params(coreparams=coreparams, Ngrid=Ngrid)
+            self.force = pyexadis.Force.DDD_FFT_MODEL.make(params=self.params, fparams=dddfftparams, cell=cell)
             
         elif self.force_mode == 'SUBCYCLING_MODEL':
             Ngrid = get_module_arg('CalForce::'+self.force_mode, kwargs, 'Ngrid')
@@ -248,8 +248,9 @@ class CalForce:
                 cell = pyexadis.Cell(h=cell.h, origin=cell.origin, is_periodic=cell.is_periodic)
             drift = kwargs.get('drift', 0)
             flong_group0 = kwargs.get('flong_group0', 1)
-            self.force = pyexadis.make_force_subcycling(params=self.params, coreparams=coreparams, Ngrid=Ngrid,
-                                                        cell=cell, drift=drift, flong_group0=flong_group0)
+            subcyclparams = pyexadis.Force.SUBCYCLING_MODEL.Params(coreparams=coreparams, Ngrid=Ngrid,
+                                                                   drift=drift, flong_group0=flong_group0)
+            self.force = pyexadis.Force.SUBCYCLING_MODEL.make(params=self.params, fparams=subcyclparams, cell=cell)
             
         else:
             raise ValueError('Unknown force %s' % force_mode)
@@ -257,14 +258,14 @@ class CalForce:
     def NodeForce(self, N: DisNetManager, state: dict, pre_compute=True) -> dict:
         applied_stress = state["applied_stress"]
         G = N.get_disnet(ExaDisNet)
-        f = pyexadis.compute_force(G.net, force=self.force, applied_stress=applied_stress, pre_compute=pre_compute)
+        f = self.force.compute_force(G.net, applied_stress=applied_stress, pre_compute=pre_compute)
         state["nodeforces"] = np.array(f)
         state["nodeforcetags"] = G.get_tags()
         return state
     
     def PreCompute(self, N: DisNetManager, state: dict) -> dict:
         G = N.get_disnet(ExaDisNet)
-        pyexadis.pre_compute_force(G.net, force=self.force)
+        self.force.pre_compute_force(G.net)
         return state
     
     def OneNodeForce(self, N: DisNetManager, state: dict, tag: Tag, update_state=True) -> np.array:
@@ -276,7 +277,7 @@ class CalForce:
         if ind.size != 1:
             raise ValueError("Cannot find node tag (%d,%d) in OneNodeForce" % tuple(tag))
         # compute node force
-        f = pyexadis.compute_node_force(G.net, ind[0], force=self.force, applied_stress=applied_stress)
+        f = self.force.compute_node_force(G.net, ind[0], applied_stress=applied_stress)
         f = np.array(f)
         # update force dictionary if needed
         if update_state:

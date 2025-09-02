@@ -46,7 +46,7 @@ namespace pybind11 { namespace detail {
             if (!isinstance<sequence>(src)) return false;
             sequence seq = reinterpret_borrow<sequence>(src);
             if (seq.size() != 3)
-                throw value_error("Expected sequence of length 3.");
+                throw value_error("Expected sequence of length 3 for Vec3 type");
             value[0] = seq[0].cast<double>();
             value[1] = seq[1].cast<double>();
             value[2] = seq[2].cast<double>();
@@ -61,6 +61,24 @@ namespace pybind11 { namespace detail {
          * ignored by implicit casters.
          */
         static handle cast(Vec3 src, return_value_policy, handle) {
+            return py::make_tuple(src.x, src.y, src.z).release();
+        }
+    };
+    
+    template <> struct type_caster<Vec3i> {
+    public:
+        PYBIND11_TYPE_CASTER(Vec3i, _("Vec3i"));
+        bool load(handle src, bool) {
+            if (!isinstance<sequence>(src)) return false;
+            sequence seq = reinterpret_borrow<sequence>(src);
+            if (seq.size() != 3)
+                throw value_error("Expected sequence of length 3 for Vec3i type");
+            value[0] = seq[0].cast<int>();
+            value[1] = seq[1].cast<int>();
+            value[2] = seq[2].cast<int>();
+            return true;
+        }
+        static handle cast(Vec3i src, return_value_policy, handle) {
             return py::make_tuple(src.x, src.y, src.z).release();
         }
     };
@@ -80,7 +98,7 @@ namespace pybind11 { namespace detail {
                 value[1] = Vec3(seq[3].cast<double>(), seq[4].cast<double>(), seq[5].cast<double>());
                 value[2] = Vec3(seq[6].cast<double>(), seq[7].cast<double>(), seq[8].cast<double>());
             } else {
-                throw value_error("Expected sequence of length 9 or 3x3.");
+                throw value_error("Expected sequence of length 9 or 3x3 for Mat33 type");
             }
             return true;
         }
@@ -96,7 +114,7 @@ namespace pybind11 { namespace detail {
             if (!isinstance<sequence>(src)) return false;
             sequence seq = reinterpret_borrow<sequence>(src);
             if (seq.size() != 2)
-                throw value_error("Expected sequence of length 2.");
+                throw value_error("Expected sequence of length 2 for NodeTag type");
             value.domain = seq[0].cast<int>();
             value.index  = seq[1].cast<int>();
             return true;
@@ -171,6 +189,13 @@ struct ExaDisNet {
         net->update();
     }
     
+    System* adjust_system(Params& params) {
+        system->params = params;
+        if (system->crystal != params.crystal)
+            system->crystal = Crystal(params.crystal);
+        return system;
+    }
+    
     int number_of_nodes() { return system->Nnodes_total(); }
     int number_of_segs() { return system->Nsegs_total(); }
     bool is_sane() { return system->get_serial_network()->sanity_check(); }
@@ -218,18 +243,60 @@ struct SystemBind : ExaDisNet {
 struct ForceBind {
     enum ForceModel {
         LINE_TENSION_MODEL, CUTOFF_MODEL, DDD_FFT_MODEL, 
-        SUBCYCLING_MODEL, PYTHON_MODEL
+        SUBCYCLING_MODEL, PYTHON_MODEL,
+        FORCE_FFT,
     };
     Force* force = nullptr;
     int model = -1;
     Params params;
     double neighbor_cutoff = 0.0;
     bool pre_computed = false;
-    ForceBind() {}
     ForceBind(Force* _force, int _model, Params _params, double cutoff=0.0) : 
     force(_force), model(_model), params(_params), neighbor_cutoff(cutoff) {}
+    
+    ForceFFT* get_force_fft() {
+        ForceFFT* forcefft = nullptr;
+        if (model == DDD_FFT_MODEL) {
+            forcefft = static_cast<ForceType::DDD_FFT_MODEL*>(force)->get_force2()->get_flong();
+        } else if (model == FORCE_FFT) {
+            forcefft = static_cast<ForceFFT*>(force);
+        } else { 
+            ExaDiS_fatal("Error: get_force_fft() method requires DDD_FFT_MODEL or FORCE_FFT model\n");
+        }
+        return forcefft;
+    }
     void pre_compute(SystemBind& sysbind) { force->pre_compute(sysbind.system); }
     void compute(SystemBind& sysbind) { force->compute(sysbind.system); }
+    
+    void pre_compute_force(ExaDisNet& disnet) {
+        System* system = disnet.adjust_system(params);
+        force->pre_compute(system);
+        pre_computed = true;
+    }
+    std::vector<Vec3> compute_force(ExaDisNet& disnet, std::vector<double> applied_stress,
+                                    bool pre_compute) {
+        System* system = disnet.adjust_system(params);
+        system->extstress = Mat33().voigt(applied_stress.data());
+        if (pre_compute) {
+            force->pre_compute(system);
+            pre_computed = true;
+        }
+        force->compute(system);
+        std::vector<Vec3> forces = get_forces(system);
+        return forces;
+    }
+    Vec3 compute_node_force(ExaDisNet& disnet, int i, 
+                            std::vector<double> applied_stress) {
+        System* system = disnet.adjust_system(params);
+        system->extstress = Mat33().voigt(applied_stress.data());
+        // Warning: the user must ensure the pre_compute is up-to-date...
+        if (!pre_computed) {
+            force->pre_compute(system);
+            pre_computed = true;
+        }
+        Vec3 f = force->node_force(system, i);
+        return f;
+    }
 };
 
 class ForcePython : public Force {

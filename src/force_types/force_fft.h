@@ -804,16 +804,43 @@ public:
 #endif
     }
     
+    std::vector<Mat33> export_stress_gridval()
+    {
+        synchronize_stress_gridval();
+        std::vector<Mat33> stress_gridval(Ngrid3);
+        int ind = 0;
+        for (int kx = 0; kx < Ngrid[0]; kx++) {
+            for (int ky = 0; ky < Ngrid[1]; ky++) {
+                for (int kz = 0; kz < Ngrid[2]; kz++) {
+                    double S[6];
+                    for (int i = 0; i < 6; i++)
+                        S[i] = get_stress_gridval<SerialDisNet>(i, kx, ky, kz);
+                    // S: GRID_XX, GRID_XY, GRID_XZ, GRID_YY, GRID_YZ, GRID_ZZ
+                    // Mat33: xx, yy, zz, xy, xz, yz
+                    stress_gridval[ind++] = Mat33().symmetric(S[0], S[3], S[5], S[1], S[2], S[4]);
+                }
+            }
+        }
+        return stress_gridval;
+    }
+    
+    std::vector<Mat33> interpolate_stress_array(std::vector<Vec3>& p) {
+        std::vector<Mat33> stress(p.size());
+        for (size_t i = 0; i < p.size(); i++)
+            stress[i] = interpolate_stress<SerialDisNet>(p[i]);
+        return stress;
+    }
+    
 #if EXADIS_FULL_UNIFIED_MEMORY
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    double get_stress_gridval(N* n, int i, int kx, int ky, int kz) {
+    double get_stress_gridval(int i, int kx, int ky, int kz) {
         return gridval[stress_comps[i]](kx, ky, kz).real();
     }
 #else
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    double get_stress_gridval(N *n, int i, int kx, int ky, int kz) {
+    double get_stress_gridval(int i, int kx, int ky, int kz) {
         if constexpr (std::is_same<N, SerialDisNet>::value) {
             return h_gridval[i](kx, ky, kz).real();
         } else {
@@ -822,16 +849,9 @@ public:
     }
 #endif
     
-    Mat33 interpolate_stress(System *system, const Vec3 &p)
-    {
-        synchronize_stress_gridval();
-        SerialDisNet *net = system->get_serial_network();
-        return interpolate_stress(net, p);
-    }
-    
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    Mat33 interpolate_stress(N *net, const Vec3 &p)
+    Mat33 interpolate_stress(const Vec3& p)
     {
         Vec3 s = cell.scaled_position(p);
         
@@ -876,7 +896,7 @@ public:
                 for (int j = 0; j < 2; j++) {
                     for (int k = 0; k < 2; k++) {
                         double phi = phi1d[0][i]*phi1d[1][j]*phi1d[2][k];
-                        S[l] += phi * get_stress_gridval(net, l, ind1d[0][i], ind1d[1][j], ind1d[2][k]);
+                        S[l] += phi * get_stress_gridval<N>(l, ind1d[0][i], ind1d[1][j], ind1d[2][k]);
                     }
                 }
             }
@@ -889,7 +909,7 @@ public:
     
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    SegForce segment_force(System *system, N *net, int i)
+    SegForce segment_force(System* system, N* net, int i)
     {
         auto nodes = net->get_nodes();
         auto segs = net->get_segs();
@@ -923,7 +943,7 @@ public:
                 double pos = positions[j];
                 Vec3 p = pmid + pos*pspan;
 
-                Mat33 S = interpolate_stress(net, p);
+                Mat33 S = interpolate_stress<N>(p);
                 Vec3 sigb = S * b;
                 Vec3 fLinv = cross(sigb, pspan);
 

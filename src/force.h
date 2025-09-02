@@ -133,7 +133,7 @@ public:
  *-------------------------------------------------------------------------*/
 template<class F1, class F2>
 class ForceCollection2 : public Force {
-public:
+private:
     F1* force1;
     F2* force2;
     
@@ -157,6 +157,9 @@ public:
         force1 = exadis_new<F1>(system, f1params);
         force2 = exadis_new<F2>(system, f2params);
     }
+    
+    F1* get_force1() { return force1; }
+    F2* get_force2() { return force2; }
     
     void pre_compute(System *system) {
         force1->pre_compute(system);
@@ -232,6 +235,9 @@ public:
         // Short-range
         fshort = exadis_new<FShort>(system, flong);
     }
+    
+    FLong* get_flong() { return flong; }
+    FShort* get_fshort() { return fshort; }
     
     virtual void pre_compute(System *system) {
         flong->pre_compute(system);
