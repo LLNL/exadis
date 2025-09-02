@@ -31,6 +31,7 @@ enum CrystalType {BCC_CRYSTAL, FCC_CRYSTAL, USER_CRYSTAL};
 struct CrystalParams
 {
     int type = -1; // crystal type
+    int num_bcc_plane_families = -1; // number of plane families for BCC
     Mat33 R = Mat33().eye(); // crystal orientation
     int use_glide_planes = -1;
     int enforce_glide_planes = -1;
@@ -81,7 +82,8 @@ struct Crystal : CrystalParams
     bool operator!=(const CrystalParams& p) {
         if (type != p.type || R != p.R ||
             (p.use_glide_planes != -1 && use_glide_planes != p.use_glide_planes) ||
-            (p.enforce_glide_planes != -1 && enforce_glide_planes != p.enforce_glide_planes))
+            (p.enforce_glide_planes != -1 && enforce_glide_planes != p.enforce_glide_planes) ||
+            (p.num_bcc_plane_families != -1 && num_bcc_plane_families != p.num_bcc_plane_families))
             return 1;
         return 0;
     }
@@ -152,7 +154,14 @@ struct Crystal : CrystalParams
             ref_burgs(6) = 2.0/sqrt(3.0) * Vec3(0.0, 0.0, 1.0);
             
             // Habit planes
-            num_planes = 4*(3+3)+3*16;
+            if (num_bcc_plane_families <= 0)
+                num_bcc_plane_families = 2; // default
+            int num_glissile_planes;
+            if (num_bcc_plane_families == 1) num_glissile_planes = 3; // only {110} planes
+            else if (num_bcc_plane_families == 2) num_glissile_planes = 3+3; // {110} and {112} planes
+            else num_glissile_planes = 3+3+6; // {110}, {112}, and {123} planes
+            
+            num_planes = 4*num_glissile_planes+3*16;
             Kokkos::resize(ref_planes, num_planes);
             Kokkos::resize(planes_per_burg, num_burgs);
             Kokkos::resize(burg_start_plane, num_burgs);
@@ -161,16 +170,27 @@ struct Crystal : CrystalParams
             for (int i = 0; i < 4; i++) {
                 Vec3 b = ref_burgs(i);
                 // {110} planes
-                ref_planes(i*6+0) = Vec3(-1.0*b.x, b.y, 0.0).normalized();
-                ref_planes(i*6+1) = Vec3(0.0, -1.0*b.y, b.z).normalized();
-                ref_planes(i*6+2) = Vec3(b.x, 0.0, -1.0*b.z).normalized();
-                // {112} planes
-                ref_planes(i*6+3) = Vec3(-2.0*b.x, b.y, b.z).normalized();
-                ref_planes(i*6+4) = Vec3(b.x, -2.0*b.y, b.z).normalized();
-                ref_planes(i*6+5) = Vec3(b.x, b.y, -2.0*b.z).normalized();
+                ref_planes(i*num_glissile_planes+0) = Vec3(-1.0*b.x, b.y, 0.0).normalized();
+                ref_planes(i*num_glissile_planes+1) = Vec3(0.0, -1.0*b.y, b.z).normalized();
+                ref_planes(i*num_glissile_planes+2) = Vec3(b.x, 0.0, -1.0*b.z).normalized();
+                if (num_glissile_planes > 3) {
+                    // {112} planes
+                    ref_planes(i*num_glissile_planes+3) = Vec3(-2.0*b.x, b.y, b.z).normalized();
+                    ref_planes(i*num_glissile_planes+4) = Vec3(b.x, -2.0*b.y, b.z).normalized();
+                    ref_planes(i*num_glissile_planes+5) = Vec3(b.x, b.y, -2.0*b.z).normalized();
+                }
+                if (num_glissile_planes > 6) {
+                    // {123} planes
+                    ref_planes(i*num_glissile_planes+6)  = Vec3(-3.0*b.x, 2.0*b.y, b.z).normalized();
+                    ref_planes(i*num_glissile_planes+7)  = Vec3(-3.0*b.x, b.y, 2.0*b.z).normalized();
+                    ref_planes(i*num_glissile_planes+8)  = Vec3(2.0*b.x, -3.0*b.y, b.z).normalized();
+                    ref_planes(i*num_glissile_planes+9)  = Vec3(b.x, -3.0*b.y, 2.0*b.z).normalized();
+                    ref_planes(i*num_glissile_planes+10) = Vec3(2.0*b.x, b.y, -3.0*b.z).normalized();
+                    ref_planes(i*num_glissile_planes+11) = Vec3(b.x, 2.0*b.y, -3.0*b.z).normalized();
+                }
                 // Indexing
-                planes_per_burg(i) = 6;
-                burg_start_plane(i) = i*6;
+                planes_per_burg(i) = num_glissile_planes;
+                burg_start_plane(i) = i*num_glissile_planes;
             }
             
             // <100> Burgers
@@ -187,13 +207,13 @@ struct Crystal : CrystalParams
             for (int i = 0; i < 3; i++) {
                 // Indexing
                 planes_per_burg(4+i) = 16;
-                burg_start_plane(4+i) = 4*6+i*16;
+                burg_start_plane(4+i) = 4*num_glissile_planes+i*16;
                 // <100> zonal planes
                 for (int j = 0; j < 16; j++) {
                     Vec3 pj(0.0);
                     pj[(i+1)%3] = pref100[j].x;
                     pj[(i+2)%3] = pref100[j].y;
-                    ref_planes(4*6+i*16+j) = pj.normalized();
+                    ref_planes(4*num_glissile_planes+i*16+j) = pj.normalized();
                 }
             }
             
@@ -366,7 +386,7 @@ struct Crystal : CrystalParams
                 }
             }
             Vec3 p = ref_planes(burg_start_plane(bid)+nid);
-            if (fabs(dot(plane, p)) > 0.99) plane = p;
+            if (enforce_glide_planes || fabs(dot(plane, p)) > 0.99) plane = p;
             if (use_R) plane = R * plane;
         }
         return plane;

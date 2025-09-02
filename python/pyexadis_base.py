@@ -176,6 +176,7 @@ def get_exadis_params(state):
     if "Rorient" in state: params.crystal.R = state["Rorient"]
     if "use_glide_planes" in state: params.crystal.use_glide_planes = state["use_glide_planes"]
     if "enforce_glide_planes" in state: params.crystal.enforce_glide_planes = state["enforce_glide_planes"]
+    if "num_bcc_plane_families" in state: params.crystal.num_bcc_plane_families = state["num_bcc_plane_families"]
     if "rann" in state: params.rann = state["rann"]
     if "rtol" in state: params.rtol = state["rtol"]
     if "maxdt" in state: params.maxdt = state["maxdt"]
