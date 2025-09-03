@@ -349,7 +349,7 @@ ExaDisNet read_paradis_system(const char *file)
 
 /*---------------------------------------------------------------------------
  *
- *    Parameters binding
+ *    Parameters / Crystal binding
  *
  *-------------------------------------------------------------------------*/
 Params::Params(
@@ -361,7 +361,7 @@ Params::Params(
     double _maxdt, double _nextdt,
     int _split3node)
 {
-    set_crystal(crystalname);
+    crystal.set_crystal_type(crystalname);
     burgmag = _burgmag;
     MU = _MU;
     NU = _NU;
@@ -375,10 +375,10 @@ Params::Params(
     split3node = _split3node;
 }
 
-void Params::set_crystal(std::string crystalname) {
+void CrystalParams::set_crystal_type(std::string crystalname) {
     if (!crystalname.empty()) {
-        if (crystalname == "bcc" || crystalname == "BCC") crystal.type = BCC_CRYSTAL;
-        else if (crystalname == "fcc" || crystalname == "FCC") crystal.type = FCC_CRYSTAL;
+        if (crystalname == "bcc" || crystalname == "BCC") type = BCC_CRYSTAL;
+        else if (crystalname == "fcc" || crystalname == "FCC") type = FCC_CRYSTAL;
         else ExaDiS_fatal("Error: unknown crystal type %s in the python binding\n", crystalname.c_str());
     }
 }
@@ -886,8 +886,7 @@ PYBIND11_MODULE(pyexadis, m) {
              py::arg("crystal")="", py::arg("burgmag"), py::arg("mu"), py::arg("nu"), py::arg("a"), 
              py::arg("maxseg"), py::arg("minseg"), py::arg("rann")=-1.0, py::arg("rtol")=-1.0, 
              py::arg("maxdt")=1e-7, py::arg("nextdt")=1e-12, py::arg("split3node")=1)
-        .def("set_crystal", &Params::set_crystal, "Set the crystal type")
-        .def_readwrite("crystal", &Params::crystal, "Crystal parameters")
+        .def_readwrite("crystalparams", &Params::crystal, "Crystal parameters")
         .def_readwrite("burgmag", &Params::burgmag, "Burgers vector magnitude (scaling length)")
         .def_readwrite("mu", &Params::MU, "Shear modulus")
         .def_readwrite("nu", &Params::NU, "Poisson's ratio")
@@ -902,15 +901,16 @@ PYBIND11_MODULE(pyexadis, m) {
     
     py::class_<CrystalParams>(m, "CrystalParams")
         .def(py::init<>())
+        .def("set_crystal_type", &CrystalParams::set_crystal_type, "Set the crystal type")
         .def_readwrite("R", &CrystalParams::R, "Crystal orientation matrix")
         .def_readwrite("use_glide_planes", &CrystalParams::use_glide_planes, "Use and maintain dislocation glide planes")
         .def_readwrite("enforce_glide_planes", &CrystalParams::enforce_glide_planes, "Enforce glide planes option")
         .def_readwrite("num_bcc_plane_families", &CrystalParams::num_bcc_plane_families, "Number of BCC plane families (1, 2, or 3)");
     
     py::class_<Crystal>(m, "Crystal")
-        .def(py::init<>())
         .def(py::init<int>(), py::arg("type"))
         .def(py::init<int, Mat33>(), py::arg("type"), py::arg("R"))
+        .def(py::init<const CrystalParams&>(), py::arg("crystalparams"))
         .def_readonly("type", &Crystal::type, "Index of the crystal type")
         .def_readonly("R", &Crystal::R, "Crystal orientation matrix")
         .def("set_orientation", (void (Crystal::*)(Mat33)) &Crystal::set_orientation, "Set crystal orientation matrix")
@@ -1023,6 +1023,8 @@ PYBIND11_MODULE(pyexadis, m) {
         .def("write_data", &ExaDisNet::write_data, "Write network in ParaDiS format")
         .def("get_plastic_strain", &ExaDisNet::get_plastic_strain, "Returns plastic strain as computed since the last integration step")
         .def("physical_links", &ExaDisNet::physical_links, "Returns the list of segments for each physical dislocation link")
+        .def("_get_crystal", &ExaDisNet::get_crystal, "Get the Crystal object",
+             py::return_value_policy::reference_internal)
         .def("_get_serial_network", &ExaDisNet::get_serial_network, "Get the SerialDisNet object",
              py::return_value_policy::reference_internal);
         

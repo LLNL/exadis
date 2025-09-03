@@ -35,6 +35,8 @@ struct CrystalParams
     Mat33 R = Mat33().eye(); // crystal orientation
     int use_glide_planes = -1;
     int enforce_glide_planes = -1;
+    
+    void set_crystal_type(std::string);
 };
 
 /*---------------------------------------------------------------------------

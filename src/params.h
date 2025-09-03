@@ -81,7 +81,6 @@ struct Params {
     // Python binding
     Params(std::string, double, double, double, double, double, double, double, double, double, double, int);
     CrystalParams crystal;
-    void set_crystal(std::string);
 };
 
 } // namespace ExaDiS

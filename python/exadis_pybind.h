@@ -211,6 +211,7 @@ struct ExaDisNet {
     void set_forces(std::vector<Vec3>& forces, std::vector<NodeTag>& tags) { ::set_forces(system, forces, tags); }
     void set_velocities(std::vector<Vec3>& vels, std::vector<NodeTag>& tags) { ::set_velocities(system, vels, tags); }
     
+    Crystal* get_crystal() { return &system->crystal; }
     SerialDisNet* get_serial_network() { return system->get_serial_network(); }
     
     std::vector<std::vector<int> > physical_links() { return system->get_serial_network()->physical_links(); }
