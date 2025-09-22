@@ -824,7 +824,9 @@ public:
         return stress_gridval;
     }
     
-    std::vector<Mat33> interpolate_stress_array(std::vector<Vec3>& p) {
+    std::vector<Mat33> interpolate_stress_array(std::vector<Vec3>& p)
+    {
+        synchronize_stress_gridval();
         std::vector<Mat33> stress(p.size());
         for (size_t i = 0; i < p.size(); i++)
             stress[i] = interpolate_stress<SerialDisNet>(p[i]);

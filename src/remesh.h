@@ -64,7 +64,7 @@ public:
         for (int i = 0; i < nsegs; i++) {
             
             int n1 = network->segs[i].n1;
-    		int n2 = network->segs[i].n2;
+            int n2 = network->segs[i].n2;
             Vec3 r1 = network->nodes[n1].pos;
             Vec3 r2 = network->cell.pbc_position(r1, network->nodes[n2].pos);
             double length = (r2-r1).norm();
@@ -145,7 +145,7 @@ public:
                 Vec3 r0 = network->cell.pbc_position(ri, network->nodes[n0].pos);
                 double l0 = (r0-ri).norm();
                 
-                // neighbor 2
+                // neighbor 1
                 int s1 = network->conn[i].seg[1];
                 int n1 = network->conn[i].node[1];
                 Vec3 r1 = network->cell.pbc_position(ri, network->nodes[n1].pos);

@@ -684,6 +684,8 @@ public:
     
     IntegratorSubcyclingDriver(const IntegratorSubcyclingDriver&) = delete;
     
+    SegSegGroups* get_subgroups() { return subgroups; }
+    
     void write_stats() {
         if (0) {
             printf("Subcycling\n");

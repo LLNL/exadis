@@ -68,6 +68,9 @@ public:
         rtolth = params.rtolth;
         rtolrel = params.rtolrel;
         
+        if (rtol < 0.0 || rtolth < 0.0 || rtolrel < 0.0)
+            ExaDiS_fatal("Error: invalid rtol values in IntegratorRKF\n");
+        
         dtIncrementFact = 1.2;
         dtDecrementFact = 0.5;
         dtVariableAdjustment = 0;
