@@ -132,7 +132,7 @@ namespace pybind11 { namespace detail {
  *    Utility functions
  *
  *-------------------------------------------------------------------------*/
-void initialize(int num_threads=-1, int device_id=0);
+void initialize(int num_threads=-1, int device_id=0, bool verbose=true);
 void finalize();
 std::vector<int> map_node_tags(DeviceDisNet* net, std::vector<NodeTag>& tags);
 void set_positions(System* system, std::vector<Vec3>& pos);

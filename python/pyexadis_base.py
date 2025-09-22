@@ -72,8 +72,8 @@ class ExaDisNet(DisNet_Base):
         else:
             raise ValueError('Invalid number of arguments in ExaDisNet()')
         
-    def read_paradis(self, datafile):
-        self.net = pyexadis.read_paradis(datafile)
+    def read_paradis(self, datafile, verbose=True):
+        self.net = pyexadis.read_paradis(datafile, verbose)
         return self
     read_data = read_paradis
         

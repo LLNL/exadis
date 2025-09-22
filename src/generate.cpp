@@ -368,15 +368,15 @@ struct ParaDisSeg {
     }
 };
 
-SerialDisNet* read_paradis(const char *file)
+SerialDisNet* read_paradis(const char* file, bool verbose)
 {
-    printf("Reading ParaDiS configuration\n");
+    if (verbose) printf("Reading ParaDiS configuration\n");
     
     FILE *fp = fopen(file, "r");
     if (fp == NULL)
         ExaDiS_fatal("Error: cannot open ParaDiS file %s\n", file);
     else
-        printf(" Input file: %s\n", file);
+        if (verbose) printf(" Input file: %s\n", file);
     
     char *line = NULL;
     size_t len = 0;
@@ -471,7 +471,7 @@ SerialDisNet* read_paradis(const char *file)
             network->add_seg(n1, n2, segs[i].burg, segs[i].plane);
     }
     
-    printf(" nodes: %d, segments: %d\n", 
+    if (verbose) printf(" nodes: %d, segments: %d\n", 
     network->number_of_nodes(), network->number_of_segs());
     
     // Verify Burgers vector conservation
@@ -483,8 +483,8 @@ SerialDisNet* read_paradis(const char *file)
             bsum += network->conn[i].order[j] * network->segs[network->conn[i].seg[j]].burg;
         if (bsum.norm2() > 1e-5) nb++;
     }
-    if (nb == 0) printf(" Burgers vector is conserved for all nodes\n");
-    else printf(" Warning: Burgers vector is not conserved for %d node(s)\n", nb);
+    if (nb > 0) printf(" Warning: Burgers vector is not conserved for %d node(s)\n", nb);
+    else if (verbose) printf(" Burgers vector is conserved for all nodes\n");
     
     return network;
 }
