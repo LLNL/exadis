@@ -24,6 +24,8 @@ set(EXADIS_INCLUDE_DIRS
 )
 
 add_subdirectory(benchmark)
+add_subdirectory(unit_tests)
+
 #add_subdirectory(test_bind)
 #add_subdirectory(test_operator)
 #add_subdirectory(test_neighbor)

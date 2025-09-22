@@ -130,8 +130,14 @@ int main(int argc, char* argv[])
 {
     ExaDiS::Initialize init(argc, argv);
     
-    test_system();
-    test_system_unified();
+    std::string test_name = "";
+    if (argc > 1)
+        test_name = std::string(argv[1]);
+    
+    if (test_name == "test_system" || test_name.empty())
+        test_system();
+    if (test_name == "test_system_unified" || test_name.empty())
+        test_system_unified();
     
     return 0;
 }

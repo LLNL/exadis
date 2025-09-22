@@ -16,7 +16,7 @@
  *-------------------------------------------------------------------------*/
 void test_memory()
 {
-    printf("test_memory\n");
+    printf("test_memory()\n");
     
     int N = 5;
     Kokkos::View<int*> array("array", N);
@@ -31,8 +31,8 @@ void test_memory()
     for (int i = 0; i < N; i++)
         error += (h_array(i) != 2*i);
     
-    if (error) printf("FAIL\n");
-    else printf("PASS\n");
+    if (error) printf(" FAIL\n");
+    else printf(" PASS\n");
 }
 
 /*---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ void test_memory()
  *-------------------------------------------------------------------------*/
 void test_unified_memory()
 {
-    printf("test_unified_memory\n");
+    printf("test_unified_memory()\n");
     
     int N = 5;
     Kokkos::View<int*, Kokkos::SharedSpace> array("array", N);
@@ -55,8 +55,8 @@ void test_unified_memory()
     for (int i = 0; i < N; i++)
         error += (array(i) != 2*i);
     
-    if (error) printf("FAIL\n");
-    else printf("PASS\n");
+    if (error) printf(" FAIL\n");
+    else printf(" PASS\n");
 }
 
 /*---------------------------------------------------------------------------
@@ -66,12 +66,20 @@ void test_unified_memory()
  *-------------------------------------------------------------------------*/
 int main(int argc, char* argv[])
 {
-    printf("test_initialize\n");
-    Kokkos::ScopeGuard guard(argc, argv);
-    printf("PASS\n");
+    std::string test_name = "";
+    if (argc > 1)
+        test_name = std::string(argv[1]);
     
-    test_memory();
-    test_unified_memory();
+    if (test_name == "test_initialize" || test_name.empty())
+        printf("test_initialize()\n");
+    Kokkos::ScopeGuard guard(argc, argv);
+    if (test_name == "test_initialize" || test_name.empty())
+        printf(" PASS\n");
+    
+    if (test_name == "test_memory" || test_name.empty())
+        test_memory();
+    if (test_name == "test_unified_memory" || test_name.empty())
+        test_unified_memory();
     
     return 0;
 }

@@ -87,7 +87,7 @@ def test_cross_slip_bcc():
                           state=state, max_step=3000, loading_mode='stress',
                           applied_stress=np.array([0.0, 0.0, 0.0, 2e8, 0.0, 0.0]),
                           print_freq=1, plot_freq=10, plot_pause_seconds=0.0001,
-                          write_freq=10, write_dir='output_bcc')
+                          write_freq=10, write_dir='output')
     sim.run(N, state)
     
     pyexadis.finalize()
