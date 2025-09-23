@@ -29,8 +29,11 @@ protected:
     double rtol, rtolth, rtolrel;
     double dtIncrementFact, dtDecrementFact, dtVariableAdjustment, dtExponent;
     
-    System* s;
-    DeviceDisNet* network;
+    System s;
+    DeviceDisNet* net;
+    T_nodes::pointer_type nodes;
+    Cell cell;
+    
     T_v rkf[6];
     T_v vcurr;
     double errmax[2];
@@ -38,12 +41,12 @@ protected:
     int step;
     
     // Coefficients for error calculation
-    const double er[6] = {
+    double er[6] = {
         1.0/360, 0.0, -128.0/4275, -2197.0/75240, 1.0/50, 2.0/55
     };
     
     // Array of coefficients used by the method.
-    const double f[6][6] = {
+    double f[6][6] = {
         {1.0/4      ,  0.0        ,  0.0         ,  0.0          ,  0.0    , 0.0   },
         {3.0/32     ,  9.0/32     ,  0.0         ,  0.0          ,  0.0    , 0.0   },
         {1932.0/2197, -7200.0/2197,  7296.0/2197 ,  0.0          ,  0.0    , 0.0   },
@@ -59,7 +62,9 @@ public:
         Params(double _rtolth, double _rtolrel) : rtolth(_rtolth), rtolrel(_rtolrel) {}
     };
     
-    IntegratorRKF(System *system, Force *_force, Mobility *_mobility, Params params=Params()) : 
+    IntegratorRKF() = default;
+    
+    IntegratorRKF(System* system, Force* _force, Mobility* _mobility, Params params=Params()) : 
     force(_force), mobility(_mobility)
     {
         nextdt = system->params.nextdt;
@@ -83,30 +88,23 @@ public:
     struct TagRestoreVels {};
     
     KOKKOS_INLINE_FUNCTION
-    void operator() (TagPreserveData, const int &i) const {
-        auto nodes = network->get_nodes();
-        s->xold(i) = nodes[i].pos;
+    void operator() (TagPreserveData, const int& i) const {
+        s.xold(i) = nodes[i].pos;
         vcurr(i) = nodes[i].v;
     }
     
     KOKKOS_INLINE_FUNCTION
-    void operator() (TagRKFStep, const int &i) const {
-        auto nodes = network->get_nodes();
-        auto cell = network->cell;
-        
+    void operator() (TagRKFStep, const int& i) const {
         if (step < 5) rkf[step](i) = nodes[i].v;
         Vec3 pos(0.0);
         for (int j = 0; j < step+1; j++)
             pos += f[step][j] * rkf[j](i);
-        pos = s->xold(i) + newdt*pos;
+        pos = s.xold(i) + newdt*pos;
         nodes[i].pos = cell.pbc_fold(pos);
     }
     
     KOKKOS_INLINE_FUNCTION
     void operator() (TagErrorNodes, const int& i, double& emax0, double& emax1, int& errnans) const {
-        auto nodes = network->get_nodes();
-        auto cell = network->cell;
-        
         rkf[5](i) = nodes[i].v;
         
         Vec3 err(0.0);
@@ -116,7 +114,7 @@ public:
         double errnet = err.norm();
         if (errnet > emax0) emax0 = errnet;
         
-        Vec3 xold = s->xold(i);
+        Vec3 xold = s.xold(i);
         xold = cell.pbc_position(nodes[i].pos, xold);
         Vec3 dr = nodes[i].pos - xold;
         double drn = dr.norm();
@@ -133,8 +131,7 @@ public:
     }
     
     KOKKOS_INLINE_FUNCTION
-    void operator() (TagRestoreVels, const int &i) const {
-        auto nodes = network->get_nodes();
+    void operator() (TagRestoreVels, const int& i) const {
         nodes[i].v = vcurr(i);
     }
     
@@ -142,13 +139,13 @@ public:
     {
         step = i;
         Kokkos::parallel_for("IntegratorRKF::RKFStep",
-            Kokkos::RangePolicy<TagRKFStep>(0, network->Nnodes_local), *this
+            Kokkos::RangePolicy<TagRKFStep>(0, net->Nnodes_local), *this
         );
         Kokkos::fence();
         
         if (i < 5) {
-            force->compute(s);
-            mobility->compute(s);
+            force->compute(&s);
+            mobility->compute(&s);
         }
     }
     
@@ -156,7 +153,7 @@ public:
     {
         int errnans = 0;
         Kokkos::parallel_reduce("IntegratorRKF::ErrorNodes",
-            Kokkos::RangePolicy<TagErrorNodes>(0, network->Nnodes_local), *this,
+            Kokkos::RangePolicy<TagErrorNodes>(0, net->Nnodes_local), *this,
             Kokkos::Max<double>(errmax[0]), Kokkos::Max<double>(errmax[1]), errnans
         );
         Kokkos::fence();
@@ -170,7 +167,7 @@ public:
         // We need to start from the old velocities. So, first,
         // substitute them with the old ones.
         Kokkos::parallel_for("IntegratorRKF::RestoreVels",
-            Kokkos::RangePolicy<TagRestoreVels>(0, network->Nnodes_local), *this
+            Kokkos::RangePolicy<TagRestoreVels>(0, net->Nnodes_local), *this
         );
         Kokkos::fence();
         
@@ -190,17 +187,19 @@ public:
         newdt = fmin(maxdt, nextdt);
         if (newdt <= 0.0) newdt = maxdt;
         
-        s = system;
-        network = system->get_device_network();
+        net = system->get_device_network();
+        nodes = net->get_nodes();
+        cell = net->cell;
         
         for (int i = 0; i < 6; i++)
-            Kokkos::resize(rkf[i], network->Nnodes_local);
+            Kokkos::resize(rkf[i], net->Nnodes_local);
         
         // Save nodal data
-        Kokkos::resize(system->xold, network->Nnodes_local);
-        Kokkos::resize(vcurr, network->Nnodes_local);
+        Kokkos::resize(system->xold, net->Nnodes_local);
+        Kokkos::resize(vcurr, net->Nnodes_local);
+        s = *system;
         Kokkos::parallel_for("IntegratorRKF::PreserveData",
-            Kokkos::RangePolicy<TagPreserveData>(0, network->Nnodes_local), *this
+            Kokkos::RangePolicy<TagPreserveData>(0, net->Nnodes_local), *this
         );
         Kokkos::fence();
 

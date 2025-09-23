@@ -165,7 +165,7 @@ public:
         if (cnew != -1 && system->crystal.use_glide_planes) {
             int snew = network->conn[i].seg[cnew];
             Vec3 bnew = network->segs[snew].burg;
-            Vec3 pnew = system->crystal.find_precise_glide_plane(bnew, p1-p0);
+            Vec3 pnew = system->crystal.find_precise_glide_plane<SerialDisNet>(bnew, p1-p0);
             if (pnew.norm2() < 1e-3)
                 pnew = system->crystal.pick_screw_glide_plane(network, bnew);
             network->segs[snew].plane = pnew;
@@ -189,7 +189,7 @@ public:
  *-------------------------------------------------------------------------*/
 template<class N>
 KOKKOS_INLINE_FUNCTION
-bool check_node_for_split(System* system, N* net, const int& i, int& nsplit)
+bool check_node_for_split(const System* system, N* net, const int& i, int& nsplit)
 {
     double shortseg = fmin(5.0, system->params.minseg * 0.1);
 

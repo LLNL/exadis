@@ -29,8 +29,11 @@ protected:
     double rtol;
     double dtIncrementFact, dtDecrementFact, dtVariableAdjustment, dtExponent;
     
-    System* s;
-    DeviceDisNet* network;
+    System s;
+    DeviceDisNet* net;
+    T_nodes::pointer_type nodes;
+    Cell cell;
+    
     T_v vcurr;
     double errmax;
     int incrDelta, iTry;
@@ -38,7 +41,9 @@ protected:
 public:
     struct Params {};
     
-    IntegratorTrapezoid(System *system, Force *_force, Mobility *_mobility, Params params=Params()) : 
+    IntegratorTrapezoid() = default;
+    
+    IntegratorTrapezoid(System* system, Force* _force, Mobility* _mobility, Params params=Params()) : 
     force(_force), mobility(_mobility)
     {
         nextdt = system->params.nextdt;
@@ -60,27 +65,20 @@ public:
     struct TagRestoreNodes {};
     
     KOKKOS_INLINE_FUNCTION
-    void operator() (TagPreserveData, const int &i) const {
-        auto nodes = network->get_nodes();
-        s->xold(i) = nodes[i].pos;
+    void operator() (TagPreserveData, const int& i) const {
+        s.xold(i) = nodes[i].pos;
         vcurr(i) = nodes[i].v;
     }
     
     KOKKOS_INLINE_FUNCTION
-    void operator() (TagAdvanceNodes, const int &i) const {
-        auto nodes = network->get_nodes();
-        auto cell = network->cell;
-        
-        Vec3 pos = s->xold(i) + 0.5 * currdt * (vcurr(i) + vcurr(i));
+    void operator() (TagAdvanceNodes, const int& i) const {
+        Vec3 pos = s.xold(i) + 0.5 * currdt * (vcurr(i) + vcurr(i));
         nodes[i].pos = cell.pbc_fold(pos);
     }
     
     KOKKOS_INLINE_FUNCTION
     void operator() (TagErrorNodes, const int& i, double& emax, int& errnans) const {
-        auto nodes = network->get_nodes();
-        auto cell = network->cell;
-        
-        Vec3 xold = s->xold(i);
+        Vec3 xold = s.xold(i);
         xold = cell.pbc_position(nodes[i].pos, xold);
         
         Vec3 verr = nodes[i].pos - xold - (0.5 * newdt * (nodes[i].v + vcurr(i)));
@@ -93,12 +91,9 @@ public:
     }
     
     KOKKOS_INLINE_FUNCTION
-    void operator() (TagRestoreNodes, const int &i) const {
-        auto nodes = network->get_nodes();
-        auto cell = network->cell;
-        
+    void operator() (TagRestoreNodes, const int& i) const {
         Vec3 x = nodes[i].pos;
-        Vec3 xold = s->xold(i);
+        Vec3 xold = s.xold(i);
         xold = cell.pbc_position(x, xold);
         Vec3 dx = x - xold - (0.5 * newdt * (nodes[i].v + vcurr(i)));
         Vec3 pos = x - dx;
@@ -109,7 +104,7 @@ public:
     {
         int errnans = 0;
         Kokkos::parallel_reduce("IntegratorTrapezoid::ErrorNodes",
-            Kokkos::RangePolicy<TagErrorNodes>(0, network->Nnodes_local), *this,
+            Kokkos::RangePolicy<TagErrorNodes>(0, net->Nnodes_local), *this,
             Kokkos::Max<double>(errmax), errnans
         );
         Kokkos::fence();
@@ -127,7 +122,7 @@ public:
                          "minimal threshold to %e. Aborting!\n", newdt);
     }
     
-    void integrate(System *system)
+    void integrate(System* system)
     {
         Kokkos::fence();
         system->timer[system->TIMER_INTEGRATION].start();
@@ -135,17 +130,19 @@ public:
         newdt = fmin(maxdt, nextdt);
         if (newdt <= 0.0) newdt = maxdt;
         
-        s = system;
-        network = system->get_device_network();
+        net = system->get_device_network();
+        nodes = net->get_nodes();
+        cell = net->cell;
         
         // Save nodal data
-        Kokkos::resize(system->xold, network->Nnodes_local);
-        Kokkos::resize(vcurr, network->Nnodes_local);
+        Kokkos::resize(system->xold, net->Nnodes_local);
+        Kokkos::resize(vcurr, net->Nnodes_local);
+        s = *system;
         Kokkos::parallel_for("IntegratorTrapezoid::PreserveData",
-            Kokkos::RangePolicy<TagPreserveData>(0, network->Nnodes_local), *this
+            Kokkos::RangePolicy<TagPreserveData>(0, net->Nnodes_local), *this
         );
         Kokkos::fence();
-
+        
         int convergent = 0;
         int maxIterations = 2;
         incrDelta = 1;
@@ -157,7 +154,7 @@ public:
             // Advance nodes
             currdt = newdt;
             Kokkos::parallel_for("IntegratorTrapezoid::AdvanceNodes",
-                Kokkos::RangePolicy<TagAdvanceNodes>(0, network->Nnodes_local), *this
+                Kokkos::RangePolicy<TagAdvanceNodes>(0, net->Nnodes_local), *this
             );
             Kokkos::fence();
             
@@ -176,7 +173,7 @@ public:
                     if (iter == maxIterations-1) continue;
                     
                     Kokkos::parallel_for("IntegratorTrapezoid::RestoreNodes",
-                        Kokkos::RangePolicy<TagRestoreNodes>(0, network->Nnodes_local), *this
+                        Kokkos::RangePolicy<TagRestoreNodes>(0, net->Nnodes_local), *this
                     );
                     Kokkos::fence();
                 }

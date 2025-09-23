@@ -18,7 +18,7 @@
 
 namespace ExaDiS {
 
-typedef Kokkos::View<bool**, T_memory_shared> T_armset;
+typedef Kokkos::View<bool**> T_armset;
 
 /*---------------------------------------------------------------------------
  *
@@ -36,7 +36,7 @@ public:
     
     static const int MAX_SPLITTABLE_DEGREE = MAX_CONN;
     
-    DeviceDisNet* net;
+    const DeviceDisNet* net;
     Cell cell;
     
     bool splitted = 0;
@@ -53,7 +53,7 @@ public:
     int Nnodes_local;
     int Nsegs_local;
     
-    KOKKOS_INLINE_FUNCTION SplitDisNet(DeviceDisNet* _net, NeighborList* _neilist) : 
+    KOKKOS_INLINE_FUNCTION SplitDisNet(const DeviceDisNet* _net, const NeighborList* _neilist) : 
     net(_net), neilist(_neilist) {
         cell = net->cell;
         Nnodes_local = net->Nnodes_local;
@@ -258,7 +258,7 @@ public:
     KOKKOS_INLINE_FUNCTION ConnAccessor get_conn() { return a_conn; }
     
     // Neighbor list accessors
-    NeighborList* neilist;
+    const NeighborList* neilist;
     int newseg = -1;
     
     struct NeiCountAccessor {
@@ -302,21 +302,22 @@ public:
  *-------------------------------------------------------------------------*/
 template<class F, class M>
 class TopologyParallel : public Topology {
-public:
-    struct SplitMultiNode; // forward declaration
-    
 private:
     F* force;
     M* mobility;
     typedef typename M::Mob Mob;
-    Mob* mob;
+    Mob mob;
     
-    SplitMultiNode* smn;
     double splitMultiNodeAlpha;
-    NeighborList* neilist;
+    NeighborList neilist;
 
     static const int MAX_SPLITTABLE_DEGREE = MAX_CONN;
     T_armset armsets[MAX_SPLITTABLE_DEGREE+1];
+    T_armset::HostMirror h_armsets[MAX_SPLITTABLE_DEGREE+1];
+    
+    Kokkos::View<int**> splits;
+    Kokkos::View<double**> power;
+    Kokkos::View<Vec3**> splitpos;
 
 public:
     TopologyParallel(System* system, Force* _force, Mobility* _mobility, Params params=Params()) 
@@ -328,12 +329,16 @@ public:
             get_arm_sets(nconn, &numSets, &armSets);
             
             Kokkos::resize(armsets[nconn], numSets, nconn);
+            h_armsets[nconn] = Kokkos::create_mirror_view(armsets[nconn]);
+            
             for (int i = 0; i < numSets; i++)
                 for (int j = 0; j < nconn; j++)
-                    armsets[nconn](i,j) = (bool)armSets[i][j];
+                    h_armsets[nconn](i,j) = (bool)armSets[i][j];
             
             for (int i = 0; i < numSets; i++) free(armSets[i]);
             free(armSets);
+            
+            Kokkos::deep_copy(armsets[nconn], h_armsets[nconn]);
         }
         
         // To reproduce ParaDiS results
@@ -350,8 +355,6 @@ public:
         if (mobility == nullptr)
             ExaDiS_fatal("Error: inconsistent mobility type in TopologyParallel\n");
         mob = mobility->mob;
-        
-        neilist = exadis_new<NeighborList>();
     }
     
     /*-----------------------------------------------------------------------
@@ -364,34 +367,27 @@ public:
      *                The trial configurations are created locally using
      *                the SplitDisNet data structure.
      *---------------------------------------------------------------------*/
+    template<class T>
     struct SplitMultiNode
     {
-        T_armset armsets[MAX_SPLITTABLE_DEGREE+1];
         double splitDist, vNoise;
         double eps = 1e-12;
         
-        System* system;
-        DeviceDisNet* net;
-        F* force;
-        Mob* mob;
-        NeighborList* neilist;
+        System system;
+        DeviceDisNet net;
+        NeighborList neilist;
+        T topology;
+        F force;
+        Mob mob;
 
-        Kokkos::View<int**, T_memory_shared> splits;
-        Kokkos::View<double**, T_memory_shared> power;
-        Kokkos::View<Vec3**, T_memory_shared> splitpos;
-
-        SplitMultiNode(System* _system, DeviceDisNet* _net, TopologyParallel* topology, 
-                       F* _force, Mob* _mob) : 
-        system(_system), net(_net), force(_force), mob(_mob)
+        SplitMultiNode(System& _system, DeviceDisNet& _net, NeighborList& _neilist,
+                       T& _topology, F& _force, Mob& _mob) : 
+        system(_system), net(_net), neilist(_neilist), topology(_topology), force(_force), mob(_mob)
         {
-            double rann = system->params.rann;
+            double rann = system.params.rann;
             splitDist = 2.0*rann + eps;
-            vNoise = (system->realdt > 0.0) ? system->params.rtol / system->realdt : 0.0;
-            vNoise = topology->splitMultiNodeAlpha * vNoise;
-            
-            // Copy precomputed armsets for each split
-            for (int nconn = 3; nconn <= MAX_SPLITTABLE_DEGREE; nconn++)
-                armsets[nconn] = topology->armsets[nconn];
+            vNoise = (system.realdt > 0.0) ? system.params.rtol / system.realdt : 0.0;
+            vNoise = topology.splitMultiNodeAlpha * vNoise;
         }
 
         KOKKOS_INLINE_FUNCTION
@@ -402,34 +398,34 @@ public:
             //int ls = team.league_size(); // returns N
             int lid = team.league_rank(); // returns a number between 0 and N
             
-            auto nodes = net->get_nodes();
-            auto segs = net->get_segs();
-            auto conn = net->get_conn();
+            auto nodes = net.get_nodes();
+            auto segs = net.get_segs();
+            auto conn = net.get_conn();
             
             int n = lid; // id in the splits array
-            int i = splits(n,0); // node id
+            int i = topology.splits(n,0); // node id
             
             int nconn = conn[i].num;
             
             // Create an instance of the SplitDisNet data structure
             // At this stage it only points to the original network
-            SplitDisNet splitnet(net, neilist);
-
+            SplitDisNet splitnet(&net, &neilist);
+            #if 1
             // Compute force and mobility of the node before the split
             // This is a per-node basis so we could do that before
-            Vec3 fi = force->node_force(system, &splitnet, i, team);
+            Vec3 fi = force.node_force(&system, &splitnet, i, team);
             
             // Mobility
             Vec3 vi;
             if (tid == 0)
-                vi = mob->node_velocity(system, net, i, fi);
+                vi = mob.node_velocity(&system, &net, i, fi);
             team.team_broadcast(vi, 0);
             
             // Compute power dissipation of the original configuration
             double powerMax = dot(fi, vi);
             
             // Now do the split locally: add new segment and change connectivity
-            int splitid = splits(n,1); // split id
+            int splitid = topology.splits(n,1); // split id
             
             // If we are dealing with a 3-arm node in BCC, let's
             // make sure that we are only allowing a split along
@@ -437,12 +433,12 @@ public:
             // a remesh operation (non-physical) and will thus
             // likely result in a higher (artificial) dissipation.
             // In this case we skip the set.
-            if (system->crystal.type == BCC_CRYSTAL && nconn == 3) {
+            if (system.crystal.type == BCC_CRYSTAL && nconn == 3) {
                 // Find the armset splitting the junction segment
                 splitid = -1;
                 for (int k = 0; k < 3; k++) {
                     for (int j = 0; j < nconn; j++) {
-                        if (!armsets[3](k,j)) {
+                        if (!topology.armsets[3](k,j)) {
                             // j is the splitarm, check if it is the junction seg
                             //if (system->crystal->is_junction_seg(system, net, conn[i].seg[j])) {
                             if (segs[conn[i].seg[j]].burg.norm2() > 1.01) {
@@ -453,33 +449,33 @@ public:
                     }
                     if (splitid >= 0) break;
                 }
-                if (tid == 0) splits(n,1) = splitid; // save split id
+                if (tid == 0) topology.splits(n,1) = splitid; // save split id
             }
             
             // Create the new configuration with splitted node
             // within the temporary, local splitnet instance
-            int inew = splitnet.split_node(i, armsets[nconn], splitid);
+            int inew = splitnet.split_node(i, topology.armsets[nconn], splitid);
             int s = splitnet.nsegs-1;
             Vec3 bnew(0.0);
             if (splitnet.newseg >= 0)
                 bnew = splitnet.segs[s].burg;
             
             // Recomputed forces with new set of arms
-            Vec3 f0 = force->node_force(system, &splitnet, i, team);
-            Vec3 f1 = force->node_force(system, &splitnet, inew, team);
+            Vec3 f0 = force.node_force(&system, &splitnet, i, team);
+            Vec3 f1 = force.node_force(&system, &splitnet, inew, team);
             
             // Compute mobility of both splitted nodes
             Vec3 v0, v1;
             if (ts > 1) {
                 if (tid == 0)
-                    v0 = mob->node_velocity(system, &splitnet, i, f0);
+                    v0 = mob.node_velocity(&system, &splitnet, i, f0);
                 if (tid == 1)
-                    v1 = mob->node_velocity(system, &splitnet, inew, f1);
+                    v1 = mob.node_velocity(&system, &splitnet, inew, f1);
                 team.team_broadcast(v0, 0);
                 team.team_broadcast(v1, 1);
             } else {
-                v0 = mob->node_velocity(system, &splitnet, i, f0);
-                v1 = mob->node_velocity(system, &splitnet, inew, f1);
+                v0 = mob.node_velocity(&system, &splitnet, i, f0);
+                v1 = mob.node_velocity(&system, &splitnet, inew, f1);
             }
             
             // If we are dealing with a 3-arm node splitting, we should
@@ -509,7 +505,7 @@ public:
                 int reposition1 = 0;
                 
                 // This may create glide plane violations
-                if (!system->crystal.use_glide_planes &&
+                if (!system.crystal.use_glide_planes &&
                     fabs(dot(v0, v1)/v0mag/v1mag+1.0) < 0.01) {
                     // If velocities of both nodes are nearly opposite,
                     // let's treat them as exactly opposite 
@@ -541,27 +537,27 @@ public:
                 splitnet.nodes[1].pos += reposition1 * minSplitDist * vdir;
                 
                 // Set glide plane of new segment if needed
-                if (splitnet.newseg >= 0 && system->crystal.use_glide_planes) {
-                    Vec3 pnew = system->crystal.find_precise_glide_plane(bnew, vdir);
+                if (splitnet.newseg >= 0 && system.crystal.use_glide_planes) {
+                    Vec3 pnew = system.crystal.find_precise_glide_plane<SplitDisNet>(bnew, vdir);
                     if (pnew.norm2() < 1e-3)
-                        pnew = system->crystal.pick_screw_glide_plane(&splitnet, bnew);
+                        pnew = system.crystal.pick_screw_glide_plane(&splitnet, bnew);
                     splitnet.segs[s].plane = pnew;
                 }
                 
                 // Recompute forces and velocities at new splitting positions
-                f0 = force->node_force(system, &splitnet, i, team);
-                f1 = force->node_force(system, &splitnet, inew, team);
+                f0 = force.node_force(&system, &splitnet, i, team);
+                f1 = force.node_force(&system, &splitnet, inew, team);
                 
                 if (ts > 1) {
                     if (tid == 0)
-                        v0 = mob->node_velocity(system, &splitnet, i, f0);
+                        v0 = mob.node_velocity(&system, &splitnet, i, f0);
                     if (tid == 1)
-                        v1 = mob->node_velocity(system, &splitnet, inew, f1);
+                        v1 = mob.node_velocity(&system, &splitnet, inew, f1);
                     team.team_broadcast(v0, 0);
                     team.team_broadcast(v1, 1);
                 } else {
-                    v0 = mob->node_velocity(system, &splitnet, i, f0);
-                    v1 = mob->node_velocity(system, &splitnet, inew, f1);
+                    v0 = mob.node_velocity(&system, &splitnet, i, f0);
+                    v1 = mob.node_velocity(&system, &splitnet, inew, f1);
                 }
                 
                 // If we are dealing with a 3-arm node, make sure we only
@@ -582,8 +578,8 @@ public:
                 if (dot(vdiff, vdir) > 0) {
                     powerTest = dot(f0, v0) + dot(f1, v1) - vNoise * (f0.norm() + f1.norm());
                     if (tid == 0) {
-                        splitpos(n,0) = splitnet.nodes[0].pos;
-                        splitpos(n,1) = splitnet.nodes[1].pos;
+                        topology.splitpos(n,0) = splitnet.nodes[0].pos;
+                        topology.splitpos(n,1) = splitnet.nodes[1].pos;
                     }
                 }
             }
@@ -591,9 +587,10 @@ public:
             // Write the power dissipation results for this split and then leave
             // The topology change was local so there is nothing to revert
             if (tid == 0) {
-                power(n,0) = powerMax;
-                power(n,1) = powerTest;
+                topology.power(n,0) = powerMax;
+                topology.power(n,1) = powerTest;
             }
+            #endif
         }
     };
     
@@ -612,17 +609,17 @@ public:
         int active_net = system->net_mngr->get_active();
         DeviceDisNet* net = system->get_device_network();
         
-
-        // Initialize the SplitMultiNode structure
-        smn = new SplitMultiNode(system, net, this, force, mob);
-        
         
         // Find nodes to split and the number of splits for each node
-        Kokkos::View<int*, T_memory_shared> nsplits("nsplits", 3);
-        Kokkos::View<int*, T_memory_shared> splitnum("splitnum", net->Nnodes_local);
+        Kokkos::View<int*> nsplits("nsplits", 3);
+        Kokkos::View<int*> splitnum("splitnum", net->Nnodes_local);
+        
+        System sys = *system;
+        DeviceDisNet d_net = *net;
+        auto nodes = net->get_nodes();
+        auto conn = net->get_conn();
+        
         Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int& i) {
-            auto nodes = net->get_nodes();
-            auto conn = net->get_conn();
             int nconn = conn[i].num;
             // Unflag corner nodes that are not 2-nodes
             if (nodes[i].constraint == CORNER_NODE && nconn != 2)
@@ -633,7 +630,7 @@ public:
                     Kokkos::atomic_add(&nsplits(2), 1);
                 }
                 // Preliminary checks to see if we should do the split
-                else if (check_node_for_split(system, net, i, nsplit)) {
+                else if (check_node_for_split(&sys, &d_net, i, nsplit)) {
                     splitnum(i) = nsplit;
                     Kokkos::atomic_add(&nsplits(0), nsplit);
                     Kokkos::atomic_add(&nsplits(1), 1);
@@ -641,19 +638,22 @@ public:
             }
         });
         Kokkos::fence();
-        int numsplits = nsplits(0);
-        int nsplitnodes = nsplits(1);
+        
+        auto h_nsplits = Kokkos::create_mirror_view(nsplits);
+        Kokkos::deep_copy(h_nsplits, nsplits);
+        int numsplits = h_nsplits(0);
+        int nsplitnodes = h_nsplits(1);
         //printf(" TopologyParallel: nsplits = %d for %d nodes\n", numsplits, nsplitnodes);
-        if (nsplits(2) > 0)
+        if (h_nsplits(2) > 0)
             printf("Warning: ignoring n=%d nodes with degree > %d = max splittable degree\n",
-            nsplits(2), MAX_SPLITTABLE_DEGREE);
+            h_nsplits(2), MAX_SPLITTABLE_DEGREE);
 
         // Create an array of all individual splits (trial configurations) 
         // These will be fully processed in parallel
         Kokkos::deep_copy(nsplits, 0);
-        Kokkos::resize(smn->splits, numsplits, 2);
-        Kokkos::View<int**, T_memory_shared>& splits = smn->splits;
-        Kokkos::View<int*, T_memory_space> splitnodes("splitnodes", nsplitnodes);
+        Kokkos::resize(splits, numsplits, 2);
+        Kokkos::View<int**>& d_splits = splits;//smn->splits;
+        Kokkos::View<int*> splitnodes("splitnodes", nsplitnodes);
         
         Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int& i) {
             int nsplit = splitnum(i);
@@ -661,15 +661,16 @@ public:
                 int idx = Kokkos::atomic_fetch_add(&nsplits(0), nsplit);
                 int idx1 = Kokkos::atomic_fetch_add(&nsplits(1), 1);
                 for (int j = 0; j < nsplit; j++) {
-                    splits(idx+j,0) = i;
-                    splits(idx+j,1) = j;
+                    d_splits(idx+j,0) = i;
+                    d_splits(idx+j,1) = j;
                 }
                 splitnodes(idx1) = i;
             }
         });
         Kokkos::fence();
-        if (nsplits(0) != numsplits)
-            ExaDiS_fatal("Error: inconsistent number of splits: %d != %d\n", nsplits(0), numsplits);
+        Kokkos::deep_copy(h_nsplits, nsplits);
+        if (h_nsplits(0) != numsplits)
+            ExaDiS_fatal("Error: inconsistent number of splits: %d != %d\n", h_nsplits(0), numsplits);
         
         
         // If we need a neighbor list, let's build a contiguous
@@ -679,17 +680,21 @@ public:
         if (cutoff > 0.0) {
             NeighborBox* neighbox = exadis_new<NeighborBox>(system, cutoff, Neighbor::NeiSeg);
             // Build a neighbor list of the nodes wrt to the segs
-            NeighborBox::BuildNeighborList<DeviceDisNet>(system, net, neighbox, neilist, Neighbor::NeiNode, splitnodes);
-            smn->neilist = neilist;
+            //NeighborBox::BuildNeighborList<DeviceDisNet>(system, net, neighbox, neilist, Neighbor::NeiNode, splitnodes);
+            neighbox->build_neighbor_list(system, net, &neilist, Neighbor::NeiNode, true, true, splitnodes);
+            //smn->neilist = neilist;
             exadis_delete(neighbox);
         }
         
-        
+
         // Now we evaluate the power dissipation of all trial
         // configurations for all nodes in parallel
-        Kokkos::resize(smn->power, numsplits, 2);
-        Kokkos::resize(smn->splitpos, numsplits, 2);
-        Kokkos::parallel_for(Kokkos::TeamPolicy<>(numsplits, Kokkos::AUTO), *smn);
+        Kokkos::resize(power, numsplits, 2);
+        Kokkos::resize(splitpos, numsplits, 2);
+        //Kokkos::parallel_for(Kokkos::TeamPolicy<>(numsplits, Kokkos::AUTO), *smn);
+        Kokkos::parallel_for(Kokkos::TeamPolicy<>(numsplits, Kokkos::AUTO),
+            SplitMultiNode<TopologyParallel>(*system, *net, neilist, *this, *force, mob)
+        );
         Kokkos::fence();
         
         
@@ -697,6 +702,14 @@ public:
         // trial configurations. Now execute the most favorable split
         // for each node, if any. We do this in serial for simplicity
         // for now.
+        auto h_splits = Kokkos::create_mirror_view(splits);
+        Kokkos::deep_copy(h_splits, splits);
+        auto h_power = Kokkos::create_mirror_view(power);
+        Kokkos::deep_copy(h_power, power);
+        auto h_splitpos = Kokkos::create_mirror_view(splitpos);
+        Kokkos::deep_copy(h_splitpos, splitpos);
+        auto h_splitnum = Kokkos::create_mirror_view(splitnum);
+        Kokkos::deep_copy(h_splitnum, splitnum);
         
         // We did not make any changes to the network yet, so
         // let's avoid making unnecessary memory copies
@@ -708,8 +721,8 @@ public:
         int isplit = 0;
         for (int n = 0; n < nsplitnodes; n++) {
             
-            int i = splits(isplit,0); // node id
-            int nsplit = splitnum(i); // number of trial splits for node i
+            int i = h_splits(isplit,0); // node id
+            int nsplit = h_splitnum(i); // number of trial splits for node i
             int nconn = network->conn[i].num;
             
             // Only consider if node and all neighbors have not
@@ -729,21 +742,21 @@ public:
                 continue;
             }
             
-            double powerMax = smn->power(isplit,0);
+            double powerMax = h_power(isplit,0);
             
             // Select most favorable split for the node
             int kmax = -1;
             Vec3 p0, p1;
             for (int k = 0; k < nsplit; k++) {
-                if (splits(isplit,0) != i)
+                if (h_splits(isplit,0) != i)
                     ExaDiS_fatal("Error: inconsistent split list\n");
                 
-                double powerTest = smn->power(isplit,1);
+                double powerTest = h_power(isplit,1);
                 if (powerTest > powerMax && powerTest > 1.0) {
                     powerMax = powerTest;
-                    kmax = splits(isplit,1); // split id
-                    p0 = smn->splitpos(isplit,0);
-                    p1 = smn->splitpos(isplit,1);
+                    kmax = h_splits(isplit,1); // split id
+                    p0 = h_splitpos(isplit,0);
+                    p1 = h_splitpos(isplit,1);
                 }
                 isplit++;
             }
@@ -754,7 +767,7 @@ public:
                 nodeflag[i] = 1;
                 std::vector<int> arms;
                 for (int l = 0; l < nconn; l++) {
-                    if (armsets[nconn](kmax,l)) {
+                    if (h_armsets[nconn](kmax,l)) {
                         arms.push_back(l);
                         nodeflag[network->conn[i].node[l]] = 1;
                     }
@@ -762,8 +775,6 @@ public:
                 execute_split(system, network, i, arms, p0, p1);
             }
         }
-        
-        delete smn;
     }
     
     /*-----------------------------------------------------------------------
@@ -778,10 +789,6 @@ public:
         
         Kokkos::fence();
         system->timer[system->TIMER_TOPOLOGY].stop();
-    }
-    
-    ~TopologyParallel() {
-        exadis_delete(neilist);
     }
     
     const char* name() { return "TopologyParallel"; }

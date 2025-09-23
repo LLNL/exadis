@@ -8,6 +8,7 @@
  *-------------------------------------------------------------------------*/
 
 #include <Kokkos_Core.hpp>
+#include <Kokkos_DualView.hpp>
 
 /*---------------------------------------------------------------------------
  *
@@ -61,6 +62,22 @@ void test_unified_memory()
 
 /*---------------------------------------------------------------------------
  *
+ *    Function:     test_memory_space
+ *
+ *-------------------------------------------------------------------------*/
+void test_memory_space()
+{
+    using ViewType = Kokkos::DualView<int*>;
+    
+    printf("host_mirror_space::memory_space: %s\n", ViewType::host_mirror_space::memory_space::name());
+    printf("execution_space::memory_space: %s\n", ViewType::execution_space::memory_space::name());
+    
+    printf("t_host::memory_space: %s\n", ViewType::t_host::memory_space::name());
+    printf("t_dev::memory_space: %s\n", ViewType::t_dev::memory_space::name());
+}
+
+/*---------------------------------------------------------------------------
+ *
  *    Function:     main
  *
  *-------------------------------------------------------------------------*/
@@ -80,6 +97,8 @@ int main(int argc, char* argv[])
         test_memory();
     if (test_name == "test_unified_memory" || test_name.empty())
         test_unified_memory();
+    if (test_name == "test_memory_space" || test_name.empty())
+        test_memory_space();
     
     return 0;
 }

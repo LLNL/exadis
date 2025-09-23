@@ -34,7 +34,7 @@ namespace ExaDiS {
  *-------------------------------------------------------------------------*/
 struct MobilityBCC_nl
 {
-    const bool non_linear = true;
+    static const bool non_linear = true;
     struct Params {
         double PEIERLS_SCREW = 1.2e9; // Pa
         double B_SCREW       = 4.6e-4; // Pa.s
@@ -54,6 +54,8 @@ struct MobilityBCC_nl
     };
     Params params;
     
+    MobilityBCC_nl() = default;
+    
     MobilityBCC_nl(System* system, Params& _params)
     {
         if (system->crystal.type != BCC_CRYSTAL)
@@ -68,8 +70,8 @@ struct MobilityBCC_nl
     }
     
     KOKKOS_INLINE_FUNCTION
-    void FscaleEdge(System* system, double feinit, double vin, const Vec3& burg,
-                    double *fout, double *dfdv, double *dfdvlin, double *d2fdv2)
+    void FscaleEdge(const System* system, double feinit, double vin, const Vec3& burg,
+                    double *fout, double *dfdv, double *dfdvlin, double *d2fdv2) const
     {
         double bt = params.B0_EDGE + params.tempK * params.B1_EDGE;
 
@@ -86,8 +88,8 @@ struct MobilityBCC_nl
     }
     
     KOKKOS_INLINE_FUNCTION
-    void EdgeDrag(System* system, Vec3& vel, const Vec3& burg, Vec3& climbdir,
-                  Vec3& fedrag, Mat33& dfedragdv)
+    void EdgeDrag(const System* system, Vec3& vel, const Vec3& burg, Vec3& climbdir,
+                  Vec3& fedrag, Mat33& dfedragdv) const
     {
         Vec3 glidedir = burg;
         glidedir = glidedir.normalized();
@@ -109,8 +111,8 @@ struct MobilityBCC_nl
     }
     
     KOKKOS_INLINE_FUNCTION
-    void FscaleScrew(System* system, double fsinit, double vin, const Vec3& burg,
-                     double *fout, double *dfdv, double *dfdvlin, double *d2fdv2)
+    void FscaleScrew(const System* system, double fsinit, double vin, const Vec3& burg,
+                     double *fout, double *dfdv, double *dfdvlin, double *d2fdv2) const
     {
         double burgmag = system->params.burgmag;
         double factor110 = sqrt(3.0)/2.0; 
@@ -163,8 +165,8 @@ struct MobilityBCC_nl
     }
     
     KOKKOS_INLINE_FUNCTION
-    void ScrewDrag(System* system, Vec3& vel, const Vec3& burg,
-                   Vec3& finit, Mat33& dfsdragdv)
+    void ScrewDrag(const System* system, Vec3& vel, const Vec3& burg,
+                   Vec3& finit, Mat33& dfsdragdv) const
     {
         double eps = 1.0e-12;
         double bnorm = burg.norm();
@@ -201,7 +203,7 @@ struct MobilityBCC_nl
     
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    Vec3 node_velocity(System* system, N* net, const int& i, const Vec3& fi)
+    Vec3 node_velocity(const System* system, N* net, const int& i, const Vec3& fi) const
     {
         auto nodes = net->get_nodes();
         auto segs = net->get_segs();

@@ -33,6 +33,7 @@ struct CoreDefault
         Params(double _Ecore, double _Ecore_junc_fact) { Ecore = _Ecore; Ecore_junc_fact = _Ecore_junc_fact; }
     };
     
+    CoreDefault() = default;
     CoreDefault(System *system, Params &params) {
         NU = system->params.NU;
         Ecore = params.Ecore;
@@ -43,7 +44,7 @@ struct CoreDefault
     }
     
     KOKKOS_INLINE_FUNCTION
-    Vec3 core_force(const Vec3 &b, const Vec3 &t)
+    Vec3 core_force(const Vec3& b, const Vec3& t) const
     {
         double bs = dot(b, t);
         Vec3 be = b - bs*t;
@@ -79,6 +80,7 @@ struct CoreConstant
         Params(double _Ecore, double _Ecore_junc_fact) { Ecore = _Ecore; Ecore_junc_fact = _Ecore_junc_fact; }
     };
     
+    CoreConstant() = default;
     CoreConstant(System *system, Params &params) {
         Ecore = params.Ecore;
         Ecore_junc_fact = params.Ecore_junc_fact;
@@ -88,7 +90,7 @@ struct CoreConstant
     }
     
     KOKKOS_INLINE_FUNCTION
-    Vec3 core_force(const Vec3 &b, const Vec3 &t)
+    Vec3 core_force(const Vec3& b, const Vec3& t) const
     {
         double Ecore_seg = Ecore;
         double bmag = b.norm();
@@ -131,6 +133,7 @@ struct CoreMD
         }
     };
     
+    CoreMD() = default;
     CoreMD(System *system, Params &params) {
         // Units conversion from eV/A to J/b^2
         double burgmag = system->params.burgmag;
@@ -158,7 +161,7 @@ struct CoreMD
     }
     
     KOKKOS_INLINE_FUNCTION
-    Vec3 core_force(const Vec3 &b, const Vec3 &t)
+    Vec3 core_force(const Vec3& b, const Vec3& t) const
     {
         double bmag = b.norm();
         double b2 = b.norm2();

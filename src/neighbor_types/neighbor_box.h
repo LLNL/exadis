@@ -40,7 +40,7 @@ public:
     int Nbox_total;
     int N_local;
     
-    typedef Kokkos::View<int*, T_memory_space> T_box;
+    typedef Kokkos::View<int*> T_box;
     T_box boxes;
     T_box countBox;
     T_box nextInBox;
@@ -57,9 +57,9 @@ public:
         build(system, net, _cutoff, _type);
     }
     
-    KOKKOS_FORCEINLINE_FUNCTION T_box::pointer_type get_head() { return boxes.data(); }
-    KOKKOS_FORCEINLINE_FUNCTION T_box::pointer_type get_count() { return countBox.data(); }
-    KOKKOS_FORCEINLINE_FUNCTION T_box::pointer_type get_next() { return nextInBox.data(); }
+    KOKKOS_FORCEINLINE_FUNCTION T_box::pointer_type get_head() const { return boxes.data(); }
+    KOKKOS_FORCEINLINE_FUNCTION T_box::pointer_type get_count() const { return countBox.data(); }
+    KOKKOS_FORCEINLINE_FUNCTION T_box::pointer_type get_next() const { return nextInBox.data(); }
     
     KOKKOS_INLINE_FUNCTION
     Vec3i find_box_coord(const Vec3& p) const {
@@ -80,8 +80,7 @@ public:
     
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    Vec3 get_node_pos(N* net, int i, NeiType _type)
-    {
+    Vec3 get_node_pos(N* net, int i, NeiType _type) const {
         auto nodes = net->get_nodes();
         Vec3 p;
         if (_type == NeiNode) {
@@ -99,30 +98,26 @@ public:
     
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    Vec3 get_node_pos(N* net, int i) {
+    Vec3 get_node_pos(N* net, int i) const {
         return get_node_pos(net, i, type);
     }
     
-    template<class N>
+    template<class N, class B>
     struct FindBox {
-        N* net;
-        NeighborBox* neighbor;
+        N net;
+        B neighbor;
         
-        FindBox(N* _net, NeighborBox* _neighbor) : net(_net), neighbor(_neighbor) {
-            Kokkos::resize(neighbor->nextInBox, neighbor->N_local);
-            Kokkos::deep_copy(neighbor->nextInBox, -1);
-            Kokkos::resize(neighbor->pos, neighbor->N_local);
-        }
+        FindBox(N& _net, B& _neighbor) : net(_net), neighbor(_neighbor) {}
         
         KOKKOS_INLINE_FUNCTION
         void operator()(const int& i) const {
-            Vec3 r = neighbor->get_node_pos(net, i);
-            int ibox = neighbor->find_box_index(r);
+            Vec3 r = neighbor.get_node_pos(&net, i);
+            int ibox = neighbor.find_box_index(r);
             // Insert node/seg into linked list of boxes
-            int nextInBox = Kokkos::atomic_exchange(&neighbor->boxes(ibox), i);
-            Kokkos::atomic_inc(&neighbor->countBox(ibox));
-            neighbor->nextInBox(i) = nextInBox;
-            neighbor->pos(i) = r;
+            int nextInBox = Kokkos::atomic_exchange(&neighbor.boxes(ibox), i);
+            Kokkos::atomic_inc(&neighbor.countBox(ibox));
+            neighbor.nextInBox(i) = nextInBox;
+            neighbor.pos(i) = r;
         }
     };
     
@@ -171,13 +166,17 @@ public:
         // Find box for each node/seg
         N_local = (type == NeiNode) ? net->Nnodes_local : net->Nsegs_local;
         
+        Kokkos::resize(nextInBox, N_local);
+        Kokkos::deep_copy(nextInBox, -1);
+        Kokkos::resize(pos, N_local);
+        
         using policy = Kokkos::RangePolicy<typename N::ExecutionSpace>;
-        Kokkos::parallel_for(policy(0, N_local), FindBox(net, this));
+        Kokkos::parallel_for(policy(0, N_local), FindBox<N,NeighborBox>(*net, *this));
         Kokkos::fence();
     }
     
     KOKKOS_INLINE_FUNCTION
-    Vec3i neighbor_box_coord(int ib)
+    Vec3i neighbor_box_coord(int ib) const
     {
         int bz = ib / 9;
         int by = (ib - 9*bz) / 3;
@@ -186,7 +185,7 @@ public:
     }
     
     KOKKOS_INLINE_FUNCTION
-    int neighbor_box_index(Vec3i c)
+    int neighbor_box_index(Vec3i c) const
     {
         for (int k = 0; k < 3; k++) {
             if (pbc[k] == PBC_BOUND) {
@@ -203,7 +202,7 @@ public:
     }
     
     KOKKOS_INLINE_FUNCTION
-    int neighbor_box_index(const Vec3i& id, int ib, Vec3& delta_pbc)
+    int neighbor_box_index(const Vec3i& id, int ib, Vec3& delta_pbc) const
     {
         Vec3i b = neighbor_box_coord(ib);
         delta_pbc.zero();
@@ -216,12 +215,12 @@ public:
     }
     
     KOKKOS_INLINE_FUNCTION
-    double get_neighbor_dist2(const Vec3& p, int k, const Vec3& delta_pbc)
+    double get_neighbor_dist2(const Vec3& p, int k, const Vec3& delta_pbc) const
     {
         Vec3 pnei = pos(k);
         return (pnei+delta_pbc-p).norm2();
     }
-    
+    /*
     template<class L>
     std::vector<L> query_list(const Vec3& p)
     {
@@ -270,7 +269,7 @@ public:
         Vec3 p = get_node_pos(net, i);
         return query_list<std::pair<int,double>>(p);
     }
-    
+    */
     
     /*-----------------------------------------------------------------------
      *    Struct:     BuildNeighborList
@@ -285,34 +284,26 @@ public:
      *                boxes are included in the neighbor list without checking
      *                their actual distance against the cutoff (faster).
      *---------------------------------------------------------------------*/
-    template<class N>
-    struct BuildNeighborList 
+    static const int Nneibox = 27;
+    
+    template<class N, class B>
+    struct BuildNeighborList
     {
-        System* system;
-        N* net;
-        NeighborBox* neighbox;
-        NeighborList* neilist;
+        N net;
+        B neighbox;
+        NeighborList neilist;
         
-        bool use_subset = false;
         NeiType input_type;
-        Kokkos::View<int*, T_memory_space> ind;
         bool strict = true;
-        
-        int Nbox = 27;
+        bool use_subset = false;
+        T_box ind;
         double cutoff2;
         
-        BuildNeighborList(System* _system, N* _net, NeighborBox* _neighbox, 
-                          NeighborList* _neilist, NeiType _type, bool _strict) :
-        system(_system), net(_net), neighbox(_neighbox), neilist(_neilist), input_type(_type), strict(_strict) {
-            use_subset = false;
-            build();
-        }
-        
-        BuildNeighborList(System* _system, N* _net, NeighborBox* _neighbox, NeighborList* _neilist,
-                          NeiType _indtype, Kokkos::View<int*, T_memory_space>& _ind) :
-        system(_system), net(_net), neighbox(_neighbox), neilist(_neilist), input_type(_indtype), ind(_ind) {
-            use_subset = true;
-            build();
+        BuildNeighborList(N& _net, NeighborBox& _neighbox, NeighborList& _neilist,
+                          NeiType _indtype, bool _strict, bool _use_subset, T_box& _ind) :
+        net(_net), neighbox(_neighbox), neilist(_neilist), input_type(_indtype),
+        strict(_strict), use_subset(_use_subset), ind(_ind) {
+            cutoff2 = neighbox.cutoff * neighbox.cutoff;
         }
         
         KOKKOS_INLINE_FUNCTION
@@ -326,25 +317,25 @@ public:
             } else {
                 i = lid;
             }
-            Vec3 p = neighbox->get_node_pos(net, i, input_type);
-            Vec3i id = neighbox->find_box_coord(p);
+            Vec3 p = neighbox.get_node_pos(&net, i, input_type);
+            Vec3i id = neighbox.find_box_coord(p);
             
             // Count the number of valid neighbors
             int Nneitot = 0;
-            Kokkos::parallel_reduce(Kokkos::TeamThreadRange(team, Nbox), [&] (const int& ib, int& nsum) {
+            Kokkos::parallel_reduce(Kokkos::TeamThreadRange(team, Nneibox), [&] (const int& ib, int& nsum) {
                 int nloc = 0;
                 Vec3 delta_pbc;
-                int nei_box_id = neighbox->neighbor_box_index(id, ib, delta_pbc);
+                int nei_box_id = neighbox.neighbor_box_index(id, ib, delta_pbc);
                 if (nei_box_id >= 0) {
-                    int Nnei = neighbox->countBox(nei_box_id);
+                    int Nnei = neighbox.countBox(nei_box_id);
                     if (!strict) {
                         nsum += Nnei;
                     } else {
-                        int n = neighbox->boxes(nei_box_id);
+                        int n = neighbox.boxes(nei_box_id);
                         for (int l = 0; l < Nnei; l++) {
-                            double dist2 = neighbox->get_neighbor_dist2(p, n, delta_pbc);
+                            double dist2 = neighbox.get_neighbor_dist2(p, n, delta_pbc);
                             if (dist2 <= cutoff2) nloc++;
-                            n = neighbox->nextInBox(n);
+                            n = neighbox.nextInBox(n);
                         }
                         nsum += nloc;
                     }
@@ -353,19 +344,19 @@ public:
             team.team_barrier();
             
             if (tid == 0)
-                neilist->count(i) = Nneitot;
+                neilist.count(i) = Nneitot;
         }
         
         KOKKOS_INLINE_FUNCTION
         void operator() (int i, int& psum, bool is_final) const {
-            if (is_final) neilist->beg(i) = psum;
-            psum += neilist->count(i);
+            if (is_final) neilist.beg(i) = psum;
+            psum += neilist.count(i);
         }
         
         KOKKOS_INLINE_FUNCTION
         void operator() (const int& t) const {
-            int ib = t % Nbox; // box id
-            int j = t / Nbox; // id
+            int ib = t % Nneibox; // box id
+            int j = t / Nneibox; // id
             
             int i; // node/seg id
             if (use_subset) {
@@ -373,86 +364,94 @@ public:
             } else {
                 i = j;
             }
-            int beg = neilist->beg(i);
+            int beg = neilist.beg(i);
             
-            Vec3 p = neighbox->get_node_pos(net, i, input_type);
-            Vec3i id = neighbox->find_box_coord(p);
+            Vec3 p = neighbox.get_node_pos(&net, i, input_type);
+            Vec3i id = neighbox.find_box_coord(p);
             
             Vec3 delta_pbc;
-            int nei_box_id = neighbox->neighbor_box_index(id, ib, delta_pbc);
+            int nei_box_id = neighbox.neighbor_box_index(id, ib, delta_pbc);
             if (nei_box_id >= 0) {
-                int Nnei = neighbox->countBox(nei_box_id);
-                int n = neighbox->boxes(nei_box_id);
+                int Nnei = neighbox.countBox(nei_box_id);
+                int n = neighbox.boxes(nei_box_id);
                 for (int l = 0; l < Nnei; l++) {
                     bool add_nei = true;
                     if (strict) {
-                        double dist2 = neighbox->get_neighbor_dist2(p, n, delta_pbc);
+                        double dist2 = neighbox.get_neighbor_dist2(p, n, delta_pbc);
                         add_nei = (dist2 <= cutoff2);
                     }
                     if (add_nei) {
-                        int idx = Kokkos::atomic_fetch_add(&neilist->count(i), 1);
-                        neilist->list(beg+idx) = n;
+                        int idx = Kokkos::atomic_fetch_add(&neilist.count(i), 1);
+                        neilist.list(beg+idx) = n;
                     }
-                    n = neighbox->nextInBox(n);
+                    n = neighbox.nextInBox(n);
                 }
             }
         }
-        
-        void build()
-        {
-            cutoff2 = neighbox->cutoff * neighbox->cutoff;
-            
-            int Ntype_local = (input_type == NeiNode) ? net->Nnodes_local : net->Nsegs_local;
-            int Nid = Ntype_local;
-            if (use_subset) {
-                Nid = ind.extent(0);
-            }
-            
-            Kokkos::resize(neilist->count, Ntype_local);
-            Kokkos::deep_copy(neilist->count, 0);
-            
-        #if defined(KOKKOS_ENABLE_CUDA) || defined(KOKKOS_ENABLE_HIP)
-            int TEAM_SIZE = 32;
-        #else
-            const Kokkos::AUTO_t TEAM_SIZE = Kokkos::AUTO;
-        #endif
-            Kokkos::parallel_for(Kokkos::TeamPolicy<>(Nid, TEAM_SIZE), *this);
-            Kokkos::resize(neilist->beg, Ntype_local);
-            Kokkos::fence();
-            
-            int Ntotnei = 0;
-            Kokkos::parallel_scan(Ntype_local, *this, Ntotnei);
-            Kokkos::fence();
-            
-            Kokkos::deep_copy(neilist->count, 0);
-            neilist->Ntotnei = Ntotnei;
-            resize_view(neilist->list, Ntotnei);
-            
-            Kokkos::parallel_for(Kokkos::RangePolicy<Kokkos::LaunchBounds<64,1>>(0, Nid*Nbox), *this);
-            Kokkos::fence();
-        }
     };
+    
+    template<class N>
+    void build_neighbor_list(System* system, N* net, NeighborList* neilist, NeiType idtype, bool strict, bool use_subset, T_box& id)
+    {
+        int Ntype_local = (idtype == NeiNode) ? net->Nnodes_local : net->Nsegs_local;
+        int Nid = Ntype_local;
+        
+        if (use_subset) {
+            Nid = id.extent(0);
+        }
+        
+        Kokkos::resize(neilist->count, Ntype_local);
+        Kokkos::deep_copy(neilist->count, 0);
+        
+    #if defined(KOKKOS_ENABLE_CUDA) || defined(KOKKOS_ENABLE_HIP)
+        int TEAM_SIZE = 32;
+    #else
+        const Kokkos::AUTO_t TEAM_SIZE = Kokkos::AUTO;
+    #endif
+        Kokkos::parallel_for(Kokkos::TeamPolicy<>(Nid, TEAM_SIZE),
+            BuildNeighborList<N,NeighborBox>(*net, *this, *neilist, idtype, strict, use_subset, id)
+        );
+        Kokkos::resize(neilist->beg, Ntype_local);
+        Kokkos::fence();
+        
+        int Ntotnei = 0;
+        Kokkos::parallel_scan(Ntype_local,
+            BuildNeighborList<N,NeighborBox>(*net, *this, *neilist, idtype, strict, use_subset, id),
+        Ntotnei);
+        Kokkos::fence();
+        
+        Kokkos::deep_copy(neilist->count, 0);
+        neilist->Ntotnei = Ntotnei;
+        resize_view(neilist->list, Ntotnei);
+        
+        Kokkos::parallel_for(Kokkos::RangePolicy<Kokkos::LaunchBounds<64,1>>(0, Nid*Nneibox),
+            BuildNeighborList<N,NeighborBox>(*net, *this, *neilist, idtype, strict, use_subset, id)
+        );
+        Kokkos::fence();
+    }
     
     template<class N>
     NeighborList* build_neighbor_list(System* system, N* net, NeiType idtype, bool strict)
     {
         NeighborList* neilist = exadis_new<NeighborList>();
-        BuildNeighborList(system, net, this, neilist, idtype, strict);
+        T_box id;
+        build_neighbor_list(system, net, neilist, idtype, strict, false, id);
+        
         return neilist;
     }
     
     template<class N>
     void build_neighbor_list(System* system, N* net, NeighborList* neilist, NeiType idtype, bool strict)
     {
-        BuildNeighborList(system, net, this, neilist, idtype, strict);
+        T_box id;
+        build_neighbor_list(system, net, neilist, idtype, strict, false, id);
     }
     
     template<class N>
-    NeighborList* build_neighbor_list(System* system, N* net, NeiType idtype, 
-                                      Kokkos::View<int*, T_memory_space>& id)
+    NeighborList* build_neighbor_list(System* system, N* net, NeiType idtype, T_box& id)
     {
         NeighborList* neilist = exadis_new<NeighborList>();
-        BuildNeighborList(system, net, this, neilist, idtype, id);
+        build_neighbor_list(system, net, neilist, idtype, true, true, id);
         return neilist;
     }
     

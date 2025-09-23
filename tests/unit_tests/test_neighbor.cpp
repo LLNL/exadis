@@ -65,7 +65,7 @@ void test_subgroups()
     
     integrator->integrate(system);
     
-    double cutoff = static_cast<ForceType::SUBCYCLING_MODEL*>(force)->fsegseg->get_cutoff();
+    double cutoff = static_cast<ForceType::SUBCYCLING_MODEL*>(force)->fsegseg.get_cutoff();
     SegSegGroups* subgroups = integrator->get_subgroups();
     printf("%d\n", subgroups->Nsegseg_tot);
     for (int i = 0; i < subgroups->Ngroups; i++)

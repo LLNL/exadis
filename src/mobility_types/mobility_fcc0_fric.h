@@ -54,7 +54,7 @@ struct MobilityField {
     }
     
     KOKKOS_INLINE_FUNCTION
-    double interpolate(const Cell& cell, const Vec3& p)
+    double interpolate(const Cell& cell, const Vec3& p) const
     {
         Vec3 s = cell.scaled_position(p);
         
@@ -135,6 +135,8 @@ struct MobilityFCC0_fric : MobilityFCC0
         }
     };
     
+    MobilityFCC0_fric() = default;
+    
     MobilityFCC0_fric(System* system, Params& params) : MobilityFCC0(system, params.params)
     {
         if (params.Fedge < 0.0 || params.Fscrew < 0.0)
@@ -153,7 +155,7 @@ struct MobilityFCC0_fric : MobilityFCC0
     
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    Vec3 node_velocity(System* system, N* net, const int& i, const Vec3& fi)
+    Vec3 node_velocity(const System* system, N* net, const int& i, const Vec3& fi) const
     {
         auto nodes = net->get_nodes();
         auto segs = net->get_segs();

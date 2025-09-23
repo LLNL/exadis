@@ -245,7 +245,7 @@ public:
                     if (cnew != -1 && system->crystal.use_glide_planes) {
                         int snew = network->conn[i].seg[cnew];
                         Vec3 bnew = network->segs[snew].burg;
-                        Vec3 pnew = system->crystal.find_precise_glide_plane(bnew, vdir);
+                        Vec3 pnew = system->crystal.find_precise_glide_plane<SerialDisNet>(bnew, vdir);
                         if (pnew.norm2() < 1e-3)
                             pnew = system->crystal.pick_screw_glide_plane(network, bnew);
                         network->segs[snew].plane = pnew;

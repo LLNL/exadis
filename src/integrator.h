@@ -61,11 +61,12 @@ public:
         
         Kokkos::resize(system->xold, net->Nnodes_local);
         
+        System sys = *system;
+        auto nodes = net->get_nodes();
+        auto cell = net->cell;
+        
         Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int i) {
-            auto nodes = net->get_nodes();
-            auto cell = net->cell;
-            
-            system->xold(i) = nodes[i].pos;
+            sys.xold(i) = nodes[i].pos;
             Vec3 rnew = nodes[i].pos + dt*nodes[i].v;
             nodes[i].pos = cell.pbc_fold(rnew);
         });

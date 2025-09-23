@@ -34,21 +34,22 @@ struct ForceSegLT
     
     typedef typename C::Params Params;
     
-    C *core;
+    C core;
     double MU, NU, a;
     
+    ForceSegLT() = default;
     ForceSegLT(System *system, Params &params)
     {
         MU = system->params.MU;
         NU = system->params.NU;
         a = system->params.a;
         
-        core = exadis_new<C>(system, params);
+        core = C(system, params);
     }
     
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    SegForce segment_force(System *system, N *net, const int &i) 
+    SegForce segment_force(const System* system, N* net, const int& i) const
     {
         auto nodes = net->get_nodes();
         auto segs = net->get_segs();
@@ -66,7 +67,7 @@ struct ForceSegLT
         t = t.normalized();
 
         // Core-force
-        Vec3 fsf = core->core_force(b, t);
+        Vec3 fsf = core.core_force(b, t);
         
         // Self-force
         if (selfforce)
@@ -79,10 +80,6 @@ struct ForceSegLT
         Vec3 f2 = -1.0*fsf + fpk;
         
         return SegForce(f1, f2);
-    }
-    
-    ~ForceSegLT() {
-        exadis_delete(core);
     }
     
     static constexpr const char* name = "ForceSegLT";

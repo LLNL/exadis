@@ -374,9 +374,9 @@ public:
     DisSeg* s_ptr;
     Conn* c_ptr;
     
-    KOKKOS_INLINE_FUNCTION DisNode* get_nodes() { return n_ptr; }
-    KOKKOS_INLINE_FUNCTION DisSeg* get_segs() { return s_ptr; }
-    KOKKOS_INLINE_FUNCTION Conn* get_conn() { return c_ptr; }
+    KOKKOS_INLINE_FUNCTION DisNode* get_nodes() const { return n_ptr; }
+    KOKKOS_INLINE_FUNCTION DisSeg* get_segs() const { return s_ptr; }
+    KOKKOS_INLINE_FUNCTION Conn* get_conn() const { return c_ptr; }
     
     inline void update_ptr() {
         Nnodes_local = number_of_nodes();

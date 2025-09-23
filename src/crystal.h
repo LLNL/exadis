@@ -55,11 +55,14 @@ struct Crystal : CrystalParams
     int num_glissile_burgs = 0;
     int num_planes = 0;
     int num_sys = 0;
-    Kokkos::View<Vec3*, T_memory_shared> ref_burgs;
-    Kokkos::View<Vec3*, T_memory_shared> ref_planes;
-    Kokkos::View<int**, T_memory_shared> ref_sys;
-    Kokkos::View<int*, T_memory_shared> planes_per_burg;
-    Kokkos::View<int*, T_memory_shared> burg_start_plane;
+    Kokkos::DualView<Vec3*> ref_burgs;
+    Kokkos::DualView<Vec3*> ref_planes;
+    Kokkos::DualView<int**> ref_sys;
+    Kokkos::DualView<int*> planes_per_burg;
+    Kokkos::DualView<int*> burg_start_plane;
+    
+    using DV_HostMem = Kokkos::DualView<int*>::t_host::memory_space;
+    using DV_DeviceMem = Kokkos::DualView<int*>::t_dev::memory_space;
     
     RandomGenerator random_gen;
     
@@ -146,14 +149,14 @@ struct Crystal : CrystalParams
             num_burgs = num_glissile_burgs+3;
             Kokkos::resize(ref_burgs, num_burgs);
             // 1/2<111> glissile Burgers
-            ref_burgs(0) = Vec3( 1.0, 1.0, 1.0).normalized();
-            ref_burgs(1) = Vec3(-1.0, 1.0, 1.0).normalized();
-            ref_burgs(2) = Vec3( 1.0,-1.0, 1.0).normalized();
-            ref_burgs(3) = Vec3( 1.0, 1.0,-1.0).normalized();
+            ref_burgs.h_view(0) = Vec3( 1.0, 1.0, 1.0).normalized();
+            ref_burgs.h_view(1) = Vec3(-1.0, 1.0, 1.0).normalized();
+            ref_burgs.h_view(2) = Vec3( 1.0,-1.0, 1.0).normalized();
+            ref_burgs.h_view(3) = Vec3( 1.0, 1.0,-1.0).normalized();
             // <100> junction Burgers
-            ref_burgs(4) = 2.0/sqrt(3.0) * Vec3(1.0, 0.0, 0.0);
-            ref_burgs(5) = 2.0/sqrt(3.0) * Vec3(0.0, 1.0, 0.0);
-            ref_burgs(6) = 2.0/sqrt(3.0) * Vec3(0.0, 0.0, 1.0);
+            ref_burgs.h_view(4) = 2.0/sqrt(3.0) * Vec3(1.0, 0.0, 0.0);
+            ref_burgs.h_view(5) = 2.0/sqrt(3.0) * Vec3(0.0, 1.0, 0.0);
+            ref_burgs.h_view(6) = 2.0/sqrt(3.0) * Vec3(0.0, 0.0, 1.0);
             
             // Habit planes
             if (num_bcc_plane_families <= 0)
@@ -170,29 +173,29 @@ struct Crystal : CrystalParams
             
             // 1/2<111> Burgers
             for (int i = 0; i < 4; i++) {
-                Vec3 b = ref_burgs(i);
+                Vec3 b = ref_burgs.h_view(i);
                 // {110} planes
-                ref_planes(i*num_glissile_planes+0) = Vec3(-1.0*b.x, b.y, 0.0).normalized();
-                ref_planes(i*num_glissile_planes+1) = Vec3(0.0, -1.0*b.y, b.z).normalized();
-                ref_planes(i*num_glissile_planes+2) = Vec3(b.x, 0.0, -1.0*b.z).normalized();
+                ref_planes.h_view(i*num_glissile_planes+0) = Vec3(-1.0*b.x, b.y, 0.0).normalized();
+                ref_planes.h_view(i*num_glissile_planes+1) = Vec3(0.0, -1.0*b.y, b.z).normalized();
+                ref_planes.h_view(i*num_glissile_planes+2) = Vec3(b.x, 0.0, -1.0*b.z).normalized();
                 if (num_glissile_planes > 3) {
                     // {112} planes
-                    ref_planes(i*num_glissile_planes+3) = Vec3(-2.0*b.x, b.y, b.z).normalized();
-                    ref_planes(i*num_glissile_planes+4) = Vec3(b.x, -2.0*b.y, b.z).normalized();
-                    ref_planes(i*num_glissile_planes+5) = Vec3(b.x, b.y, -2.0*b.z).normalized();
+                    ref_planes.h_view(i*num_glissile_planes+3) = Vec3(-2.0*b.x, b.y, b.z).normalized();
+                    ref_planes.h_view(i*num_glissile_planes+4) = Vec3(b.x, -2.0*b.y, b.z).normalized();
+                    ref_planes.h_view(i*num_glissile_planes+5) = Vec3(b.x, b.y, -2.0*b.z).normalized();
                 }
                 if (num_glissile_planes > 6) {
                     // {123} planes
-                    ref_planes(i*num_glissile_planes+6)  = Vec3(-3.0*b.x, 2.0*b.y, b.z).normalized();
-                    ref_planes(i*num_glissile_planes+7)  = Vec3(-3.0*b.x, b.y, 2.0*b.z).normalized();
-                    ref_planes(i*num_glissile_planes+8)  = Vec3(2.0*b.x, -3.0*b.y, b.z).normalized();
-                    ref_planes(i*num_glissile_planes+9)  = Vec3(b.x, -3.0*b.y, 2.0*b.z).normalized();
-                    ref_planes(i*num_glissile_planes+10) = Vec3(2.0*b.x, b.y, -3.0*b.z).normalized();
-                    ref_planes(i*num_glissile_planes+11) = Vec3(b.x, 2.0*b.y, -3.0*b.z).normalized();
+                    ref_planes.h_view(i*num_glissile_planes+6)  = Vec3(-3.0*b.x, 2.0*b.y, b.z).normalized();
+                    ref_planes.h_view(i*num_glissile_planes+7)  = Vec3(-3.0*b.x, b.y, 2.0*b.z).normalized();
+                    ref_planes.h_view(i*num_glissile_planes+8)  = Vec3(2.0*b.x, -3.0*b.y, b.z).normalized();
+                    ref_planes.h_view(i*num_glissile_planes+9)  = Vec3(b.x, -3.0*b.y, 2.0*b.z).normalized();
+                    ref_planes.h_view(i*num_glissile_planes+10) = Vec3(2.0*b.x, b.y, -3.0*b.z).normalized();
+                    ref_planes.h_view(i*num_glissile_planes+11) = Vec3(b.x, 2.0*b.y, -3.0*b.z).normalized();
                 }
                 // Indexing
-                planes_per_burg(i) = num_glissile_planes;
-                burg_start_plane(i) = i*num_glissile_planes;
+                planes_per_burg.h_view(i) = num_glissile_planes;
+                burg_start_plane.h_view(i) = i*num_glissile_planes;
             }
             
             // <100> Burgers
@@ -208,14 +211,14 @@ struct Crystal : CrystalParams
             };
             for (int i = 0; i < 3; i++) {
                 // Indexing
-                planes_per_burg(4+i) = 16;
-                burg_start_plane(4+i) = 4*num_glissile_planes+i*16;
+                planes_per_burg.h_view(4+i) = 16;
+                burg_start_plane.h_view(4+i) = 4*num_glissile_planes+i*16;
                 // <100> zonal planes
                 for (int j = 0; j < 16; j++) {
                     Vec3 pj(0.0);
                     pj[(i+1)%3] = pref100[j].x;
                     pj[(i+2)%3] = pref100[j].y;
-                    ref_planes(4*num_glissile_planes+i*16+j) = pj.normalized();
+                    ref_planes.h_view(4*num_glissile_planes+i*16+j) = pj.normalized();
                 }
             }
             
@@ -225,8 +228,8 @@ struct Crystal : CrystalParams
             Kokkos::resize(ref_sys, num_sys, 2);
             for (int i = 0; i < 4; i++) {
                 for (int j = 0; j < 3; j++) {
-                    ref_sys(i*3+j,0) = i; // Burgers index
-                    ref_sys(i*3+j,1) = burg_start_plane(i)+j; // Plane index
+                    ref_sys.h_view(i*3+j,0) = i; // Burgers index
+                    ref_sys.h_view(i*3+j,1) = burg_start_plane.h_view(i)+j; // Plane index
                 }
             }
             
@@ -237,16 +240,16 @@ struct Crystal : CrystalParams
             num_burgs = num_glissile_burgs+3;
             Kokkos::resize(ref_burgs, num_burgs);
             // 1/2<110> Burgers
-            ref_burgs(0) = Vec3( 1.0, 1.0, 0.0).normalized();
-            ref_burgs(1) = Vec3( 1.0,-1.0, 0.0).normalized();
-            ref_burgs(2) = Vec3( 1.0, 0.0, 1.0).normalized();
-            ref_burgs(3) = Vec3( 1.0, 0.0,-1.0).normalized();
-            ref_burgs(4) = Vec3( 0.0, 1.0, 1.0).normalized();
-            ref_burgs(5) = Vec3( 0.0, 1.0,-1.0).normalized();
+            ref_burgs.h_view(0) = Vec3( 1.0, 1.0, 0.0).normalized();
+            ref_burgs.h_view(1) = Vec3( 1.0,-1.0, 0.0).normalized();
+            ref_burgs.h_view(2) = Vec3( 1.0, 0.0, 1.0).normalized();
+            ref_burgs.h_view(3) = Vec3( 1.0, 0.0,-1.0).normalized();
+            ref_burgs.h_view(4) = Vec3( 0.0, 1.0, 1.0).normalized();
+            ref_burgs.h_view(5) = Vec3( 0.0, 1.0,-1.0).normalized();
             // <100> junction Burgers
-            ref_burgs(6) = sqrt(2.0) * Vec3(1.0, 0.0, 0.0);
-            ref_burgs(7) = sqrt(2.0) * Vec3(0.0, 1.0, 0.0);
-            ref_burgs(8) = sqrt(2.0) * Vec3(0.0, 0.0, 1.0);
+            ref_burgs.h_view(6) = sqrt(2.0) * Vec3(1.0, 0.0, 0.0);
+            ref_burgs.h_view(7) = sqrt(2.0) * Vec3(0.0, 1.0, 0.0);
+            ref_burgs.h_view(8) = sqrt(2.0) * Vec3(0.0, 0.0, 1.0);
             
             // Habit planes
             num_planes = 6*3+3*4;
@@ -257,63 +260,63 @@ struct Crystal : CrystalParams
             // 1/2<110> Burgers
             for (int i = 0; i < 6; i++) {
                 // Indexing
-                planes_per_burg(i) = 3;
-                burg_start_plane(i) = i*3;
+                planes_per_burg.h_view(i) = 3;
+                burg_start_plane.h_view(i) = i*3;
             }
             // for ref_burgs(0)
-            ref_planes(0*3+0) = Vec3( 1.0,-1.0, 1.0).normalized(); /* common glide plane */
-            ref_planes(0*3+1) = Vec3(-1.0, 1.0, 1.0).normalized(); /* common glide plane */
-            ref_planes(0*3+2) = Vec3( 0.0, 0.0, 1.0).normalized(); /* junction plane */
+            ref_planes.h_view(0*3+0) = Vec3( 1.0,-1.0, 1.0).normalized(); /* common glide plane */
+            ref_planes.h_view(0*3+1) = Vec3(-1.0, 1.0, 1.0).normalized(); /* common glide plane */
+            ref_planes.h_view(0*3+2) = Vec3( 0.0, 0.0, 1.0).normalized(); /* junction plane */
             // for ref_burgs(1)
-            ref_planes(1*3+0) = Vec3( 1.0, 1.0, 1.0).normalized(); /* common glide plane */
-            ref_planes(1*3+1) = Vec3( 1.0, 1.0,-1.0).normalized(); /* common glide plane */
-            ref_planes(1*3+2) = Vec3( 0.0, 0.0, 1.0).normalized(); /* junction plane */
+            ref_planes.h_view(1*3+0) = Vec3( 1.0, 1.0, 1.0).normalized(); /* common glide plane */
+            ref_planes.h_view(1*3+1) = Vec3( 1.0, 1.0,-1.0).normalized(); /* common glide plane */
+            ref_planes.h_view(1*3+2) = Vec3( 0.0, 0.0, 1.0).normalized(); /* junction plane */
             // for ref_burgs(2)
-            ref_planes(2*3+0) = Vec3( 1.0, 1.0,-1.0).normalized(); /* common glide plane */
-            ref_planes(2*3+1) = Vec3(-1.0, 1.0, 1.0).normalized(); /* common glide plane */
-            ref_planes(2*3+2) = Vec3( 0.0, 1.0, 0.0).normalized(); /* junction plane */
+            ref_planes.h_view(2*3+0) = Vec3( 1.0, 1.0,-1.0).normalized(); /* common glide plane */
+            ref_planes.h_view(2*3+1) = Vec3(-1.0, 1.0, 1.0).normalized(); /* common glide plane */
+            ref_planes.h_view(2*3+2) = Vec3( 0.0, 1.0, 0.0).normalized(); /* junction plane */
             // for ref_burgs(3)
-            ref_planes(3*3+0) = Vec3( 1.0, 1.0, 1.0).normalized(); /* common glide plane */
-            ref_planes(3*3+1) = Vec3( 1.0,-1.0, 1.0).normalized(); /* common glide plane */
-            ref_planes(3*3+2) = Vec3( 0.0, 1.0, 0.0).normalized(); /* junction plane */
+            ref_planes.h_view(3*3+0) = Vec3( 1.0, 1.0, 1.0).normalized(); /* common glide plane */
+            ref_planes.h_view(3*3+1) = Vec3( 1.0,-1.0, 1.0).normalized(); /* common glide plane */
+            ref_planes.h_view(3*3+2) = Vec3( 0.0, 1.0, 0.0).normalized(); /* junction plane */
             // for ref_burgs(4)
-            ref_planes(4*3+0) = Vec3( 1.0, 1.0,-1.0).normalized(); /* common glide plane */
-            ref_planes(4*3+1) = Vec3( 1.0,-1.0, 1.0).normalized(); /* common glide plane */
-            ref_planes(4*3+2) = Vec3( 1.0, 0.0, 0.0).normalized(); /* junction plane */
+            ref_planes.h_view(4*3+0) = Vec3( 1.0, 1.0,-1.0).normalized(); /* common glide plane */
+            ref_planes.h_view(4*3+1) = Vec3( 1.0,-1.0, 1.0).normalized(); /* common glide plane */
+            ref_planes.h_view(4*3+2) = Vec3( 1.0, 0.0, 0.0).normalized(); /* junction plane */
             // for ref_burgs(5)
-            ref_planes(5*3+0) = Vec3( 1.0, 1.0, 1.0).normalized(); /* common glide plane */
-            ref_planes(5*3+1) = Vec3(-1.0, 1.0, 1.0).normalized(); /* common glide plane */
-            ref_planes(5*3+2) = Vec3( 1.0, 0.0, 0.0).normalized(); /* junction plane */ 
+            ref_planes.h_view(5*3+0) = Vec3( 1.0, 1.0, 1.0).normalized(); /* common glide plane */
+            ref_planes.h_view(5*3+1) = Vec3(-1.0, 1.0, 1.0).normalized(); /* common glide plane */
+            ref_planes.h_view(5*3+2) = Vec3( 1.0, 0.0, 0.0).normalized(); /* junction plane */ 
             
             // <100> Burgers
             for (int i = 0; i < 3; i++) {
                 // Indexing
-                planes_per_burg(6+i) = 4;
-                burg_start_plane(6+i) = 6*3+i*4;
+                planes_per_burg.h_view(6+i) = 4;
+                burg_start_plane.h_view(6+i) = 6*3+i*4;
             }
             // for ref_burgs(6)
-            ref_planes(6*3+0*4+0) = Vec3( 0.0, 1.0, 1.0).normalized(); /* junction plane */
-            ref_planes(6*3+0*4+1) = Vec3( 0.0, 1.0,-1.0).normalized(); /* junction plane */
-            ref_planes(6*3+0*4+2) = Vec3( 0.0, 1.0, 0.0).normalized(); /* junction plane */
-            ref_planes(6*3+0*4+3) = Vec3( 0.0, 0.0, 1.0).normalized(); /* junction plane */
+            ref_planes.h_view(6*3+0*4+0) = Vec3( 0.0, 1.0, 1.0).normalized(); /* junction plane */
+            ref_planes.h_view(6*3+0*4+1) = Vec3( 0.0, 1.0,-1.0).normalized(); /* junction plane */
+            ref_planes.h_view(6*3+0*4+2) = Vec3( 0.0, 1.0, 0.0).normalized(); /* junction plane */
+            ref_planes.h_view(6*3+0*4+3) = Vec3( 0.0, 0.0, 1.0).normalized(); /* junction plane */
             // for ref_burgs(7)
-            ref_planes(6*3+1*4+0) = Vec3( 1.0, 0.0, 1.0).normalized(); /* junction plane */
-            ref_planes(6*3+1*4+1) = Vec3( 1.0, 0.0,-1.0).normalized(); /* junction plane */
-            ref_planes(6*3+1*4+2) = Vec3( 1.0, 0.0, 0.0).normalized(); /* junction plane */
-            ref_planes(6*3+1*4+3) = Vec3( 0.0, 0.0, 1.0).normalized(); /* junction plane */
+            ref_planes.h_view(6*3+1*4+0) = Vec3( 1.0, 0.0, 1.0).normalized(); /* junction plane */
+            ref_planes.h_view(6*3+1*4+1) = Vec3( 1.0, 0.0,-1.0).normalized(); /* junction plane */
+            ref_planes.h_view(6*3+1*4+2) = Vec3( 1.0, 0.0, 0.0).normalized(); /* junction plane */
+            ref_planes.h_view(6*3+1*4+3) = Vec3( 0.0, 0.0, 1.0).normalized(); /* junction plane */
             // for ref_burgs(8)
-            ref_planes(6*3+2*4+0) = Vec3( 1.0, 1.0, 0.0).normalized(); /* junction plane */
-            ref_planes(6*3+2*4+1) = Vec3( 1.0,-1.0, 0.0).normalized(); /* junction plane */
-            ref_planes(6*3+2*4+2) = Vec3( 0.0, 1.0, 0.0).normalized(); /* junction plane */
-            ref_planes(6*3+2*4+3) = Vec3( 1.0, 0.0, 0.0).normalized(); /* junction plane */
+            ref_planes.h_view(6*3+2*4+0) = Vec3( 1.0, 1.0, 0.0).normalized(); /* junction plane */
+            ref_planes.h_view(6*3+2*4+1) = Vec3( 1.0,-1.0, 0.0).normalized(); /* junction plane */
+            ref_planes.h_view(6*3+2*4+2) = Vec3( 0.0, 1.0, 0.0).normalized(); /* junction plane */
+            ref_planes.h_view(6*3+2*4+3) = Vec3( 1.0, 0.0, 0.0).normalized(); /* junction plane */
             
             // 12 FCC 1/2<110>{111} systems
             num_sys = 12;
             Kokkos::resize(ref_sys, num_sys, 2);
             for (int i = 0; i < 6; i++) {
                 for (int j = 0; j < 2; j++) {
-                    ref_sys(i*2+j,0) = i; // Burgers index
-                    ref_sys(i*2+j,1) = burg_start_plane(i)+j; // Plane index
+                    ref_sys.h_view(i*2+j,0) = i; // Burgers index
+                    ref_sys.h_view(i*2+j,1) = burg_start_plane.h_view(i)+j; // Plane index
                 }
             }
             
@@ -324,31 +327,42 @@ struct Crystal : CrystalParams
         
         // Checks
         for (int i = 0; i < num_burgs; i++) {
-            Vec3 b = ref_burgs(i);
-            for (int j = 0; j < planes_per_burg(i); j++) {
-                int s = burg_start_plane(i);
-                Vec3 n = ref_planes(s+j);
+            Vec3 b = ref_burgs.h_view(i);
+            for (int j = 0; j < planes_per_burg.h_view(i); j++) {
+                int s = burg_start_plane.h_view(i);
+                Vec3 n = ref_planes.h_view(s+j);
                 if (dot(b, n) > 1e-5)
                     ExaDiS_fatal("Error: Burgers and plane normals are not orthogonal for crystal type = %d\n", type);
             }
         }
         for (int i = 0; i < num_sys; i++) {
-            Vec3 b = ref_burgs(ref_sys(i,0));
-            Vec3 n = ref_planes(ref_sys(i,1));
+            Vec3 b = ref_burgs.h_view(ref_sys.h_view(i,0));
+            Vec3 n = ref_planes.h_view(ref_sys.h_view(i,1));
             if (dot(b, n) > 1e-5)
                 ExaDiS_fatal("Error: Burgers and plane normals are not orthogonal in crystal type = %d\n", type);
         }
+        
+        Kokkos::deep_copy(ref_burgs.view_device(), ref_burgs.view_host());
+        Kokkos::deep_copy(ref_planes.view_device(), ref_planes.view_host());
+        Kokkos::deep_copy(ref_sys.view_device(), ref_sys.view_host());
+        Kokkos::deep_copy(planes_per_burg.view_device(), planes_per_burg.view_host());
+        Kokkos::deep_copy(burg_start_plane.view_device(), burg_start_plane.view_host());
     }
     
+    template<class N>
     KOKKOS_INLINE_FUNCTION
-    int identify_closest_Burgers_index(const Vec3& b) {
+    int identify_closest_Burgers_index(const Vec3& b) const
+    {    
+        typedef typename std::conditional<std::is_same<typename N::ExecutionSpace, Kokkos::Serial>::value,
+                                          DV_HostMem, DV_DeviceMem>::type DV_memory_space;
+        auto ref_burgs_view = ref_burgs.view<DV_memory_space>();
         int bid = 0;
         double smax = 0.0;
         Vec3 bn = b.normalized();
         if (use_R) bn = Rinv * bn;
         for (int i = 0; i < num_burgs; i++) {
-            double s = fabs(dot(ref_burgs(i).normalized(), bn)); // cosine similarity
-            //s -= fabs(ref_burgs(i).norm2()-bn.norm2()); // penalize length difference
+            double s = fabs(dot(ref_burgs_view(i).normalized(), bn)); // cosine similarity
+            //s -= fabs(ref_burgs_view(i).norm2()-bn.norm2()); // penalize length difference
             if (s > smax) {
                 bid = i;
                 smax = s;
@@ -357,37 +371,49 @@ struct Crystal : CrystalParams
         return bid;
     }
     
+    template<class N>
     KOKKOS_INLINE_FUNCTION
-    bool is_crystallographic_plane(Vec3 plane) {
+    bool is_crystallographic_plane(Vec3 plane) const
+    {
+        typedef typename std::conditional<std::is_same<typename N::ExecutionSpace, Kokkos::Serial>::value,
+                                          DV_HostMem, DV_DeviceMem>::type DV_memory_space;
+        auto ref_planes_view = ref_planes.view<DV_memory_space>();
         if (use_R) plane = Rinv * plane;
         for (int i = 0; i < num_planes; i++) {
-            Vec3 p = ref_planes(i);
+            Vec3 p = ref_planes_view(i);
             if (fabs(fabs(dot(p, plane))-1.0) < 1e-5) return 1;
         }
         return 0;
     }
     
+    template<class N>
     KOKKOS_INLINE_FUNCTION
-    Vec3 find_precise_glide_plane(const Vec3& b, const Vec3& t)
+    Vec3 find_precise_glide_plane(const Vec3& b, const Vec3& t) const
     {
+        typedef typename std::conditional<std::is_same<typename N::ExecutionSpace, Kokkos::Serial>::value,
+                                          DV_HostMem, DV_DeviceMem>::type DV_memory_space;
+        auto ref_planes_view = ref_planes.view<DV_memory_space>();
+        auto planes_per_burg_view = planes_per_burg.view<DV_memory_space>();
+        auto burg_start_plane_view = burg_start_plane.view<DV_memory_space>();
+        
         Vec3 plane = cross(b, t).normalized();
         if (plane.norm2() < 1e-2 || fabs(dot(b, t))/b.norm()/t.norm() > 0.995)
             return Vec3(0.0); // screw segment
         
         if (use_glide_planes) {
-            int bid = identify_closest_Burgers_index(b);
+            int bid = identify_closest_Burgers_index<N>(b);
             if (use_R) plane = Rinv * plane;
             int nid = 0;
             double smax = 0.0;
-            for (int i = 0; i < planes_per_burg(bid); i++) {
-                Vec3 p = ref_planes(burg_start_plane(bid)+i);
+            for (int i = 0; i < planes_per_burg_view(bid); i++) {
+                Vec3 p = ref_planes_view(burg_start_plane_view(bid)+i);
                 double s = fabs(dot(p, plane));
                 if (s > smax) {
                     nid = i;
                     smax = s;
                 }
             }
-            Vec3 p = ref_planes(burg_start_plane(bid)+nid);
+            Vec3 p = ref_planes_view(burg_start_plane_view(bid)+nid);
             if (enforce_glide_planes || fabs(dot(plane, p)) > 0.99) plane = p;
             if (use_R) plane = R * plane;
         }
@@ -396,8 +422,14 @@ struct Crystal : CrystalParams
     
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    Vec3 pick_screw_glide_plane(N* net, const Vec3& b)
+    Vec3 pick_screw_glide_plane(N* net, const Vec3& b) const
     {
+        typedef typename std::conditional<std::is_same<typename N::ExecutionSpace, Kokkos::Serial>::value,
+                                          DV_HostMem, DV_DeviceMem>::type DV_memory_space;
+        auto ref_planes_view = ref_planes.view<DV_memory_space>();
+        auto planes_per_burg_view = planes_per_burg.view<DV_memory_space>();
+        auto burg_start_plane_view = burg_start_plane.view<DV_memory_space>();
+        
         Vec3 plane(0.0);
         if (use_glide_planes) {
             if (type == FCC_CRYSTAL) {
@@ -416,9 +448,9 @@ struct Crystal : CrystalParams
                     if (val < 0.5) plane.z = -plane.x;
                 }
             } else {
-                int bid = identify_closest_Burgers_index(b);
-                int nid = random_gen.rand<typename N::ExecutionSpace>(0, planes_per_burg(bid));
-                plane = ref_planes(burg_start_plane(bid)+nid);
+                int bid = identify_closest_Burgers_index<N>(b);
+                int nid = random_gen.rand<typename N::ExecutionSpace>(0, planes_per_burg_view(bid));
+                plane = ref_planes_view(burg_start_plane_view(bid)+nid);
             }
         }
         plane = plane.normalized();
@@ -428,7 +460,7 @@ struct Crystal : CrystalParams
     
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    Vec3 find_seg_glide_plane(N* net, int i)
+    Vec3 find_seg_glide_plane(N* net, int i) const
     {
         auto nodes = net->get_nodes();
         auto segs = net->get_segs();
@@ -440,12 +472,12 @@ struct Crystal : CrystalParams
         Vec3 r1 = nodes[n1].pos;
         Vec3 r2 = cell.pbc_position(r1, nodes[n2].pos);
         Vec3 l = r2-r1;
-        return find_precise_glide_plane(b, l);
+        return find_precise_glide_plane<N>(b, l);
     }
     
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    void reset_node_glide_planes(N* net, int i)
+    void reset_node_glide_planes(N* net, int i) const
     {
         if (!use_glide_planes) return;
         auto segs = net->get_segs();
@@ -467,7 +499,7 @@ struct Crystal : CrystalParams
  *-------------------------------------------------------------------------*/
 template<class N>
 KOKKOS_INLINE_FUNCTION
-int BCC_binary_junction_node(System* system, N* net, const int& i, 
+int BCC_binary_junction_node(const System* system, N* net, const int& i, 
                              Vec3& tjunc, int* planarjunc)
 {
     auto nodes = net->get_nodes();

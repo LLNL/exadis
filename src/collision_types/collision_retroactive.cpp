@@ -1377,7 +1377,7 @@ bool test_collision_glide_planes(System* system, SerialDisNet* network,
         dr = 1.0/drlen * dr;
         
         Vec3 n = network->segs[s].plane;
-        if (!system->crystal.is_crystallographic_plane(n)) continue;
+        if (!system->crystal.is_crystallographic_plane<SerialDisNet>(n)) continue;
         
         double dottest = fabs(dot(n, dr));
         double violen_old = dottest * drlen;
@@ -1865,13 +1865,15 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
     
     double cutoff = sqrt(4.0*dr2max+0.5*l2max) + rann;
     generate_neighbor_list(system, net, neilist, cutoff, Neighbor::NeiSeg);
-    NeighborList* d_neilist = neilist;
+    
+    auto count = neilist->get_count();
+    auto nei = neilist->get_nei();
     
     // Look for collisions between segments
     int max_collisions = 2 * net->Nsegs_local;
-    Kokkos::View<int, T_memory_shared> ncollisions("ncollisions");
-    Kokkos::View<int**, T_memory_shared> collisions("collisions", max_collisions, 2);
-    Kokkos::View<double**, T_memory_shared> Lcollisions("Lcollisions", max_collisions, 2);
+    Kokkos::View<int> ncollisions("ncollisions");
+    Kokkos::View<int**> collisions("collisions", max_collisions, 2);
+    Kokkos::View<double**> Lcollisions("Lcollisions", max_collisions, 2);
     
     Kokkos::parallel_for(net->Nsegs_local, KOKKOS_LAMBDA(const int& i) {
         int n1 = segs[i].n1;
@@ -1884,9 +1886,6 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
         
         Vec3 pold1 = cell.pbc_position(p1, xold(n1));
         Vec3 pold2 = cell.pbc_position(p2, xold(n2));
-        
-        auto count = d_neilist->get_count();
-        auto nei = d_neilist->get_nei();
         
         int Nnei = count[i];
         for (int j = 0; j < Nnei; j++) {
@@ -1943,8 +1942,15 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
     });
     Kokkos::fence();
     
-    if (max_collisions > 0 && ncollisions() >= max_collisions) {
-        ncollisions() = max_collisions;
+    auto h_ncollisions = Kokkos::create_mirror_view(ncollisions);
+    Kokkos::deep_copy(h_ncollisions, ncollisions);
+    auto h_collisions = Kokkos::create_mirror_view(collisions);
+    Kokkos::deep_copy(h_collisions, collisions);
+    auto h_Lcollisions = Kokkos::create_mirror_view(Lcollisions);
+    Kokkos::deep_copy(h_Lcollisions, Lcollisions);
+    
+    if (max_collisions > 0 && h_ncollisions() >= max_collisions) {
+        h_ncollisions() = max_collisions;
         ExaDiS_log("Warning: max collisions have been reached. Some collisions have been ignored\n");
     }
     
@@ -1957,10 +1963,10 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
     std::vector<int> skipseg(nsegs, 0);
     
     // Now execute collisions found in the previous step
-    for (int c = 0; c < ncollisions(); c++) {
+    for (int c = 0; c < h_ncollisions(); c++) {
         
-        int i = collisions(c,0);
-        int k = collisions(c,1);
+        int i = h_collisions(c,0);
+        int k = h_collisions(c,1);
         
         if (skipseg[i] || skipseg[k]) continue;
         
@@ -1980,8 +1986,8 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
         Vec3 p4 = network->cell.pbc_position(p3, network->nodes[n4].pos);
         Vec3 l34 = p3-p4;
         
-        double L1 = Lcollisions(c,0);
-        double L2 = Lcollisions(c,1);
+        double L1 = h_Lcollisions(c,0);
+        double L2 = h_Lcollisions(c,1);
         
         
         // Coplanar segments check
@@ -2116,12 +2122,8 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
     }
     
 /*
-#if EXADIS_FULL_UNIFIED_MEMORY
-    T_x& h_xold = system->xold;
-#else
     T_x::HostMirror h_xold = Kokkos::create_mirror_view(system->xold);
     Kokkos::deep_copy(h_xold, system->xold);
-#endif
 */
     
     // Now we have to loop for collisions on hinge joints (i.e zipping)

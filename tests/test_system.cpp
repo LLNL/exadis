@@ -99,7 +99,8 @@ void test_system_unified()
 {
     ExaDiS_log("test_system_unified()\n");
     
-    SystemTest* system = exadis_new<SystemTest>();
+    void* p = Kokkos::kokkos_malloc<Kokkos::SharedSpace>(sizeof(SystemTest));
+    SystemTest* system = new(p) SystemTest();
     try
     {
         Kokkos::parallel_for("FunctorSystemUnified",
@@ -118,7 +119,8 @@ void test_system_unified()
         ExaDiS_log("Unknown error occurred\n");
         ExaDiS_log(" FAIL\n");
     }
-    exadis_delete(system);
+    system->~SystemTest();
+    Kokkos::kokkos_free<Kokkos::SharedSpace>(system);
 }
 
 /*---------------------------------------------------------------------------

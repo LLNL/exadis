@@ -60,9 +60,9 @@ public:
     
     template<class N>
     void zero_force(N *net) {
+        auto nodes = net->get_nodes();
         using policy = Kokkos::RangePolicy<typename N::ExecutionSpace>;
         Kokkos::parallel_for(policy(0, net->Nnodes_local), KOKKOS_LAMBDA(const int i) {
-            auto nodes = net->get_nodes();
             nodes[i].f = Vec3(0.0);
         });
         Kokkos::fence();
@@ -134,8 +134,8 @@ public:
 template<class F1, class F2>
 class ForceCollection2 : public Force {
 private:
-    F1* force1;
-    F2* force2;
+    F1 force1;
+    F2 force2;
     
     typedef typename F1::Params F1params;
     typedef typename F2::Params F2params;
@@ -149,50 +149,45 @@ public:
     };
     
     ForceCollection2(System* system, Params params) {
-        force1 = exadis_new<F1>(system, params.f1params);
-        force2 = exadis_new<F2>(system, params.f2params);
+        force1 = F1(system, params.f1params);
+        force2 = F2(system, params.f2params);
     }
     
     ForceCollection2(System* system, F1params f1params=F1params(), F2params f2params=F2params()) {
-        force1 = exadis_new<F1>(system, f1params);
-        force2 = exadis_new<F2>(system, f2params);
+        force1 = F1(system, f1params);
+        force2 = F2(system, f2params);
     }
     
-    F1* get_force1() { return force1; }
-    F2* get_force2() { return force2; }
+    F1* get_force1() { return &force1; }
+    F2* get_force2() { return &force2; }
     
     void pre_compute(System *system) {
-        force1->pre_compute(system);
-        force2->pre_compute(system);
+        force1.pre_compute(system);
+        force2.pre_compute(system);
     }
     
     void compute(System *system, bool zero=true) {
-        auto net = system->get_device_network();
+        DeviceDisNet* net = system->get_device_network();
         if (zero) zero_force(net);
-        force1->compute(system, false);
-        force2->compute(system, false);
+        force1.compute(system, false);
+        force2.compute(system, false);
     }
     
     Vec3 node_force(System *system, const int &i) {
         Vec3 f(0.0);
-        f += static_cast<Force*>(force1)->node_force(system, i);
-        f += static_cast<Force*>(force2)->node_force(system, i);
+        f += force1.node_force(system, i);
+        f += force2.node_force(system, i);
         return f;
     }
     
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    Vec3 node_force(System* system, N* net, const int& i, const team_handle& team)
+    Vec3 node_force(const System* system, N* net, const int& i, const team_handle& team) const
     {
         Vec3 f(0.0);
-        f += force1->node_force(system, net, i, team);
-        f += force2->node_force(system, net, i, team);
+        f += force1.node_force(system, net, i, team);
+        f += force2.node_force(system, net, i, team);
         return f;
-    }
-    
-    ~ForceCollection2() {
-        exadis_delete(force1);
-        exadis_delete(force2);
     }
     
     const char* name() { return "ForceCollection2"; }
@@ -209,68 +204,65 @@ public:
 template<class FLong, class FShort>
 class ForceLongShort : public Force {
 protected:
-    FLong *flong;
-    FShort *fshort;
+    FLong flong;
+    FShort fshort;
 
 public:
     typedef typename FLong::Params Params;
     
+    ForceLongShort() = default;
+    
     ForceLongShort(System *system, Params params) {
         // Long-range
-        flong = exadis_new<FLong>(system, params);
+        flong = FLong(system, params);
         // Short-range
-        fshort = exadis_new<FShort>(system, flong);
+        fshort = FShort(system, &flong);
     }
     
     ForceLongShort(System *system, int Ngrid) {
         // Long-range
-        flong = exadis_new<FLong>(system, Params(Ngrid));
+        flong = FLong(system, Params(Ngrid));
         // Short-range
-        fshort = exadis_new<FShort>(system, flong);
+        fshort = FShort(system, &flong);
     }
     
     ForceLongShort(System *system, int Nx, int Ny, int Nz) {
         // Long-range
-        flong = exadis_new<FLong>(system, Params(Nx, Ny, Nz));
+        flong = FLong(system, Params(Nx, Ny, Nz));
         // Short-range
-        fshort = exadis_new<FShort>(system, flong);
+        fshort = FShort(system, &flong);
     }
     
-    FLong* get_flong() { return flong; }
-    FShort* get_fshort() { return fshort; }
+    FLong* get_flong() { return &flong; }
+    FShort* get_fshort() { return &fshort; }
     
     virtual void pre_compute(System *system) {
-        flong->pre_compute(system);
-        fshort->pre_compute(system);
+        flong.pre_compute(system);
+        fshort.pre_compute(system);
     }
     
     virtual void compute(System *system, bool zero=true) {
-        auto net = system->get_device_network();
+        DeviceDisNet* net = system->get_device_network();
         if (zero) zero_force(net);
-        flong->compute(system, false);
-        fshort->compute(system, false);
+        flong.compute(system, false);
+        fshort.compute(system, false);
     }
     
     virtual Vec3 node_force(System *system, const int &i) {
         Vec3 f(0.0);
-        f += flong->node_force(system, i);
-        f += fshort->node_force(system, i);
+        f += flong.node_force(system, i);
+        f += fshort.node_force(system, i);
         return f;
     }
     
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    Vec3 node_force(System* system, N* net, const int& i, const team_handle& team)
+    Vec3 node_force(const System* system, N* net, const int& i, const team_handle& team) const
     {
         Vec3 f(0.0);
-        f += flong->node_force(system, net, i, team);
-        f += fshort->node_force(system, net, i, team);
+        f += flong.node_force(system, net, i, team);
+        f += fshort.node_force(system, net, i, team);
         return f;
-    }
-    
-    virtual ~ForceLongShort() {
-        exadis_delete(flong);
-        exadis_delete(fshort);
     }
     
     const char* name() { return "ForceLongShort"; }
@@ -289,9 +281,9 @@ template <class F>
 class ForceSeg : public Force {
 private:
 #if defined(EXADIS_USE_COMPUTE_MAPS)
-    const bool use_map = true;
+    bool use_map = true;
 #else
-    const bool use_map = false;
+    bool use_map = false;
 #endif
     Kokkos::View<SegForce*> fmap;
     
@@ -299,10 +291,12 @@ private:
     
 public:
     typedef typename F::Params Params;
-    F *force; // force kernel
+    F force; // force kernel
+    
+    ForceSeg() = default;
     
     ForceSeg(System *system, Params params=Params()) {
-        force = exadis_new<F>(system, params);
+        force = F(system, params);
         TIMER_COMP = system->add_timer(std::string(F::name)+" compute");
     }
     
@@ -311,23 +305,22 @@ public:
     
     template<class N>
     struct AddSegmentForce {
-        System* system;
-        ForceSeg<F>* f;
-        N* net;
-        AddSegmentForce(System* _system, ForceSeg<F>* _f, N* _net) :
-        system(_system), f(_f), net(_net) {}
+        System system;
+        ForceSeg<F> f;
+        N net;
+        AddSegmentForce(System& _system, ForceSeg<F>& _f, N& _net) : system(_system), f(_f), net(_net) {}
         
         KOKKOS_INLINE_FUNCTION
-        void operator()(TagComputeForce, const int& i) const {
-            auto nodes = net->get_nodes();
-            auto segs = net->get_segs();
+        void operator()(TagComputeForce, const int &i) const {
+            auto nodes = net.get_nodes();
+            auto segs = net.get_segs();
             int n1 = segs[i].n1;
             int n2 = segs[i].n2;
             
-            SegForce fseg = f->force->segment_force(system, net, i);
+            SegForce fseg = f.force.segment_force(&system, &net, i);
             
-            if (f->use_map) {
-                f->fmap(i) = fseg;
+            if (f.use_map) {
+                f.fmap(i) = fseg;
             } else {
                 Kokkos::atomic_add(&nodes[n1].f, fseg.f1);
                 Kokkos::atomic_add(&nodes[n2].f, fseg.f2);
@@ -338,12 +331,12 @@ public:
         void operator()(const team_handle& team) const {
             int i = team.league_rank(); // seg id
             
-            auto nodes = net->get_nodes();
-            auto segs = net->get_segs();
+            auto nodes = net.get_nodes();
+            auto segs = net.get_segs();
             int n1 = segs[i].n1;
             int n2 = segs[i].n2;
             
-            SegForce fseg = f->force->segment_force(system, net, i, team);
+            SegForce fseg = f.force.segment_force(&system, &net, i, team);
             
             Kokkos::atomic_add(&nodes[n1].f, fseg.f1);
             Kokkos::atomic_add(&nodes[n2].f, fseg.f2);
@@ -351,13 +344,13 @@ public:
         
         KOKKOS_INLINE_FUNCTION
         void operator()(TagMapForce, const int& i) const {
-            auto nodes = net->get_nodes();
-            auto conn = net->get_conn();
+            auto nodes = net.get_nodes();
+            auto conn = net.get_conn();
             
             Vec3 fn(0.0);
             for (int j = 0; j < conn[i].num; j++) {
                 int k = conn[i].seg[j];
-                SegForce fseg = f->fmap(k);
+                SegForce fseg = f.fmap(k);
                 fn += ((conn[i].order[j] == 1) ? fseg.f1 : fseg.f2);
             }
             nodes[i].f += fn;
@@ -370,7 +363,7 @@ public:
         system->timer[system->TIMER_FORCE].start();
         
         if constexpr (F::has_pre_compute)
-            force->pre_compute(system);
+            force.pre_compute(system);
         
         Kokkos::fence();
         system->timer[system->TIMER_FORCE].stop();
@@ -386,7 +379,7 @@ public:
         
         if constexpr (F::has_compute_team) {
             Kokkos::parallel_for(Kokkos::TeamPolicy<>(net->Nsegs_local, Kokkos::AUTO),
-                AddSegmentForce<DeviceDisNet>(system, this, net)
+                AddSegmentForce<DeviceDisNet>(*system, *this, *net)
             );
         } else {
             
@@ -395,11 +388,11 @@ public:
             }
             
             using policy = Kokkos::RangePolicy<TagComputeForce,Kokkos::LaunchBounds<64,1>>;
-            Kokkos::parallel_for(policy(0, net->Nsegs_local), AddSegmentForce<DeviceDisNet>(system, this, net));
+            Kokkos::parallel_for(policy(0, net->Nsegs_local), AddSegmentForce<DeviceDisNet>(*system, *this, *net));
             
             if (use_map) {
                 using policy = Kokkos::RangePolicy<TagMapForce,Kokkos::LaunchBounds<64,1>>;
-                Kokkos::parallel_for(policy(0, net->Nnodes_local), AddSegmentForce<DeviceDisNet>(system, this, net));
+                Kokkos::parallel_for(policy(0, net->Nnodes_local), AddSegmentForce<DeviceDisNet>(*system, *this, *net));
             }
         }
         
@@ -414,13 +407,13 @@ public:
         Vec3 f(0.0);
         
         if constexpr (F::has_node_force) {
-            f = force->node_force(system, network, i);
+            f = force.node_force(system, network, i);
         } else {
             auto conn = network->get_conn();
             
             for (int j = 0; j < conn[i].num; j++) {
                 int k = conn[i].seg[j];
-                SegForce fs = force->segment_force(system, network, k);
+                SegForce fs = force.segment_force(system, network, k);
                 f += ((conn[i].order[j] == 1) ? fs.f1 : fs.f2);
             }
         }
@@ -430,29 +423,25 @@ public:
     
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    Vec3 node_force(System* system, N* net, const int& i, const team_handle& team)
+    Vec3 node_force(const System* system, N* net, const int& i, const team_handle& team) const
     {
         Vec3 f(0.0);
         
         if constexpr (F::has_node_force) {
-            f = force->node_force(system, net, i, team);
+            f = force.node_force(system, net, i, team);
         } else {
             auto nodes = net->get_nodes();
             auto conn = net->get_conn();
             
             Kokkos::parallel_reduce(Kokkos::TeamThreadRange(team, conn[i].num), [&] (const int& j, Vec3& fsum) {
                 int k = conn[i].seg[j];
-                SegForce fs = force->segment_force(system, net, k);
+                SegForce fs = force.segment_force(system, net, k);
                 fsum += ((conn[i].order[j] == 1) ? fs.f1 : fs.f2);
             }, f);
             team.team_barrier();
         }
         
         return f;
-    }
-    
-    ~ForceSeg() {
-        exadis_delete(force);
     }
     
     const char* name() { return F::name; }

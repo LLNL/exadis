@@ -22,7 +22,7 @@ namespace ExaDiS {
  *-------------------------------------------------------------------------*/
 struct MobilityGlide
 {
-    const bool non_linear = false;
+    static const bool non_linear = false;
     double Medge, Mscrew;
     
     struct Params {
@@ -38,6 +38,8 @@ struct MobilityGlide
         }
     };
     
+    MobilityGlide() = default;
+    
     MobilityGlide(System* system, Params& params)
     {
         if (params.Medge < 0 || params.Mscrew < 0.0)
@@ -48,7 +50,7 @@ struct MobilityGlide
     }
     
     KOKKOS_INLINE_FUNCTION
-    Mat33 glide_constraints(int nconn, Vec3* norm)
+    Mat33 glide_constraints(int nconn, Vec3* norm) const
     {
         Mat33 P = Mat33().eye();
         
@@ -73,7 +75,7 @@ struct MobilityGlide
     
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    Vec3 node_velocity(System* system, N* net, const int& i, const Vec3& fi)
+    Vec3 node_velocity(const System* system, N* net, const int& i, const Vec3& fi) const
     {
         auto nodes = net->get_nodes();
         auto segs = net->get_segs();

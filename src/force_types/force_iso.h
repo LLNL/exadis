@@ -27,6 +27,8 @@ struct SegSegIso
     
     double MU, NU, a;
     
+    SegSegIso() = default;
+    
     SegSegIso(System *system, Params params) {
         MU = system->params.MU;
         NU = system->params.NU;
@@ -35,8 +37,8 @@ struct SegSegIso
 
     template<class N>
     KOKKOS_FORCEINLINE_FUNCTION
-    SegSegForce segseg_force(System *system, N *net, const SegSeg &ss, 
-                             int compute_seg12=1, int compute_seg34=1) 
+    SegSegForce segseg_force(const System* system, N* net, const SegSeg& ss, 
+                             int compute_seg12=1, int compute_seg34=1) const
     {
         auto nodes = net->get_nodes();
         auto segs = net->get_segs();
@@ -87,6 +89,8 @@ struct SegSegIsoFFT
     
     double MU, NU, a, rcgrid;
     
+    SegSegIsoFFT() = default;
+    
     SegSegIsoFFT(System *system, Params params) {
         rcgrid = params.rcgrid;
         initialize(system);
@@ -108,8 +112,8 @@ struct SegSegIsoFFT
 
     template<class N>
     KOKKOS_FORCEINLINE_FUNCTION
-    SegSegForce segseg_force(System *system, N *net, const SegSeg &ss,
-                             int compute_seg12=1, int compute_seg34=1) 
+    SegSegForce segseg_force(const System* system, N* net, const SegSeg& ss,
+                             int compute_seg12=1, int compute_seg34=1) const
     {
         // No need to compute anything if all 
         // forces are accounted for by the grid

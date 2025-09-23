@@ -35,8 +35,10 @@ struct ForceSegN2
     
     typedef typename F::Params Params;
     
-    F *force;
+    F force;
     double MU, NU, a;
+    
+    ForceSegN2() = default;
     
     ForceSegN2(System *system, Params &params)
     {
@@ -44,12 +46,12 @@ struct ForceSegN2
         NU = system->params.NU;
         a = system->params.a;
         
-        force = exadis_new<F>(system, params);
+        force = F(system, params);
     }
     
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    SegForce segment_force(System *system, N *net, const int &i) 
+    SegForce segment_force(const System* system, N* net, const int& i) const
     {
         int Nsegs = net->Nsegs_local;
 
@@ -57,7 +59,7 @@ struct ForceSegN2
         for (int j = 0; j < Nsegs; j++) {
             if (j == i) continue; // skip self-force
             
-            SegSegForce fs = force->segseg_force(system, net, SegSeg(i, j), 1, 0);
+            SegSegForce fs = force.segseg_force(system, net, SegSeg(i, j), 1, 0);
             fs1 += fs.f1;
             fs2 += fs.f2;
         }
@@ -67,14 +69,14 @@ struct ForceSegN2
     
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    SegForce segment_force(System* system, N* net, const int& i, const team_handle& team)
+    SegForce segment_force(const System* system, N* net, const int& i, const team_handle& team) const
     {
         int Nsegs = net->Nsegs_local;
         
         Vec3 fs1(0.0), fs2(0.0);
         Kokkos::parallel_reduce(Kokkos::TeamThreadRange(team, Nsegs), [&] (const int& j, Vec3& fs1sum, Vec3& fs2sum) {
             if (j != i) { // skip self-force
-                SegSegForce fs = force->segseg_force(system, net, SegSeg(i, j), 1, 0);
+                SegSegForce fs = force.segseg_force(system, net, SegSeg(i, j), 1, 0);
                 fs1sum += fs.f1;
                 fs2sum += fs.f2;
             }
@@ -86,29 +88,29 @@ struct ForceSegN2
     
     template<class N, typename ScatterViewType>
     struct NodeForce {
-        System *system;
-        F *force;
-        N *net;
+        System system;
+        F force;
+        N net;
         ScatterViewType s_f;
         int i;
         
-        NodeForce(System *_system, F *_force, N *_net, 
-                  ScatterViewType &_s_f, int _i) : 
+        NodeForce(System& _system, F& _force, N& _net, 
+                  ScatterViewType& _s_f, int _i) : 
         system(_system), force(_force), net(_net), s_f(_s_f), i(_i) {}
         
         KOKKOS_INLINE_FUNCTION
         void operator()(const int &p) const {
             auto access = s_f.access();
             
-            auto conn = net->get_conn();
+            auto conn = net.get_conn();
             
-            int j = p / net->Nsegs_local;
+            int j = p / net.Nsegs_local;
             int o = conn[i].order[j];
             int s1 = conn[i].seg[j];
-            int s2 = p % net->Nsegs_local;
+            int s2 = p % net.Nsegs_local;
             
             if (s1 != s2) {
-                SegSegForce fs = force->segseg_force(system, net, SegSeg(s1, s2), 1, 0);
+                SegSegForce fs = force.segseg_force(&system, &net, SegSeg(s1, s2), 1, 0);
                 Vec3 fl = (o == 1) ? fs.f1 : fs.f2;
                 access(0) += fl;
             }
@@ -132,7 +134,7 @@ struct ForceSegN2
             
             using policy = Kokkos::RangePolicy<typename Kokkos::DefaultHostExecutionSpace>;
             Kokkos::parallel_for("ForceSegN2::NodeForce", policy(0, conn[i].num*net->Nsegs_local),
-                NodeForce<SerialDisNet,Sview>(system, force, net, s_f, i)
+                NodeForce<SerialDisNet,Sview>(*system, force, *net, s_f, i)
             );
             
             Kokkos::Experimental::contribute(f, s_f);
@@ -151,7 +153,7 @@ struct ForceSegN2
             Sview s_f(f);
             
             Kokkos::parallel_for("ForceSegN2::NodeForce", conn[i].num*net->Nsegs_local,
-                NodeForce<DeviceDisNet,Sview>(system, force, d_net, s_f, i)
+                NodeForce<DeviceDisNet,Sview>(*system, force, *d_net, s_f, i)
             );
             
             Kokkos::Experimental::contribute(f, s_f);
@@ -165,7 +167,7 @@ struct ForceSegN2
     
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    Vec3 node_force(System* system, N* net, const int& i, const team_handle& team)
+    Vec3 node_force(const System* system, N* net, const int& i, const team_handle& team) const
     {
         auto nodes = net->get_nodes();
         auto conn = net->get_conn();
@@ -179,17 +181,13 @@ struct ForceSegN2
             int j = t / Nsegs; // conn id
             int k = conn[i].seg[j];
             if (k != n) {
-                SegSegForce fs = force->segseg_force(system, net, SegSeg(k, n), 1, 0);
+                SegSegForce fs = force.segseg_force(system, net, SegSeg(k, n), 1, 0);
                 fsum += ((conn[i].order[j] == 1) ? fs.f1 : fs.f2);
             }
         }, f);
         team.team_barrier();
         
         return f;
-    }
-    
-    ~ForceSegN2() {
-        exadis_delete(force);
     }
     
     static constexpr const char* name = "ForceSegN2";

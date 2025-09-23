@@ -68,21 +68,20 @@ struct FFTPlan : FFTPlanBase {
     void initialize(int _Nx, int _Ny, int _Nz) {
         Nx = _Nx; Ny = _Ny; Nz = _Nz;
     }
-    void finalize() {}
 };
 
 template <class ExecutionSpace = Kokkos::DefaultExecutionSpace>
 struct FFT3DTransform
 {
     template <typename ViewType>
-    FFT3DTransform(FFTPlan<ExecutionSpace>& plan, 
+    FFT3DTransform(FFTPlan<ExecutionSpace>* plan, 
                    const ViewType& in, const ViewType& out,
                    int sign)
     {
 #ifdef FFTW
         int FFT_DIR = (sign == FFT_FORWARD) ? FFTW_FORWARD : FFTW_BACKWARD;
         fftw_plan p = fftw_plan_dft_3d(
-            plan.Nx, plan.Ny, plan.Nz, 
+            plan->Nx, plan->Ny, plan->Nz, 
             reinterpret_cast<fftw_complex*>(in.data()),
             reinterpret_cast<fftw_complex*>(out.data()),
             FFT_DIR, FFTW_ESTIMATE
@@ -104,33 +103,25 @@ struct FFT3DTransform
 #if defined(EXADIS_FFT) && defined(KOKKOS_ENABLE_CUDA)
 template<>
 struct FFTPlan<Kokkos::Cuda> : FFTPlanBase {
-    bool plan_created = 0;
-    cufftHandle* plan = nullptr;
-    KOKKOS_INLINE_FUNCTION FFTPlan() {}
-    KOKKOS_INLINE_FUNCTION FFTPlan(const FFTPlan& p) : plan(p.plan) { plan_created = 0; }
+    cufftHandle plan;
     void initialize(int _Nx, int _Ny, int _Nz) {
         Nx = _Nx; Ny = _Ny; Nz = _Nz;
-        if (plan) delete plan;
-        plan = new cufftHandle();
-        CUFFTWRAPPER(cufftPlan3d(plan, Nx, Ny, Nz, CUFFT_Z2Z));
-        plan_created = 1;
+        CUFFTWRAPPER(cufftPlan3d(&plan, Nx, Ny, Nz, CUFFT_Z2Z));
     }
-    void finalize() {
-        if (plan_created && plan) cufftDestroy(*plan);
-    }
+    ~FFTPlan() { cufftDestroy(plan); }
 };
 
 template<>
 struct FFT3DTransform<Kokkos::Cuda>
 {
     template <typename ViewType>
-    FFT3DTransform(FFTPlan<Kokkos::Cuda>& plan, 
+    FFT3DTransform(FFTPlan<Kokkos::Cuda>* plan, 
                    const ViewType& in, const ViewType& out, 
                    int sign)
     {
         int FFT_DIR = (sign == FFT_FORWARD) ? CUFFT_FORWARD : CUFFT_INVERSE;
         CUFFTWRAPPER(cufftExecZ2Z( //double precision
-            *plan.plan,
+            plan->plan,
             reinterpret_cast<cufftDoubleComplex*>(in.data()),
             reinterpret_cast<cufftDoubleComplex*>(out.data()),
             FFT_DIR
@@ -148,33 +139,25 @@ struct FFT3DTransform<Kokkos::Cuda>
 #if defined(EXADIS_FFT) && defined(KOKKOS_ENABLE_HIP)
 template<>
 struct FFTPlan<Kokkos::HIP> : FFTPlanBase {
-    bool plan_created = 0;
-    hipfftHandle* plan = nullptr;
-    KOKKOS_INLINE_FUNCTION FFTPlan() {}
-    KOKKOS_INLINE_FUNCTION FFTPlan(const FFTPlan& p) : plan(p.plan) { plan_created = 0; }
+    hipfftHandle plan;
     void initialize(int _Nx, int _Ny, int _Nz) {
         Nx = _Nx; Ny = _Ny; Nz = _Nz;
-        if (plan) delete plan;
-        plan = new hipfftHandle();
-        hipfftPlan3d(plan, Nx, Ny, Nz, HIPFFT_Z2Z);
-        plan_created = 1;
+        hipfftPlan3d(&plan, Nx, Ny, Nz, HIPFFT_Z2Z);
     }
-    void finalize() {
-        if (plan_created && plan) hipfftDestroy(*plan);
-    }
+    ~FFTPlan() { hipfftDestroy(plan); }
 };
 
 template<>
 struct FFT3DTransform<Kokkos::HIP>
 {
     template <typename ViewType>
-    FFT3DTransform(FFTPlan<Kokkos::HIP>& plan, 
+    FFT3DTransform(FFTPlan<Kokkos::HIP>* plan, 
                    const ViewType& in, const ViewType& out, 
                    int sign)
     {
         int FFT_DIR = (sign == FFT_FORWARD) ? HIPFFT_FORWARD : HIPFFT_BACKWARD;
         hipfftExecZ2Z( //double precision
-            *plan.plan,
+            plan->plan,
             reinterpret_cast<hipfftDoubleComplex*>(in.data()),
             reinterpret_cast<hipfftDoubleComplex*>(out.data()),
             FFT_DIR
@@ -226,19 +209,17 @@ void InverseComplex33(complex M[3][3])
  *-------------------------------------------------------------------------*/
 class ForceFFT : public Force {
 private:
-    FFTPlan<> plan;
+    FFTPlan<>* plan;
     int Ngrid[3], Ngrid3;
     double rcgrid, rcnei;
     
-    typedef Kokkos::View<complex***, Kokkos::LayoutRight, T_memory_space> T_grid;
+    typedef Kokkos::View<complex***, Kokkos::LayoutRight> T_grid;
     T_grid gridval[9];
     T_grid w;
     double wsum;
     
-#if !EXADIS_FULL_UNIFIED_MEMORY
     T_grid::HostMirror h_gridval[6];
     bool host_synced;
-#endif
     
     enum gridcomps {
         GRID_XX, GRID_XY, GRID_XZ,
@@ -254,7 +235,8 @@ private:
     double stress_fact = 1.0;//1e-9;
     double C[3][3][3][3];
     
-    DeviceDisNet* d_net;
+    T_nodes::pointer_type nodes;
+    T_segs::pointer_type segs;
     Mat33 H0, Hk, Hkinv;
     Cell cell;
     Vec3 Hs;
@@ -269,6 +251,8 @@ public:
         Params(int _Ngrid) { Ngrid[0] = Ngrid[1] = Ngrid[2] = _Ngrid; }
         Params(int Nx, int Ny, int Nz) { Ngrid[0] = Nx; Ngrid[1] = Ny; Ngrid[2] = Nz; }
     };
+
+    ForceFFT() = default;
     
     ForceFFT(System* system, Params params)
     {
@@ -283,7 +267,7 @@ public:
         TIMER_FFTTRANSFORMS = system->add_timer("ForceFFT transforms");
     }
     
-    void initialize(System* system, Params params)
+    void initialize(System* system, Params& params)
     {
         for (int i = 0; i < 3; i++) {
             Ngrid[i] = params.Ngrid[i];
@@ -291,14 +275,13 @@ public:
                 ExaDiS_fatal("Error: undefined grid size in ForceFFT\n");
         }
         Ngrid3 = Ngrid[0]*Ngrid[1]*Ngrid[2];
-        plan.initialize(Ngrid[0], Ngrid[1], Ngrid[2]);
+        plan = new FFTPlan<>();
+        plan->initialize(Ngrid[0], Ngrid[1], Ngrid[2]);
         
         for (int i = 0; i < 9; i++)
             Kokkos::resize(gridval[i], Ngrid[0], Ngrid[1], Ngrid[2]);
-            
-#if !EXADIS_FULL_UNIFIED_MEMORY
+        
         host_synced = false;
-#endif
         
         double MU = system->params.MU * stress_fact;
         double NU = system->params.NU;
@@ -325,7 +308,7 @@ public:
     struct TagNormalizeW {};
     
     KOKKOS_INLINE_FUNCTION
-    void operator() (TagComputeW, const int& kx, const int& ky, const int& kz, double &psum) const {
+    void operator() (TagComputeW, const int& kx, const int& ky, const int& kz, double& psum) const {
         int kxmax = Ngrid[0]/2 + Ngrid[0] % 2;
         int kymax = Ngrid[1]/2 + Ngrid[1] % 2;
         int kzmax = Ngrid[2]/2 + Ngrid[2] % 2;
@@ -411,8 +394,8 @@ public:
     double get_rcgrid() { return rcgrid; }
     
     KOKKOS_INLINE_FUNCTION
-    double alpha_box_segment(const Vec3 &p1, const Vec3 &t, const double &L,
-                             const Vec3 &bc, const Vec3 &H) const
+    double alpha_box_segment(const Vec3& p1, const Vec3& t, const double& L,
+                             const Vec3& bc, const Vec3& H) const
     {
         double eps = 1e-10;
         Vec3 tinv(1.0/(t.x+eps), 1.0/(t.y+eps), 1.0/(t.z+eps));
@@ -512,9 +495,6 @@ public:
     
     KOKKOS_INLINE_FUNCTION
     void operator() (TagComputeAlpha, const int& i) const {
-        auto nodes = d_net->get_nodes();
-        auto segs = d_net->get_segs();
-        
         int n1 = segs[i].n1;
         int n2 = segs[i].n2;
         Vec3 b = segs[i].burg;
@@ -727,13 +707,15 @@ public:
     
     void compute_alpha(System* system)
     {
-        d_net = system->get_device_network();
-        cell = d_net->cell;
+        DeviceDisNet* net = system->get_device_network();
+        nodes = net->get_nodes();
+        segs = net->get_segs();
+        cell = net->cell;
         
         if ((cell.H.colx() - H0.colx()).norm2() > 1.0 ||
             (cell.H.coly() - H0.coly()).norm2() > 1.0 ||
             (cell.H.colz() - H0.colz()).norm2() > 1.0) {
-            initialize_spectral_core(system, d_net);
+            initialize_spectral_core(system, net);
         }
         
         Hs.x = 1.0/Ngrid[0];
@@ -747,12 +729,10 @@ public:
         for (int i = 0; i < 9; i++)
             Kokkos::deep_copy(gridval[i], 0.0);
         
-#if !EXADIS_FULL_UNIFIED_MEMORY
         host_synced = false;
-#endif
         
         Kokkos::parallel_for("ForceFFT::ComputeAlpha",
-            Kokkos::RangePolicy<TagComputeAlpha>(0, d_net->Nsegs_local), *this
+            Kokkos::RangePolicy<TagComputeAlpha>(0, net->Nsegs_local), *this
         );
         Kokkos::fence();
         system->devtimer[TIMER_FFTALPHA].stop();
@@ -793,7 +773,6 @@ public:
     
     inline void synchronize_stress_gridval()
     {
-#if !EXADIS_FULL_UNIFIED_MEMORY
         if (!host_synced) {
             for (int i = 0; i < 6; i++) {
                 h_gridval[i] = Kokkos::create_mirror_view(gridval[stress_comps[i]]);
@@ -801,7 +780,6 @@ public:
             }
             host_synced = true;
         }
-#endif
     }
     
     std::vector<Mat33> export_stress_gridval()
@@ -833,27 +811,19 @@ public:
         return stress;
     }
     
-#if EXADIS_FULL_UNIFIED_MEMORY
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    double get_stress_gridval(int i, int kx, int ky, int kz) {
-        return gridval[stress_comps[i]](kx, ky, kz).real();
-    }
-#else
-    template<class N>
-    KOKKOS_INLINE_FUNCTION
-    double get_stress_gridval(int i, int kx, int ky, int kz) {
+    double get_stress_gridval(int i, int kx, int ky, int kz) const {
         if constexpr (std::is_same<N, SerialDisNet>::value) {
             return h_gridval[i](kx, ky, kz).real();
         } else {
             return gridval[stress_comps[i]](kx, ky, kz).real();
         }
     }
-#endif
     
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    Mat33 interpolate_stress(const Vec3& p)
+    Mat33 interpolate_stress(const Vec3& p) const
     {
         Vec3 s = cell.scaled_position(p);
         
@@ -911,7 +881,7 @@ public:
     
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    SegForce segment_force(System* system, N* net, int i)
+    SegForce segment_force(const System* system, N* net, int i) const
     {
         auto nodes = net->get_nodes();
         auto segs = net->get_segs();
@@ -962,34 +932,34 @@ public:
     }
     
 #if defined(EXADIS_USE_COMPUTE_MAPS)
-    const bool use_map = true;
+    bool use_map = true;
 #else
-    const bool use_map = false;
+    bool use_map = false;
 #endif
     Kokkos::View<SegForce*> fmap;
     
     struct TagComputeForce {};
     struct TagMapForce {};
     
-    template<class N>
+    template<class N, class F>
     struct AddSegmentForce {
-        System* system;
-        ForceFFT* force;
-        N* net;
-        AddSegmentForce(System* _system, ForceFFT* _force, N* _net) : 
+        System system;
+        F force;
+        N net;
+        AddSegmentForce(System& _system, F& _force, N& _net) : 
         system(_system), force(_force), net(_net) {}
         
         KOKKOS_INLINE_FUNCTION
-        void operator()(TagComputeForce, const int& i) const {
-            auto nodes = net->get_nodes();
-            auto segs = net->get_segs();
+        void operator()(TagComputeForce, const int &i) const {
+            auto nodes = net.get_nodes();
+            auto segs = net.get_segs();
             int n1 = segs[i].n1;
             int n2 = segs[i].n2;
             
-            SegForce fseg = force->segment_force(system, net, i);
+            SegForce fseg = force.segment_force(&system, &net, i);
             
-            if (force->use_map) {
-                force->fmap(i) = fseg;
+            if (force.use_map) {
+                force.fmap(i) = fseg;
             } else {
                 Kokkos::atomic_add(&nodes[n1].f, fseg.f1);
                 Kokkos::atomic_add(&nodes[n2].f, fseg.f2);
@@ -998,13 +968,13 @@ public:
         
         KOKKOS_INLINE_FUNCTION
         void operator()(TagMapForce, const int& i) const {
-            auto nodes = net->get_nodes();
-            auto conn = net->get_conn();
+            auto nodes = net.get_nodes();
+            auto conn = net.get_conn();
             
             Vec3 fn(0.0);
             for (int j = 0; j < conn[i].num; j++) {
                 int k = conn[i].seg[j];
-                SegForce fseg = force->fmap(k);
+                SegForce fseg = force.fmap(k);
                 fn += ((conn[i].order[j] == 1) ? fseg.f1 : fseg.f2);
             }
             nodes[i].f += fn;
@@ -1038,11 +1008,15 @@ public:
         }
         
         using policy = Kokkos::RangePolicy<TagComputeForce,Kokkos::LaunchBounds<64,1>>;
-        Kokkos::parallel_for(policy(0, net->Nsegs_local), AddSegmentForce<DeviceDisNet>(system, this, net));
+        Kokkos::parallel_for(policy(0, net->Nsegs_local),
+            AddSegmentForce<DeviceDisNet,ForceFFT>(*system, *this, *net)
+        );
         
         if (use_map) {
             using policy = Kokkos::RangePolicy<TagMapForce,Kokkos::LaunchBounds<64,1>>;
-            Kokkos::parallel_for(policy(0, net->Nnodes_local), AddSegmentForce<DeviceDisNet>(system, this, net));
+            Kokkos::parallel_for(policy(0, net->Nnodes_local),
+                AddSegmentForce<DeviceDisNet,ForceFFT>(*system, *this, *net)
+            );
         }
         
         Kokkos::fence();
@@ -1068,7 +1042,7 @@ public:
     
     template<class N>
     KOKKOS_INLINE_FUNCTION
-    Vec3 node_force(System* system, N* net, const int& i, const team_handle& team)
+    Vec3 node_force(const System* system, N* net, const int& i, const team_handle& team) const
     {
         auto nodes = net->get_nodes();
         auto conn = net->get_conn();
@@ -1082,10 +1056,6 @@ public:
         team.team_barrier();
         
         return f;
-    }
-    
-    ~ForceFFT() {
-        plan.finalize();
     }
     
     const char* name() { return "ForceFFT"; }

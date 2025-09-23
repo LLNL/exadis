@@ -44,24 +44,24 @@ class MobilityLocal : public Mobility {
 public:
     typedef M Mob;
     typedef typename M::Params Params;
-    M *mob; // mobility kernel
+    M mob; // mobility kernel
     
     MobilityLocal(System *system, Params params) {
-        mob = exadis_new<M>(system, params);
-        non_linear = mob->non_linear;
+        mob = M(system, params);
+        non_linear = mob.non_linear;
     }
     
     template<class N>
     struct NodeMobility {
-        System *system;
-        M *mob;
-        N *net;
-        NodeMobility(System *_system, M *_mob, N *_net) : system(_system), mob(_mob), net(_net) {}
+        System system;
+        M mob;
+        N net;
+        NodeMobility(System& _system, M& _mob, N& _net) : system(_system), mob(_mob), net(_net) {}
         
         KOKKOS_INLINE_FUNCTION
         void operator()(const int &i) const {
-            auto nodes = net->get_nodes();
-            nodes[i].v = mob->node_velocity(system, net, i, nodes[i].f);
+            auto nodes = net.get_nodes();
+            nodes[i].v = mob.node_velocity(&system, &net, i, nodes[i].f);
         }
     };
     
@@ -72,7 +72,7 @@ public:
         
         DeviceDisNet *net = system->get_device_network();
         using policy = Kokkos::RangePolicy<Kokkos::LaunchBounds<32,1>>;
-        Kokkos::parallel_for(policy(0, net->Nnodes_local), NodeMobility<DeviceDisNet>(system, mob, net));
+        Kokkos::parallel_for(policy(0, net->Nnodes_local), NodeMobility<DeviceDisNet>(*system, mob, *net));
         
         Kokkos::fence();
         system->timer[system->TIMER_MOBILITY].stop();
@@ -81,11 +81,7 @@ public:
     Vec3 node_velocity(System *system, const int &i, const Vec3 &fi)
     {
         SerialDisNet *network = system->get_serial_network();
-        return mob->node_velocity(system, network, i, fi);
-    }
-    
-    ~MobilityLocal() {
-        exadis_delete(mob);
+        return mob.node_velocity(system, network, i, fi);
     }
     
     const char* name() { return M::name; }

@@ -522,11 +522,11 @@ void ExaDiSApp::output(Control& ctrl)
             fprintf(fp, "Output time:       %12.3f sec\n", system->timer[system->TIMER_OUTPUT].accumtime);
             fprintf(fp, "\n");
             fprintf(fp, "Total time:        %12.3f sec\n", timer.seconds());
-            if (system->numdevtimer > 0) {
+            if (system->devtimer.num() > 0) {
                 fprintf(fp, "\n\n");
                 fprintf(fp, "Additional (development) timers\n");
                 fprintf(fp, "\n");
-                for (int i = 0; i < system->numdevtimer; i++)
+                for (int i = 0; i < system->devtimer.num(); i++)
                     fprintf(fp, "%s time: %.3f sec\n", system->devtimer[i].label.c_str(), system->devtimer[i].accumtime);
             }
             if (timeronefile)

@@ -20,6 +20,53 @@ namespace ExaDiS {
 
 extern FILE* flog;
 
+
+struct SystemTimer {
+    Kokkos::Timer timer;
+    double accumtime;
+    std::string label;
+    SystemTimer() { accumtime = 0.0; }
+    SystemTimer(std::string _label) : label(_label) { accumtime = 0.0; }
+    void start() { timer.reset(); }
+    void stop() { accumtime += timer.seconds(); }
+};
+
+struct SystemTimers {
+    enum timers {TIMER_FORCE, TIMER_MOBILITY, TIMER_INTEGRATION, TIMER_CROSSSLIP,
+                 TIMER_COLLISION, TIMER_TOPOLOGY, TIMER_REMESH, TIMER_OUTPUT, TIMER_END};
+    SystemTimer timer[TIMER_END];
+};
+
+struct SystemDevTimers {
+    bool pyexadis = false;
+    static const int MAX_DEV_TIMERS = 20;
+    int numdevtimer = 0;
+    SystemTimer devtimer[MAX_DEV_TIMERS];
+    int add_timer(std::string label) {
+        if (pyexadis) return 0;
+        if (numdevtimer == MAX_DEV_TIMERS)
+            ExaDiS_fatal("Error: MAX_DEV_TIMERS = %d limit reached\n", MAX_DEV_TIMERS);
+        devtimer[numdevtimer++].label = label;
+        return numdevtimer-1;
+    }
+};
+
+struct TimerAccessor {
+    SystemTimers* systimers = nullptr;
+    inline SystemTimer& operator[](const int i) {
+        return systimers->timer[i];
+    }
+};
+
+struct DevTimerAccessor {
+    SystemDevTimers* sysdevtimers = nullptr;
+    int num() { return sysdevtimers->numdevtimer; }
+    inline SystemTimer& operator[](const int i) {
+        return sysdevtimers->devtimer[i];
+    }
+};
+
+
 class System {
 public:
     DisNetManager* net_mngr = nullptr;
@@ -45,9 +92,8 @@ public:
     Crystal crystal;
     
     System();
-    ~System();
-    System(const System&) = delete;
     void initialize(Params _params, Crystal _crystal, SerialDisNet* network);
+    void finalize();
     void register_neighbor_cutoff(double cutoff);
     void plastic_strain();
     void reset_glide_planes();
@@ -58,30 +104,12 @@ public:
     int num_ranks;
     int proc_rank;
     
-    struct SystemTimer {
-        Kokkos::Timer timer;
-        double accumtime;
-        std::string label;
-        SystemTimer() { accumtime = 0.0; }
-        SystemTimer(std::string _label) : label(_label) { accumtime = 0.0; }
-        void start() { timer.reset(); }
-        void stop() { accumtime += timer.seconds(); }
-    };
+    bool pyexadis = false;
     enum timers {TIMER_FORCE, TIMER_MOBILITY, TIMER_INTEGRATION, TIMER_CROSSSLIP,
                  TIMER_COLLISION, TIMER_TOPOLOGY, TIMER_REMESH, TIMER_OUTPUT, TIMER_END};
-    SystemTimer timer[TIMER_END];
-    
-    bool pyexadis = false;
-    static const int MAX_DEV_TIMERS = 20;
-    int numdevtimer = 0;
-    SystemTimer devtimer[MAX_DEV_TIMERS];
-    int add_timer(std::string label) {
-        if (pyexadis) return 0;
-        if (numdevtimer == MAX_DEV_TIMERS)
-            ExaDiS_fatal("Error: MAX_DEV_TIMERS = %d limit reached\n", MAX_DEV_TIMERS);
-        devtimer[numdevtimer++].label = label;
-        return numdevtimer-1;
-    }
+    TimerAccessor timer;
+    DevTimerAccessor devtimer;
+    int add_timer(std::string label) { return devtimer.sysdevtimers->add_timer(label); }
     void print_timers(bool dev=false);
 };
 

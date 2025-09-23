@@ -150,9 +150,9 @@ void insert_prismatic_loop(Crystal& crystal, SerialDisNet *network, Vec3 burg,
         
     } else if (crystal.type == FCC_CRYSTAL) {
         Nsides = 4;
-        int bid = crystal.identify_closest_Burgers_index(crystal.R * burg);
-        Vec3 p1 = crystal.ref_planes(bid*3+0);
-        Vec3 p2 = crystal.ref_planes(bid*3+1);
+        int bid = crystal.identify_closest_Burgers_index<SerialDisNet>(crystal.R * burg);
+        Vec3 p1 = crystal.ref_planes.h_view(bid*3+0);
+        Vec3 p2 = crystal.ref_planes.h_view(bid*3+1);
         
         Vec3 l1 = cross(p1, burg).normalized();
         Vec3 l2 = cross(p2, burg).normalized();
@@ -215,8 +215,8 @@ SerialDisNet* generate_frs_config(Crystal crystal, Cell cell, int numsources,
     
     std::vector<Vec3> blist, nlist;
     for (int i = 0; i < crystal.num_sys; i++) {
-        blist.push_back(crystal.ref_burgs(crystal.ref_sys(i,0)));
-        nlist.push_back(crystal.ref_planes(crystal.ref_sys(i,1)));
+        blist.push_back(crystal.ref_burgs.h_view(crystal.ref_sys.h_view(i,0)));
+        nlist.push_back(crystal.ref_planes.h_view(crystal.ref_sys.h_view(i,1)));
     }
     
     // Sources positions
@@ -294,7 +294,7 @@ SerialDisNet* generate_prismatic_config(Crystal crystal, Cell cell, int numsourc
     
     std::vector<Vec3> blist;
     for (int i = 0; i < crystal.num_glissile_burgs; i++)
-        blist.push_back(crystal.ref_burgs(i));
+        blist.push_back(crystal.ref_burgs.h_view(i));
     
     // Sources positions
     std::random_device rd;

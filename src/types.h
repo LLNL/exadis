@@ -70,13 +70,9 @@ public:
  *    Functions:    Memory management and defintions
  *
  *-------------------------------------------------------------------------*/
-#ifndef EXADIS_FULL_UNIFIED_MEMORY
-#define EXADIS_FULL_UNIFIED_MEMORY 1
-#endif
-
 template<typename T, typename... Args>
 inline T* exadis_new(Args... args) {
-#if 1 //EXADIS_UNIFIED_MEMORY
+#if 0 //EXADIS_UNIFIED_MEMORY
     void* p = Kokkos::kokkos_malloc<Kokkos::SharedSpace>(sizeof(T));
     return new(p) T(args...);
 #else
@@ -86,7 +82,7 @@ inline T* exadis_new(Args... args) {
 
 template<typename T>
 inline void exadis_delete(T *p) {
-#if 1 //EXADIS_UNIFIED_MEMORY
+#if 0 //EXADIS_UNIFIED_MEMORY
     if (p) p->~T();
     Kokkos::kokkos_free<Kokkos::SharedSpace>(p);
 #else
@@ -94,18 +90,11 @@ inline void exadis_delete(T *p) {
 #endif
 }
 
-#if EXADIS_FULL_UNIFIED_MEMORY
-typedef typename Kokkos::SharedSpace T_memory_space;
-#else
-typedef typename Kokkos::DefaultExecutionSpace::memory_space T_memory_space;
-#endif
-typedef typename Kokkos::SharedSpace T_memory_shared;
-
-typedef Kokkos::View<DisNode*, T_memory_space> T_nodes;
-typedef Kokkos::View<DisSeg*, T_memory_space> T_segs;
-typedef Kokkos::View<Conn*, T_memory_space> T_conn;
-typedef Kokkos::View<Vec3*, T_memory_space> T_x;
-typedef Kokkos::View<Vec3*, T_memory_space> T_v;
+typedef Kokkos::View<DisNode*> T_nodes;
+typedef Kokkos::View<DisSeg*> T_segs;
+typedef Kokkos::View<Conn*> T_conn;
+typedef Kokkos::View<Vec3*> T_x;
+typedef Kokkos::View<Vec3*> T_v;
 
 typedef Kokkos::TeamPolicy<>::member_type team_handle;
 
@@ -182,11 +171,12 @@ public:
     T_segs segs;
     T_conn conn;
     
+    DeviceDisNet() = default;
     DeviceDisNet(const Cell &_cell) : cell(_cell) {}
     
-    KOKKOS_FORCEINLINE_FUNCTION T_nodes::pointer_type get_nodes() { return nodes.data(); }
-    KOKKOS_FORCEINLINE_FUNCTION T_segs::pointer_type get_segs() { return segs.data(); }
-    KOKKOS_FORCEINLINE_FUNCTION T_conn::pointer_type get_conn() { return conn.data(); }
+    KOKKOS_FORCEINLINE_FUNCTION T_nodes::pointer_type get_nodes() const { return nodes.data(); }
+    KOKKOS_FORCEINLINE_FUNCTION T_segs::pointer_type get_segs() const { return segs.data(); }
+    KOKKOS_FORCEINLINE_FUNCTION T_conn::pointer_type get_conn() const { return conn.data(); }
     
     inline void update_ptr() {}
 };
@@ -222,14 +212,6 @@ public:
             s_network->segs.resize(d_network->Nsegs_local);
             s_network->conn.resize(d_network->Nnodes_local);
             
-        #if EXADIS_FULL_UNIFIED_MEMORY
-            for (int i = 0; i < d_network->Nnodes_local; i++)
-                s_network->nodes[i] = d_network->nodes(i);
-            for (int i = 0; i < d_network->Nsegs_local; i++)
-                s_network->segs[i] = d_network->segs(i);
-            for (int i = 0; i < d_network->Nnodes_local; i++)
-                s_network->conn[i] = d_network->conn(i);
-        #else
             T_nodes::HostMirror h_nodes = Kokkos::create_mirror_view(d_network->nodes);
             T_segs::HostMirror h_segs = Kokkos::create_mirror_view(d_network->segs);
             T_conn::HostMirror h_conn = Kokkos::create_mirror_view(d_network->conn);
@@ -244,7 +226,6 @@ public:
                 s_network->segs[i] = h_segs(i);
             for (int i = 0; i < d_network->Nnodes_local; i++)
                 s_network->conn[i] = h_conn(i);
-        #endif
             
             // Copy cell in case it has changed
             s_network->cell = d_network->cell;
@@ -264,14 +245,6 @@ public:
             Kokkos::resize(d_network->segs, s_network->number_of_segs());
             Kokkos::resize(d_network->conn, s_network->number_of_nodes());
             
-        #if EXADIS_FULL_UNIFIED_MEMORY
-            for (int i = 0; i < s_network->number_of_nodes(); i++)
-                d_network->nodes(i) = s_network->nodes[i];
-            for (int i = 0; i < s_network->number_of_segs(); i++)
-                d_network->segs(i) = s_network->segs[i];
-            for (int i = 0; i < s_network->number_of_nodes(); i++)
-                d_network->conn(i) = s_network->conn[i];
-        #else
             T_nodes::HostMirror h_nodes = Kokkos::create_mirror_view(d_network->nodes);
             T_segs::HostMirror h_segs = Kokkos::create_mirror_view(d_network->segs);
             T_conn::HostMirror h_conn = Kokkos::create_mirror_view(d_network->conn);
@@ -286,7 +259,6 @@ public:
             Kokkos::deep_copy(d_network->nodes, h_nodes);
             Kokkos::deep_copy(d_network->segs, h_segs);
             Kokkos::deep_copy(d_network->conn, h_conn);
-        #endif
             
             d_network->Nnodes_local = s_network->number_of_nodes();
             d_network->Nsegs_local = s_network->number_of_segs();

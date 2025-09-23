@@ -29,6 +29,9 @@ System::System()
 #endif
 
     net_mngr = nullptr;
+    
+    timer.systimers = new SystemTimers();
+    devtimer.sysdevtimers = new SystemDevTimers();
 }
 
 /*---------------------------------------------------------------------------
@@ -77,7 +80,7 @@ void System::initialize(Params _params, Crystal _crystal, SerialDisNet *network)
  *    Function:     System::~System()
  *
  *-------------------------------------------------------------------------*/
-System::~System()
+void System::finalize()
 {
     exadis_delete(net_mngr);
     if (oprec) delete oprec;
@@ -106,66 +109,44 @@ void System::register_neighbor_cutoff(double cutoff)
 template <class N>
 class PlasticStrain {
 private:
-    System* system;
-    N* net;
+    System system;
+    N net;
     double vol, bmag;
 public:
-    PlasticStrain(System* _system, N* _net) : system(_system), net(_net)
+    PlasticStrain(System& _system, N& _net) : system(_system), net(_net)
     {
-        vol = net->cell.volume();
-        bmag = system->params.burgmag;
-        system->dEp.zero();
-        system->dWp.zero();
-        system->density = 0.0;
+        vol = net.cell.volume();
+        bmag = system.params.burgmag;
     }
     
     KOKKOS_INLINE_FUNCTION
-    void operator() (const team_handle& team) const
-    {
-        int ts = team.team_size();
-        int lid = team.league_rank();
+    void operator() (const int& i, Mat33& Esum, Mat33& Wsum, double& rhosum) const {
+        auto nodes = net.get_nodes();
+        auto segs = net.get_segs();
+        auto cell = net.cell;
         
-        auto nodes = net->get_nodes();
-        auto segs = net->get_segs();
-        auto cell = net->cell;
+        int n1 = segs[i].n1;
+        int n2 = segs[i].n2;
+        Vec3 b = segs[i].burg;
         
-        Mat33 E, W;
-        double rho;
-        Kokkos::parallel_reduce(Kokkos::TeamThreadRange(team, ts), 
-        [=](int& t, Mat33& Esum, Mat33& Wsum, double& rhosum) {
-            int i = lid*ts + t; // segment id
-            if (i < net->Nsegs_local) {
-                int n1 = segs[i].n1;
-                int n2 = segs[i].n2;
-                Vec3 b = segs[i].burg;
-                
-                Vec3 r1 = nodes[n1].pos;
-                Vec3 r2 = cell.pbc_position(r1, nodes[n2].pos);
-                Vec3 r3 = cell.pbc_position(r1, system->xold(n1));
-                Vec3 r4 = cell.pbc_position(r3, system->xold(n2));
-                Vec3 n = 0.5*cross(r2-r3, r1-r4);
-                
-                Mat33 P = 1.0/vol * outer(n, b);
-                Esum += 0.5 * (P + P.transpose());
-                Wsum += 0.5 * (P - P.transpose());
-                rhosum += 1.0/vol/bmag/bmag * (r2-r1).norm(); // 1/m^2
-            }
-        }, E, W, rho);
+        Vec3 r1 = nodes[n1].pos;
+        Vec3 r2 = cell.pbc_position(r1, nodes[n2].pos);
+        Vec3 r3 = cell.pbc_position(r1, system.xold(n1));
+        Vec3 r4 = cell.pbc_position(r3, system.xold(n2));
+        Vec3 n = 0.5*cross(r2-r3, r1-r4);
         
-        Kokkos::single(Kokkos::PerTeam(team), [=]() {
-            Kokkos::atomic_add(&system->dEp, E);
-            Kokkos::atomic_add(&system->dWp, W);
-            Kokkos::atomic_add(&system->density, rho);
-        });
+        Mat33 P = 1.0/vol * outer(n, b);
+        Esum += 0.5 * (P + P.transpose());
+        Wsum += 0.5 * (P - P.transpose());
+        rhosum += 1.0/vol/bmag/bmag * (r2-r1).norm(); // 1/m^2
     }
 };
 
 void System::plastic_strain()
 {
     DeviceDisNet* net = get_device_network();
-    TeamSize ts = get_team_sizes(net->Nsegs_local);
-    Kokkos::parallel_for(Kokkos::TeamPolicy<>(ts.num_teams, ts.team_size), 
-        PlasticStrain<DeviceDisNet>(this, net)
+    Kokkos::parallel_reduce(net->Nsegs_local, 
+        PlasticStrain<DeviceDisNet>(*this, *net), dEp, dWp, density
     );
     Kokkos::fence();
     
@@ -188,12 +169,15 @@ void System::reset_glide_planes()
     if (!crystal.use_glide_planes) return;
     
     DeviceDisNet* net = get_device_network();
+    auto nodes = net->get_nodes();
+    auto segs = net->get_segs();
+    auto conn = net->get_conn();
+    auto cell = net->cell;
     
     //if (!crystal.enforce_glide_planes) {
         // Check that all segments have a non-zero glide plane assigned
         int err = 0;
         Kokkos::parallel_reduce(net->Nsegs_local, KOKKOS_LAMBDA(const int& i, int& err) {
-            auto segs = net->get_segs();
             if (segs[i].plane.norm2() < 1e-10) err += 1;
         }, err);
         Kokkos::fence();
@@ -220,11 +204,6 @@ void System::reset_glide_planes()
         T_x& xprev = xold;
         if (use_oprec) Kokkos::deep_copy(flag.d_view, 0);
         Kokkos::parallel_for(net->Nnodes_local, KOKKOS_LAMBDA(const int& i) {
-            auto nodes = net->get_nodes();
-            auto segs = net->get_segs();
-            auto conn = net->get_conn();
-            auto cell = net->cell;
-            
             // Determine the number of unique glide planes.
             int numplanes = 0;
             Vec3 planes[MAX_CONN];
@@ -279,13 +258,12 @@ void System::reset_glide_planes()
     }
     
     // Now reset the glide planes
-    Crystal* cryst = &crystal;
+    Crystal cryst = crystal;
+    DeviceDisNet d_net = *net;
     if (use_oprec) Kokkos::deep_copy(flag.d_view, 0);
     Kokkos::parallel_for(net->Nsegs_local, KOKKOS_LAMBDA(const int& i) {
-        auto nodes = net->get_nodes();
-        auto segs = net->get_segs();
         Vec3 pold = segs[i].plane;
-        Vec3 pnew = cryst->find_seg_glide_plane(net, i);
+        Vec3 pnew = cryst.find_seg_glide_plane(&d_net, i);
         if (pnew.norm2() > 1e-5 && (pnew-pold).norm2() > 1e-5) {
             segs[i].plane = pnew;
             if (use_oprec) {
@@ -360,8 +338,8 @@ void System::print_timers(bool dev)
     ExaDiS_log("%-20s %11.3f sec (%.2f%%)\n", "Remesh time:", timer[TIMER_REMESH].accumtime, ftime[TIMER_REMESH]);
     ExaDiS_log("%-20s %11.3f sec (%.2f%%)\n", "Output time:", timer[TIMER_OUTPUT].accumtime, ftime[TIMER_OUTPUT]);
     ExaDiS_log("----------------------------------------------\n");
-    if (dev && numdevtimer > 0) {
-        for (int i = 0; i < numdevtimer; i++)
+    if (dev && devtimer.num() > 0) {
+        for (int i = 0; i < devtimer.num(); i++)
             ExaDiS_log("%s time: %.3f sec\n", devtimer[i].label.c_str(), devtimer[i].accumtime);
         ExaDiS_log("----------------------------------------------\n");
     }

@@ -29,6 +29,18 @@ template<class F>
 class CrossSlipParallel : public CrossSlip {
 private:
     F* force;
+    NeighborList neilist;
+    
+public:
+    struct CrossSlipEvent {
+        int type; 
+        Vec3 p0, p1;
+        Vec3 plane;
+    };
+    
+    Kokkos::View<int*> count;
+    Kokkos::View<int*> csnodes;
+    Kokkos::View<CrossSlipEvent*> events;
     
 public:
     CrossSlipParallel(System* system, Force* _force)
@@ -40,28 +52,20 @@ public:
     }
     
     /*-----------------------------------------------------------------------
-     *    Struct:     CrossSlipEvent
-     *                Structure to hold cross-slip event information.
-     *---------------------------------------------------------------------*/
-    struct CrossSlipEvent {
-        int type; 
-        Vec3 p0, p1;
-        Vec3 plane;
-    };
-    
-    /*-----------------------------------------------------------------------
      *    Struct:     FindCrossSlipEvents
      *                Structure that implements the kernel to determine the
      *                cross-slip events that must be executed. Each node
      *                is assigned a team of threads for parallel force
      *                calculations.
      *---------------------------------------------------------------------*/
+    template<class C>
     struct FindCrossSlipEvents
     {
-        System* system;
-        DeviceDisNet* net;
-        F* force;
-        NeighborList* neilist;
+        System system;
+        DeviceDisNet net;
+        F force;
+        NeighborList neilist;
+        C crossslip;
         
         double eps, thetacrit, sthetacrit, s2thetacrit;
         double shearModulus, areamin;
@@ -69,39 +73,36 @@ public:
         
         Mat33 R, Rinv;
         
-        Kokkos::View<int*, T_memory_shared> count;
-        Kokkos::View<int*, T_memory_space> csnodes;
-        Kokkos::View<CrossSlipEvent*, T_memory_shared> events;
-        
-        FindCrossSlipEvents(System* _system, DeviceDisNet* _net, F* _force) :
-        system(_system), net(_net), force(_force)
+        FindCrossSlipEvents(System& _system, DeviceDisNet& _net, NeighborList& _neilist,
+                            C& _crossslip, F& _force) :
+        system(_system), net(_net), neilist(_neilist), crossslip(_crossslip), force(_force)
         {
             eps = 1e-6;
-            if (system->crystal.type == FCC_CRYSTAL)
+            if (system.crystal.type == FCC_CRYSTAL)
                 thetacrit = 2.0 / 180.0 * M_PI;
-            else if (system->crystal.type == BCC_CRYSTAL)
+            else if (system.crystal.type == BCC_CRYSTAL)
                 thetacrit = 0.5 / 180.0 * M_PI;
             sthetacrit = sin(thetacrit);
             s2thetacrit = sthetacrit * sthetacrit;
-            shearModulus = system->params.MU;
+            shearModulus = system.params.MU;
             
-            areamin = 2.0 * system->params.rtol * system->params.maxseg;
-            areamin = MIN(areamin, system->params.minseg * system->params.minseg * sqrt(3.0) / 4.0);
+            areamin = 2.0 * system.params.rtol * system.params.maxseg;
+            areamin = MIN(areamin, system.params.minseg * system.params.minseg * sqrt(3.0) / 4.0);
             
             noiseFactor = 1e-5;
             weightFactor = 1.0;
             
-            R = system->crystal.R;
-            Rinv = system->crystal.Rinv;
+            R = system.crystal.R;
+            Rinv = system.crystal.Rinv;
         }
         
         KOKKOS_INLINE_FUNCTION
         void operator() (const int& i) const
         {
-            auto nodes = net->get_nodes();
-            auto segs = net->get_segs();
-            auto conn = net->get_conn();
-            auto cell = net->cell;
+            auto nodes = net.get_nodes();
+            auto segs = net.get_segs();
+            auto conn = net.get_conn();
+            auto cell = net.cell;
             
             if (conn[i].num != 2) return;
             if (nodes[i].constraint != UNCONSTRAINED) return;
@@ -114,7 +115,7 @@ public:
             Vec3 burgCrystal = Rinv * burg;
             burgCrystal = burgCrystal.normalized();
             
-            if (system->crystal.type == FCC_CRYSTAL) {
+            if (system.crystal.type == FCC_CRYSTAL) {
             
                 // Only consider glide dislocations. If the Burgers vector is not
                 // a [1 1 0] type, ignore it.
@@ -141,7 +142,7 @@ public:
                     return; // not a {111} plane
                 }
                 
-            } else if (system->crystal.type == BCC_CRYSTAL) {
+            } else if (system.crystal.type == BCC_CRYSTAL) {
                 
                 // Only consider <111> dislocations
                 if (fabs(burgCrystal.x * burgCrystal.y * burgCrystal.z) < eps) {
@@ -187,8 +188,8 @@ public:
                  ((testmax1 - test1) < (testmax1 * s2thetacrit)));
                  
             if (seg1_is_screw || seg2_is_screw || bothseg_are_screw) {
-                int idx = Kokkos::atomic_fetch_add(&count(0), 1);
-                csnodes(idx) = i;
+                int idx = Kokkos::atomic_fetch_add(&crossslip.count(0), 1);
+                crossslip.csnodes(idx) = i;
             }
         }
         
@@ -197,15 +198,15 @@ public:
         {
             int tid = team.team_rank();
             int lid = team.league_rank();
-            int i = csnodes(lid); // node id
+            int i = crossslip.csnodes(lid); // node id
             
             // Flag no event type
-            if (tid == 0) events(lid).type = -1;
+            if (tid == 0) crossslip.events(lid).type = -1;
             
-            auto nodes = net->get_nodes();
-            auto segs = net->get_segs();
-            auto conn = net->get_conn();
-            auto cell = net->cell;
+            auto nodes = net.get_nodes();
+            auto segs = net.get_segs();
+            auto conn = net.get_conn();
+            auto cell = net.cell;
             
             // Recompute some info about the local node
             int s = conn[i].seg[0];
@@ -251,10 +252,10 @@ public:
             // Since we will likely need to locally modify the network
             // let's first create a new configuration within a temporary, 
             // local SplitNet instance (from Topology)
-            SplitDisNet splitnet(net, neilist);
+            SplitDisNet splitnet(&net, &neilist);
             
             // Compute the nodal force (initially in laboratory frame)
-            Vec3 fLab = force->node_force(system, &splitnet, i, team);
+            Vec3 fLab = force.node_force(&system, &splitnet, i, team);
             
             // Set the force threshold for noise level within the code
             double L1 = sqrt(testmax2);
@@ -265,7 +266,7 @@ public:
             Mat33 glideDirCrystal = Mat33().zero();
             int numGlideDir = 0; // Number of cross-slip glide directions
             
-            if (system->crystal.type == FCC_CRYSTAL) {
+            if (system.crystal.type == FCC_CRYSTAL) {
                 // Find which glide planes the segments are on
                 // e.g. for burg = [ 1  1  0 ], the two glide directions are
                 //                 [ 1 -1  2 ] and
@@ -289,7 +290,7 @@ public:
                 glideDirCrystal[0] = sqrt(1.0/6.0) * glideDirCrystal[0];
                 glideDirCrystal[1] = sqrt(1.0/6.0) * glideDirCrystal[1];
                 
-            } else if (system->crystal.type == BCC_CRYSTAL) {
+            } else if (system.crystal.type == BCC_CRYSTAL) {
                 // Find which glide planes the segments are on. Initial
                 // glidedir array contains glide directions in crystal frame
                 // For BCC geometry burgCrystal should be of <1 1 1> type
@@ -342,8 +343,8 @@ public:
                 // is close to screw.
                 
                 // Determine if the neighbor nodes should be considered immobile
-                bool pinned1 = node_pinned(system, net, n1, plane1, glideDirLab, numGlideDir);
-                bool pinned2 = node_pinned(system, net, n2, plane2, glideDirLab, numGlideDir);
+                bool pinned1 = node_pinned(&system, &net, n1, plane1, glideDirLab, numGlideDir);
+                bool pinned2 = node_pinned(&system, &net, n2, plane2, glideDirLab, numGlideDir);
                 
                 if (pinned1) {
                     if ((!pinned2) || ((testmax1-test1) < (eps*eps*burgSize*burgSize))) {
@@ -387,7 +388,7 @@ public:
                         splitnet.nodes[1].pos = nbr2p;
                         
                         // Evaluate force on temporary configuration
-                        Vec3 newforce = force->node_force(system, &splitnet, i, team);
+                        Vec3 newforce = force.node_force(&system, &splitnet, i, team);
                         double newfdotglide = dot(newforce, glideDirLab[fplane]);
                         
                         if ((SIGN(newfdotglide) * SIGN(fdotglide)) < 0.0) {
@@ -396,10 +397,10 @@ public:
                         
                         // Save the new node positions and plane
                         if (tid == 0) {
-                            events(lid).type = 0;
-                            events(lid).p0 = nodep;
-                            events(lid).p1 = nbr2p;
-                            events(lid).plane = newplane;
+                            crossslip.events(lid).type = 0;
+                            crossslip.events(lid).p0 = nodep;
+                            crossslip.events(lid).p1 = nbr2p;
+                            crossslip.events(lid).plane = newplane;
                         }
                     }
                 } else {
@@ -436,7 +437,7 @@ public:
                     splitnet.nodes[0].pos = nodep;
                     splitnet.nodes[1].pos = nbr1p;
                     
-                    Vec3 newforce = force->node_force(system, &splitnet, i, team);
+                    Vec3 newforce = force.node_force(&system, &splitnet, i, team);
                     double newfdotglide = dot(newforce, glideDirLab[fplane]);
                     
                     if ((SIGN(newfdotglide) * SIGN(fdotglide)) < 0.0) {
@@ -445,10 +446,10 @@ public:
                     
                     // Save the new node positions and plane
                     if (tid == 0) {
-                        events(lid).type = 1;
-                        events(lid).p0 = nodep;
-                        events(lid).p1 = nbr1p;
-                        events(lid).plane = newplane;
+                        crossslip.events(lid).type = 1;
+                        crossslip.events(lid).p0 = nodep;
+                        crossslip.events(lid).p1 = nbr1p;
+                        crossslip.events(lid).plane = newplane;
                     }
                 }
             
@@ -459,7 +460,7 @@ public:
                 // neighbor is either not pinned or pinned but already
                 // sufficiently aligned, proceed with the cross-slip event
                 
-                bool pinned1 = node_pinned(system, net, n1, plane1, glideDirLab, numGlideDir);
+                bool pinned1 = node_pinned(&system, &net, n1, plane1, glideDirLab, numGlideDir);
                 
                 if ((!pinned1) || ((testmax2-test2) < (eps*eps*burgSize*burgSize))) {
                     
@@ -473,7 +474,7 @@ public:
                     Vec3 pmid = 0.5 * (nodep + nbr1p);
                     int nnew = splitnet.split_seg(s1, pmid);
                     
-                    Vec3 newSegForce = force->node_force(system, &splitnet, nnew, team);
+                    Vec3 newSegForce = force.node_force(&system, &splitnet, nnew, team);
                     
                     double zipperThreshold = noiseFactor * shearModulus *
                                              burgSize *  L1;
@@ -491,9 +492,9 @@ public:
                     
                     // Save the new node position and plane
                     if (tid == 0) {
-                        events(lid).type = 2;
-                        events(lid).p1 = nbr1p;
-                        events(lid).plane = newplane;
+                        crossslip.events(lid).type = 2;
+                        crossslip.events(lid).p1 = nbr1p;
+                        crossslip.events(lid).plane = newplane;
                     }
                 }
                 
@@ -502,7 +503,7 @@ public:
                 
                 // Zipper condition met for second segment
                 
-                bool pinned2 = node_pinned(system, net, n2, plane2, glideDirLab, numGlideDir);
+                bool pinned2 = node_pinned(&system, &net, n2, plane2, glideDirLab, numGlideDir);
                 
                 if ((!pinned2) || ((testmax2-test2) < (eps*eps*burgSize*burgSize))) {
                     
@@ -511,7 +512,7 @@ public:
                     Vec3 pmid = 0.5 * (nodep + nbr2p);
                     int nnew = splitnet.split_seg(s2, pmid);
                     
-                    Vec3 newSegForce = force->node_force(system, &splitnet, nnew, team);
+                    Vec3 newSegForce = force.node_force(&system, &splitnet, nnew, team);
                     
                     double zipperThreshold = noiseFactor * shearModulus *
                                              burgSize *  L2;
@@ -529,9 +530,9 @@ public:
                     
                     // Save the new node position and plane
                     if (tid == 0) {
-                        events(lid).type = 3;
-                        events(lid).p1 = nbr2p;
-                        events(lid).plane = newplane;
+                        crossslip.events(lid).type = 3;
+                        crossslip.events(lid).p1 = nbr2p;
+                        crossslip.events(lid).plane = newplane;
                     }
                 }
             }
@@ -552,45 +553,48 @@ public:
         int active_net = system->net_mngr->get_active();
         DeviceDisNet* net = system->get_device_network();
         
-        // Initialize the FindCrossSlipEvents structure
-        FindCrossSlipEvents* cs = exadis_new<FindCrossSlipEvents>(system, net, force);
-        
         // Identify nodes attached to screw segments that need
         // to be considered for a cross-slip event
-        Kokkos::resize(cs->count, 1);
-        Kokkos::deep_copy(cs->csnodes, 0);
-        Kokkos::resize(cs->csnodes, net->Nnodes_local);
+        Kokkos::resize(count, 1);
+        Kokkos::deep_copy(csnodes, 0);
+        Kokkos::resize(csnodes, net->Nnodes_local);
         
-        Kokkos::parallel_for(net->Nnodes_local, *cs);
+        Kokkos::parallel_for(net->Nnodes_local,
+            FindCrossSlipEvents<CrossSlipParallel>(*system, *net, neilist, *this, *force)
+        );
         Kokkos::fence();
         
-        int numcsnodes = cs->count(0);
-        Kokkos::resize(cs->csnodes, numcsnodes);
+        auto h_count = Kokkos::create_mirror_view(count);
+        Kokkos::deep_copy(h_count, count);
+        int numcsnodes = h_count(0);
+        Kokkos::resize(csnodes, numcsnodes);
         
         // If we need a neighbor list, let's build a contiguous
         // one for only the subset of split nodes so that access 
         // on device will be much faster
         double cutoff = system->neighbor_cutoff;
-        NeighborList* neilist;
         if (cutoff > 0.0) {
             NeighborBox* neighbox = exadis_new<NeighborBox>(system, cutoff, Neighbor::NeiSeg);
             // Build a neighbor list of the nodes wrt to the segs
-            neilist = neighbox->build_neighbor_list(system, net, Neighbor::NeiNode, cs->csnodes);
-            cs->neilist = neilist;
+            neighbox->build_neighbor_list(system, net, &neilist, Neighbor::NeiNode, true, true, csnodes);
             exadis_delete(neighbox);
         }
         
         // Find all cross-slip events that we need to handle.
         // This is done in parallel where each node previously
         // identified is now assigned a team of threads.
-        Kokkos::resize(cs->events, numcsnodes);
-        Kokkos::parallel_for(Kokkos::TeamPolicy<>(numcsnodes, Kokkos::AUTO), *cs);
+        Kokkos::resize(events, numcsnodes);
+        Kokkos::parallel_for(Kokkos::TeamPolicy<>(numcsnodes, Kokkos::AUTO),
+            FindCrossSlipEvents<CrossSlipParallel>(*system, *net, neilist, *this, *force)
+        );
         Kokkos::fence();
         
         // We are done with determining the cross-slip events, now
         // execute the changes. We do this in serial for simplicity.
-        auto h_events = Kokkos::create_mirror_view(cs->events);
-        auto h_csnodes = Kokkos::create_mirror_view(cs->csnodes);
+        auto h_events = Kokkos::create_mirror_view(events);
+        Kokkos::deep_copy(h_events, events);
+        auto h_csnodes = Kokkos::create_mirror_view(csnodes);
+        Kokkos::deep_copy(h_csnodes, csnodes);
         
         // We did not make any changes to the network yet, so
         // let's avoid making unnecessary memory copies
@@ -711,12 +715,6 @@ public:
             update_seg_plane(network, s1, newplane);
             update_seg_plane(network, s2, newplane);
         }
-        
-        
-        if (cutoff > 0.0)
-            exadis_delete(neilist);
-            
-        exadis_delete(cs);
         
         Kokkos::fence();
         system->timer[system->TIMER_CROSSSLIP].stop();
