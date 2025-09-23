@@ -20,9 +20,10 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
 option(Kokkos_ENABLE_SERIAL "Kokkos enable SERIAL" On)
 option(Kokkos_ENABLE_OPENMP "Kokkos enable OPENMP" On)
-option(Kokkos_ENABLE_CUDA "Kokkos enable cuda" Off)
-option(Kokkos_ENABLE_CUDA_LAMBDA "Kokkos enable cuda lambda" Off)
-option(Kokkos_ENABLE_HIP "Kokkos enable hip" Off)
+option(Kokkos_ENABLE_CUDA "Kokkos enable CUDA" Off)
+option(Kokkos_ENABLE_CUDA_LAMBDA "Kokkos enable CUDA LAMBDA" Off)
+option(Kokkos_ENABLE_HIP "Kokkos enable HIP" Off)
+option(Kokkos_ENABLE_SYCL "Kokkos enable SYCL" Off)
 
 if(NOT PROJECT_SOURCE_DIR)
     message(STATUS "ExaDiS standalone build")
