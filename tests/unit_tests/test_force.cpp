@@ -71,11 +71,13 @@ void test_force(std::string name="")
             ForceFFT::AddSegmentForce<SerialDisNet>(system, forcefft, network)
         );
         if (forcefft->use_map) {
+            Kokkos::fence();
             using policy = Kokkos::RangePolicy<ForceFFT::TagMapForce,Kokkos::LaunchBounds<64,1>>;
             Kokkos::parallel_for(policy(0, network->Nnodes_local),
                 ForceFFT::AddSegmentForce<SerialDisNet>(system, forcefft, network)
             );
         }
+        Kokkos::fence();
     }
     
     if (0) {

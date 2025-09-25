@@ -398,6 +398,7 @@ public:
             Kokkos::parallel_for(policy(0, net->Nsegs_local), AddSegmentForce<DeviceDisNet>(system, this, net));
             
             if (use_map) {
+                Kokkos::fence();
                 using policy = Kokkos::RangePolicy<TagMapForce,Kokkos::LaunchBounds<64,1>>;
                 Kokkos::parallel_for(policy(0, net->Nnodes_local), AddSegmentForce<DeviceDisNet>(system, this, net));
             }
