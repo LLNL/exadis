@@ -63,6 +63,7 @@ void test_subgroups()
         IntegratorSubcycling::Params({0.0, 100.0, 600.0, 1600.0})
     );
     
+    force->pre_compute(system);
     integrator->integrate(system);
     
     double cutoff = static_cast<ForceType::SUBCYCLING_MODEL*>(force)->fsegseg->get_cutoff();
