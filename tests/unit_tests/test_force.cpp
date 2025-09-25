@@ -58,6 +58,28 @@ void test_force(std::string name="")
     force->pre_compute(system);
     force->compute(system);
     
+    if (name == "fft_serialdisnet") {
+        // Test synchronization of FFT grid data
+        ForceFFT* forcefft = static_cast<ForceFFT*>(force);
+        SerialDisNet* network = system->get_serial_network();
+        forcefft->zero_force(network);
+        if (forcefft->use_map) {
+            resize_view(forcefft->fmap, network->Nsegs_local);
+        }
+        using policy = Kokkos::RangePolicy<ForceFFT::TagComputeForce,Kokkos::LaunchBounds<64,1>>;
+        Kokkos::parallel_for(policy(0, network->Nsegs_local),
+            ForceFFT::AddSegmentForce<SerialDisNet>(system, forcefft, network)
+        );
+        if (forcefft->use_map) {
+            Kokkos::fence();
+            using policy = Kokkos::RangePolicy<ForceFFT::TagMapForce,Kokkos::LaunchBounds<64,1>>;
+            Kokkos::parallel_for(policy(0, network->Nnodes_local),
+                ForceFFT::AddSegmentForce<SerialDisNet>(system, forcefft, network)
+            );
+        }
+        Kokkos::fence();
+    }
+    
     if (0) {
         // write reference results in a file
         debug::write_force(system, "test_force_"+name+".dat");
@@ -87,8 +109,8 @@ int main(int argc, char* argv[])
         test_force<ForceType::CUTOFF_MODEL>("cutoff");
     else if (name == "ddd_fft")
         test_force<ForceType::DDD_FFT_MODEL>("ddd_fft");
-    else if (name == "fft")
-        test_force<ForceFFT>("fft");
+    else if (name == "fft" || name == "fft_serialdisnet")
+        test_force<ForceFFT>(name);
     else
         std::cerr << "Error: invalid force type = '" << name << "'" << std::endl;
 
