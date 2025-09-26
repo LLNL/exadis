@@ -61,23 +61,18 @@ void test_force(std::string name="")
     if (name == "fft_serialdisnet") {
         // Test synchronization of FFT grid data
         ForceFFT* forcefft = static_cast<ForceFFT*>(force);
+        forcefft->synchronize_stress_gridval();
         SerialDisNet* network = system->get_serial_network();
         forcefft->zero_force(network);
-        if (forcefft->use_map) {
-            resize_view(forcefft->fmap, network->Nsegs_local);
+        auto nodes = network->get_nodes();
+        auto segs = network->get_segs();
+        for (int i = 0; i < network->Nsegs_local; i++) {
+            int n1 = segs[i].n1;
+            int n2 = segs[i].n2;
+            SegForce fseg = forcefft->segment_force(system, network, i);
+            nodes[n1].f += fseg.f1;
+            nodes[n2].f += fseg.f2;
         }
-        using policy = Kokkos::RangePolicy<ForceFFT::TagComputeForce,Kokkos::LaunchBounds<64,1>>;
-        Kokkos::parallel_for(policy(0, network->Nsegs_local),
-            ForceFFT::AddSegmentForce<SerialDisNet,ForceFFT>(*system, *forcefft, *network)
-        );
-        if (forcefft->use_map) {
-            Kokkos::fence();
-            using policy = Kokkos::RangePolicy<ForceFFT::TagMapForce,Kokkos::LaunchBounds<64,1>>;
-            Kokkos::parallel_for(policy(0, network->Nnodes_local),
-                ForceFFT::AddSegmentForce<SerialDisNet,ForceFFT>(*system, *forcefft, *network)
-            );
-        }
-        Kokkos::fence();
     }
     
     if (0) {
