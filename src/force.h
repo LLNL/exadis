@@ -80,10 +80,13 @@ public:
 class ForceCollection : public Force {
 private:
     std::vector<Force*> forces;
+    bool free_on_delete = true;
 
 public:
-    ForceCollection(System *system, std::vector<Force*> forcelist) {
+    ForceCollection(System *system, std::vector<Force*> forcelist,
+                    bool _free_on_delete=true) {
         forces = forcelist;
+        free_on_delete = _free_on_delete;
     }
     
     void pre_compute(System *system) {
@@ -106,8 +109,10 @@ public:
     }
     
     ~ForceCollection() {
-        for (auto force : forces)
-            if (force) delete force;
+        if (free_on_delete) {
+            for (auto force : forces)
+                exadis_delete(force);
+        }
     }
     
     const char* name() {

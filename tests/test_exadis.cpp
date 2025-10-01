@@ -365,15 +365,15 @@ void tests(ExaDiSApp *exadis, int test_id)
     
     // Force
     if (!subcycling) {
-        //exadis->force = new ForceType::LINE_TENSION_MODEL(system);
+        //exadis->force = exadis_new<ForceType::LINE_TENSION_MODEL>(system);
         exadis->force = new ForceCollection(system, {
-            //new ForceType::COREMD_SELF_PKEXT(system, CoreMD_Ta_Li03),
-            //new ForceType::CORE_SELF_PKEXT(system),
-            new ForceType::CORE_SELF_PKEXT(system, CoreDefaultParams),
-            //new ForceType::BRUTE_FORCE_N2(system)
-            //new ForceFFT(system, ForceFFT::Params(64))
-            //new ForceSegSegList<SegSegIso>(system, /*50.0*/ 1000.0)
-            new ForceType::LONG_FFT_SHORT_ISO(system, 32)
+            //exadis_new<ForceType::COREMD_SELF_PKEXT>(system, CoreMD_Ta_Li03),
+            //exadis_new<ForceType::CORE_SELF_PKEXT>(system),
+            exadis_new<ForceType::CORE_SELF_PKEXT>(system, CoreDefaultParams),
+            //exadis_new<ForceType::BRUTE_FORCE_N2>(system)
+            //exadis_new<ForceFFT>(system, ForceFFT::Params(64))
+            //exadis_new<ForceSegSegList<SegSegIso>>(system, /*50.0*/ 1000.0)
+            exadis_new<ForceType::LONG_FFT_SHORT_ISO>(system, 32)
         });
     } else {
         exadis->force = exadis_new<ForceType::SUBCYCLING_MODEL>(system, ForceType::SUBCYCLING_MODEL::Params(64));
