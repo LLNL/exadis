@@ -32,22 +32,38 @@ System* get_system()
     return make_system(config, crystal, params);
 }
 
-void test_segseglist()
+void test_neighborlist()
 {
     System* system = get_system();
+    DeviceDisNet* net = system->get_device_network();
     
-    ForceType::FORCE_SEGSEG_ISO* force = exadis_new<ForceType::FORCE_SEGSEG_ISO>(system,
-        ForceType::FORCE_SEGSEG_ISO::Params(0.0)
-    );
+    NeighborList* neilist = exadis_new<NeighborList>();
     
     std::vector<double> cutoffs = {100.0, 1000.0, 2000.0, 5000.0, 7500.0, 15000.0};
     for (double cutoff : cutoffs) {
-        force->get_segseglist()->set_cutoff(system, cutoff);
-        force->pre_compute(system);
-        printf("%d\n", force->get_segseglist()->Nsegseg);
+        generate_neighbor_list(system, net, neilist, cutoff, Neighbor::NeiSeg);
+        printf("%d\n", neilist->Ntotnei);
     }
     
-    exadis_delete(force);
+    exadis_delete(neilist);
+    exadis_delete(system);
+}
+
+void test_segseglist()
+{
+    System* system = get_system();
+    DeviceDisNet* net = system->get_device_network();
+    
+    SegSegList* segseglist = exadis_new<SegSegList>(system, 0.0, false);
+    
+    std::vector<double> cutoffs = {100.0, 1000.0, 2000.0, 5000.0, 7500.0, 15000.0};
+    for (double cutoff : cutoffs) {
+        segseglist->set_cutoff(system, cutoff);
+        segseglist->build_list<DeviceDisNet>(system, net);
+        printf("%d\n", segseglist->Nsegseg);
+    }
+    
+    exadis_delete(segseglist);
     exadis_delete(system);
 }
 
@@ -85,7 +101,9 @@ int main(int argc, char* argv[])
     std::string name = "";
     if (argc == 2) name = std::string(argv[1]);
     
-    if (name == "test_segseglist")
+    if (name == "test_neighborlist")
+        test_neighborlist();
+    else if (name == "test_segseglist")
         test_segseglist();
     else if (name == "test_subgroups")
         test_subgroups();

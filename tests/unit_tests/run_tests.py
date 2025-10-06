@@ -214,6 +214,7 @@ def main():
         ("Test_Force_FFT_CPP", [f"{tests_path}/test_force", "fft"], "expected_output/test_force_fft.dat", None),
         ("Test_Force_FFT_SerialDisNet_CPP", [f"{tests_path}/test_force", "fft_serialdisnet"], "expected_output/test_force_fft.dat", None),
         
+        ("Test_Neighbor_NeighborList_CPP", [f"{tests_path}/test_neighbor", "test_neighborlist"], [22330, 44362, 78780, 298786, 673446, 3609540], None),
         ("Test_Neighbor_SegSegList_CPP", [f"{tests_path}/test_neighbor", "test_segseglist"], [4171, 11436, 22158, 105147, 259015, 1549038], None),
         ("Test_Neighbor_SubGroups_CPP", [f"{tests_path}/test_neighbor", "test_subgroups"], [247266, 0, 752, 3221, 10696, 232597], None),
         
