@@ -188,7 +188,15 @@ def main():
     args = parser.parse_args()
     
     build_path = args.build_path
+    if build_path == "../../build" and not os.path.isdir(build_path):
+        build_path = "../../../../build/core/exadis"
+    if not os.path.isdir(build_path):
+        print(f"{FONT_RED}ERROR: exadis build path ({build_path}) does not exist. Some tests will fail. {FONT_RESET}")
     tests_path = os.path.join(build_path, 'tests/unit_tests')
+    if not os.path.isdir(tests_path):
+        print(f"{FONT_RED}ERROR: exadis tests path ({tests_path}) does not exist. Some tests will fail. " \
+        f"Make sure the code was compiled with option '-DEXADIS_BUILD_TESTS=On'. {FONT_RESET}")
+    
     vis = VisualizeExample(not args.noplot)
     
     # Define test cases (test_name, command, expected_output)
