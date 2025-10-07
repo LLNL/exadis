@@ -11,6 +11,18 @@
 #ifndef EXADIS_NEIGHBOR_BOX_H
 #define EXADIS_NEIGHBOR_BOX_H
 
+// fix miscompilation bug with CUDA 12.6+
+#ifdef __CUDA_ARCH__
+#include <cuda_runtime_api.h>
+#if !defined(CUDART_VERSION) || (CUDART_VERSION >= 12060)
+#define FIX_CUDA_NOINLINE __noinline__
+#else
+#define FIX_CUDA_NOINLINE
+#endif
+#else
+#define FIX_CUDA_NOINLINE
+#endif
+
 #include "neighbor.h"
 
 namespace ExaDiS {
@@ -202,6 +214,7 @@ public:
         return nei_box;
     }
     
+    FIX_CUDA_NOINLINE // fix miscompilation bug with CUDA 12.6+
     KOKKOS_INLINE_FUNCTION
     int neighbor_box_index(const Vec3i& id, int ib, Vec3& delta_pbc)
     {
